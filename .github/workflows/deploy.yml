@@ -37,14 +37,17 @@ jobs:
         host: ${{ secrets.VM_IP }}
         username: ubuntu
         key: ${{ secrets.SSH_PRIVATE_KEY }}
-        envs: DOCKER_USERNAME,DOCKER_PASSWORD
         script: |
           docker pull tungxd96/sas-server:latest
           docker stop sas-server || true
           docker rm sas-server || true
           docker run -d \
             --name sas-server \
-            --env-file .env \  # Your VM .env
+            -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+            -e SCHWAB_CLIENT_ID="${{ secrets.SCHWAB_CLIENT_ID }}" \
+            -e SCHWAB_CLIENT_SECRET="${{ secrets.SCHWAB_CLIENT_SECRET }}" \
+            -e SCHWAB_REDIRECT_URI="${{ secrets.SCHWAB_REDIRECT_URI }}" \
+            -e SCHWAB_TRADER_API_URI="${{ secrets.SCHWAB_TRADER_API_URI }}" \
             -p 8000:8000 \
             --restart always \
             tungxd96/sas-server:latest
