@@ -63,6 +63,7 @@ jobs:
             -e REDIS_HOST="${{ secrets.REDIS_HOST }}" \
             -e REDIS_PORT="${{ secrets.REDIS_PORT }}" \
             -e REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
+            -e POWERPOCKET_FRONTEND_URI="${{ secrets.POWERPOCKET_FRONTEND_URI }}" \
             -p 8000:8000 \
             --restart always \
             tungxd96/sas-server:latest
