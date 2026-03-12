@@ -38,6 +38,18 @@ jobs:
         username: ubuntu
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         script: |
+          # Start/refresh Redis container
+          docker stop redis || true
+          docker rm redis || true
+          docker run -d \
+            --name redis \
+            -p 6379:6379 \
+            -v redis-data:/data \
+            --restart unless-stopped \
+            redis:7-alpine \
+            redis-server --appendonly yes --requirepass "${{ secrets.REDIS_PASSWORD }}"
+
+          # Deploy app container
           docker pull tungxd96/sas-server:latest
           docker stop sas-server || true
           docker rm sas-server || true
@@ -48,8 +60,14 @@ jobs:
             -e SCHWAB_CLIENT_SECRET="${{ secrets.SCHWAB_CLIENT_SECRET }}" \
             -e SCHWAB_REDIRECT_URI="${{ secrets.SCHWAB_REDIRECT_URI }}" \
             -e SCHWAB_TRADER_API_URI="${{ secrets.SCHWAB_TRADER_API_URI }}" \
+            -e REDIS_HOST="${{ secrets.REDIS_HOST }}" \
+            -e REDIS_PORT="${{ secrets.REDIS_PORT }}" \
+            -e REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
             -p 8000:8000 \
             --restart always \
             tungxd96/sas-server:latest
+
           sudo nginx -t && sudo systemctl restart nginx
-          curl localhost:8000 || echo "Health check failed"
+          sleep 3
+          curl -f localhost:8000 || echo "Health check failed"
+
