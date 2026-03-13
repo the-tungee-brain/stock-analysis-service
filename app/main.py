@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, APIRouter
 from dotenv import load_dotenv
 
 from app.api.get_account_positions_route import router as get_account_positions_router
@@ -18,30 +18,19 @@ AUTH_GOOGLE_PREFIX = f"{API_PREFIX}/auth/google"
 
 load_dotenv()
 
-app = FastAPI(
-    lifespan=lifespan,
+app = FastAPI(lifespan=lifespan)
+
+app.include_router(health_check_router)
+app.include_router(auth_google_callback_route, prefix=AUTH_GOOGLE_PREFIX)
+app.include_router(auth_schwab_connect_router, prefix=AUTH_SCHWAB_PREFIX)
+app.include_router(auth_schwab_callback_router, prefix=AUTH_SCHWAB_PREFIX)
+
+protected_api = APIRouter(
+    prefix=API_PREFIX,
     dependencies=[Depends(get_current_user)],
 )
 
-app.include_router(
-    health_check_router,
-    dependencies=[Depends(allow_anonymous)],
-)
-app.include_router(
-    auth_google_callback_route,
-    prefix=AUTH_GOOGLE_PREFIX,
-    dependencies=[Depends(allow_anonymous)],
-)
-app.include_router(
-    auth_schwab_connect_router,
-    prefix=AUTH_SCHWAB_PREFIX,
-    dependencies=[Depends(allow_anonymous)],
-)
-app.include_router(
-    auth_schwab_callback_router,
-    prefix=AUTH_SCHWAB_PREFIX,
-    dependencies=[Depends(allow_anonymous)],
-)
+protected_api.include_router(get_account_positions_router, prefix=API_PREFIX)
+protected_api.include_router(analyze_positions_by_symbol_router, prefix=API_PREFIX)
 
-app.include_router(get_account_positions_router, prefix=API_PREFIX)
-app.include_router(analyze_positions_by_symbol_router, prefix=API_PREFIX)
+app.include_router(protected_api)
