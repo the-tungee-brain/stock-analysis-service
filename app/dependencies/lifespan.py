@@ -44,12 +44,17 @@ def get_schwab_trader_builder(session: requests.Session) -> SchwabTraderBuilder:
 def get_powerpocketdb_client() -> oracledb.ConnectionPool:
     user = os.getenv("POWERPOCKETDB_USER")
     password = os.getenv("POWERPOCKETDB_PASSWORD")
-    dsn = os.getenv("POWERPOCKETDB_TP_TNS")
+    host = os.getenv("POWERPOCKETDB_HOST")
+    port = os.getenv("POWERPOCKETDB_PORT")
+    service_name = os.getenv("POWERPOCKETDB_SERVICE_NAME")
 
-    if not all([user, password, dsn]):
-        raise ValueError("Missing ORACLE_USER, ORACLE_PASSWORD, or ORACLE_DSN env vars")
+    dsn = (f"{host}:{port}/", service_name)
 
-    return oracledb.create_pool(user=user, password=password, dsn=dsn)
+    return oracledb.create_pool(
+        user=user,
+        password=password,
+        dsn=dsn,
+    )
 
 
 @asynccontextmanager
