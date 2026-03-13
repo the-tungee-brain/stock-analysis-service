@@ -30,7 +30,7 @@ protected_api = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
-protected_api.include_router(get_account_positions_router, prefix=API_PREFIX)
-protected_api.include_router(analyze_positions_by_symbol_router, prefix=API_PREFIX)
+protected_api.include_router(get_account_positions_router)
+protected_api.include_router(analyze_positions_by_symbol_router)
 
 app.include_router(protected_api)
