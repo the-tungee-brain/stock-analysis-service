@@ -48,7 +48,7 @@ def get_powerpocketdb_client() -> oracledb.ConnectionPool:
     port = os.getenv("POWERPOCKETDB_PORT")
     service_name = os.getenv("POWERPOCKETDB_SERVICE_NAME")
 
-    dsn = (f"{host}:{port}/", service_name)
+    dsn = f"{host}:{port}/{service_name}"
 
     return oracledb.create_pool(
         user=user,
