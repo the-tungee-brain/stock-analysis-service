@@ -16,6 +16,9 @@ from app.adapters.schwab.schwab_auth import SchwabAuth
 from app.adapters.schwab.schwab_auth_access_token_adapter import (
     SchwabAuthAccessTokenAdapter,
 )
+from app.adapters.user.app_user_adapter import AppUserAdapter
+from app.builders.app_user_builder import AppUserBuilder
+from app.services.user_service import UserService
 import oracledb
 
 
@@ -63,18 +66,22 @@ async def lifespan(app: FastAPI):
     schwab_auth_access_token_adapter = SchwabAuthAccessTokenAdapter(
         client=powerpocketdb_client
     )
+    app_user_adapter = AppUserAdapter(client=powerpocketdb_client)
     schwab_auth = SchwabAuth(
         client_id=schwab_client_id,
         client_secret=schwab_client_secret,
         redirect_uri=schwab_redirect_uri,
     )
     schwab_redis_token_manager = SchwabRedisTokenManager(redis_client)
+
     schwab_auth_builder = SchwabAuthBuilder(
         schwab_auth=schwab_auth,
         schwab_auth_access_token_adapter=schwab_auth_access_token_adapter,
         schwab_redis_token_manager=schwab_redis_token_manager,
     )
     schwab_trader_builder = get_schwab_trader_builder(session)
+    app_user_builder = AppUserBuilder(app_user_adapter=app_user_adapter)
+
     llm_service = LLMService()
     portfolio_service = PortfolioService(schwab_trader_builder=schwab_trader_builder)
     schwab_auth_service = SchwabAuthService(
@@ -83,6 +90,7 @@ async def lifespan(app: FastAPI):
         schwab_redirect_uri=schwab_redirect_uri,
         schwab_auth_builder=schwab_auth_builder,
     )
+    user_service = UserService(app_user_builder=app_user_builder)
 
     app.state.http_session = session
     app.state.redis_client = redis_client
@@ -90,6 +98,7 @@ async def lifespan(app: FastAPI):
     app.state.portfolio_service = portfolio_service
     app.state.schwab_redis_token_manager = schwab_redis_token_manager
     app.state.schwab_auth_service = schwab_auth_service
+    app.state.user_service = user_service
 
     try:
         yield

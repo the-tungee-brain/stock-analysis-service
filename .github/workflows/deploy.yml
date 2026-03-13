@@ -68,6 +68,8 @@ jobs:
             -e REDIS_HOST="${{ secrets.REDIS_HOST }}" \
             -e REDIS_PORT="${{ secrets.REDIS_PORT }}" \
             -e REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
+            -e GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
+            -e JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}" \
             -p 8000:8000 \
             --restart always \
             tungxd96/sas-server:latest

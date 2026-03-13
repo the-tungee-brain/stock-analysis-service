@@ -11,3 +11,7 @@ def get_portfolio_service(request: Request):
 
 def get_schwab_auth_service(request: Request):
     return request.app.state.schwab_auth_service
+
+
+def get_user_service(request: Request):
+    return request.app.state.user_service
