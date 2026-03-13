@@ -69,9 +69,7 @@ jobs:
             -e REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
             -e GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
             -e JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}" \
-            -e POWERPOCKETDB_HOST="${{ secrets.POWERPOCKETDB_HOST }}" \
-            -e POWERPOCKETDB_PORT="${{ secrets.POWERPOCKETDB_PORT }}" \
-            -e POWERPOCKETDB_SERVICE_NAME="${{ secrets.POWERPOCKETDB_SERVICE_NAME }}" \
+            -e POWERPOCKETDB_TP_TNS="${{ secrets.POWERPOCKETDB_TP_TNS }}" \
             -p 8000:8000 \
             --restart always \
             tungxd96/sas-server:latest

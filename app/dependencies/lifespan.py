@@ -44,11 +44,7 @@ def get_schwab_trader_builder(session: requests.Session) -> SchwabTraderBuilder:
 def get_powerpocketdb_client() -> oracledb.ConnectionPool:
     user = os.getenv("POWERPOCKETDB_USER")
     password = os.getenv("POWERPOCKETDB_PASSWORD")
-    host = os.getenv("POWERPOCKETDB_HOST")
-    port = os.getenv("POWERPOCKETDB_PORT")
-    service_name = os.getenv("POWERPOCKETDB_SERVICE_NAME")
-
-    dsn = f"{host}:{port}/{service_name}"
+    dsn = os.getenv("POWERPOCKETDB_TP_TNS")
 
     return oracledb.create_pool(
         user=user,
