@@ -9,7 +9,7 @@ from app.services.user_service import UserService
 from app.dependencies.service_dependencies import get_user_service
 from app.models.user_models import IdentityPayload
 
-router = APIRouter(prefix="/api/v1/auth/google", tags=["auth-google"])
+router = APIRouter()
 
 
 class GoogleSignInRequest(BaseModel):
