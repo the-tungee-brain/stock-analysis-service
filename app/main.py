@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, APIRouter
 from dotenv import load_dotenv
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.get_account_positions_route import router as get_account_positions_router
 from app.api.analyze_positions_by_symbol_route import (
@@ -19,6 +20,19 @@ AUTH_GOOGLE_PREFIX = f"{API_PREFIX}/auth/google"
 load_dotenv()
 
 app = FastAPI(lifespan=lifespan)
+
+origins = [
+    "http://localhost:3000",
+    "https://powerpocket.netlify.app",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+)
 
 app.include_router(health_check_router)
 app.include_router(auth_google_callback_route, prefix=AUTH_GOOGLE_PREFIX)
