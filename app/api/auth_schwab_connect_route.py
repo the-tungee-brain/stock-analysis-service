@@ -13,7 +13,7 @@ class AuthSchwabConnectRequest(BaseModel):
     pass
 
 
-@router.post("connect")
+@router.post("/connect")
 def auth_schwab_connect(
     request: AuthSchwabConnectRequest,
     user_id: str = Depends(get_current_user_id),
