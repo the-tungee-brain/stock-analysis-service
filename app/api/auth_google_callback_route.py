@@ -22,7 +22,7 @@ class GoogleSignInResponse(BaseModel):
 
 
 @router.post("/callback", response_model=GoogleSignInResponse)
-async def auth_google_callback(
+def auth_google_callback(
     payload: GoogleSignInRequest, user_service: UserService = Depends(get_user_service)
 ):
     print(payload)
