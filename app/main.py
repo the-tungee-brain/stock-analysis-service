@@ -1,20 +1,27 @@
 from fastapi import FastAPI
-from app.api.get_account_positions_route import router as get_account_positions_route
-from app.api.analyze_positions_by_symbol_route import (
-    router as analyze_positions_by_symbol_route,
-)
-from app.api.health_check_route import router as health_check_route
-from app.api.auth_schwab_callback_route import router as auth_schwab_callback_route
 from dotenv import load_dotenv
+
+from app.api.get_account_positions_route import router as get_account_positions_router
+from app.api.analyze_positions_by_symbol_route import (
+    router as analyze_positions_by_symbol_router,
+)
+from app.api.health_check_route import router as health_check_router
+from app.api.auth_schwab_callback_route import router as auth_schwab_callback_router
+from app.api.auth_schwab_connect_route import router as auth_schwab_connect_router
 from app.dependencies.lifespan import lifespan
 
+
 API_PREFIX = "/api/v1"
+AUTH_SCHWAB_PREFIX = f"{API_PREFIX}/auth/schwab"
 
 load_dotenv()
 
 app = FastAPI(lifespan=lifespan)
 
-app.include_router(get_account_positions_route, prefix=API_PREFIX)
-app.include_router(analyze_positions_by_symbol_route, prefix=API_PREFIX)
-app.include_router(health_check_route)
-app.include_router(auth_schwab_callback_route, prefix=f"{API_PREFIX}/auth/schwab")
+app.include_router(health_check_router)
+
+app.include_router(get_account_positions_router, prefix=API_PREFIX)
+app.include_router(analyze_positions_by_symbol_router, prefix=API_PREFIX)
+
+app.include_router(auth_schwab_connect_router, prefix=AUTH_SCHWAB_PREFIX)
+app.include_router(auth_schwab_callback_router, prefix=AUTH_SCHWAB_PREFIX)

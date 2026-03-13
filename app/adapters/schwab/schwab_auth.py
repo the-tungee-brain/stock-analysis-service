@@ -9,14 +9,12 @@ class SchwabAuth:
 
     TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 
-    def __init__(self, token_file="token.json"):
+    def __init__(self, client_id: str, client_secret: str, redirect_uri: str):
         load_dotenv()
 
-        self.client_id = os.getenv("SCHWAB_CLIENT_ID")
-        self.client_secret = os.getenv("SCHWAB_CLIENT_SECRET")
-        self.redirect_uri = os.getenv("SCHWAB_REDIRECT_URI")
-
-        self.token_file = token_file
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.redirect_uri = redirect_uri
 
     def _get_basic_auth_header(self):
         auth = base64.b64encode(

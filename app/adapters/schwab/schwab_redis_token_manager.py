@@ -1,22 +1,23 @@
 import json
-import redis
-from typing import Optional
-from app.models.schwab_models import SchwabAccessTokenResponse
 from datetime import timedelta
+from typing import Any, Optional
+
+import redis
 
 
 class SchwabRedisTokenManager:
-    TOKEN_TTL_SECONDS = timedelta(days=7) - timedelta(minutes=15)
+    TOKEN_TTL_SECONDS: int = int(
+        (timedelta(days=7) - timedelta(minutes=15)).total_seconds()
+    )
 
-    def __init__(self, redis_client: redis.Redis, key_prefix: str = "schwab:token"):
+    def __init__(self, redis_client: redis.Redis, key_prefix: str = "schwab"):
         self.redis_client = redis_client
         self.key_prefix = key_prefix
-        self.default_key = f"{key_prefix}:default"
 
-    def _redis_key(self, key: Optional[str]) -> str:
-        return f"{self.key_prefix}:{key}" if key else self.default_key
+    def _redis_key(self, key: str) -> str:
+        return f"{self.key_prefix}:{key}"
 
-    def get(self, key: str | None = None) -> SchwabAccessTokenResponse | None:
+    def get(self, key: str) -> Optional[Any]:
         redis_key = self._redis_key(key)
         raw = self.redis_client.get(redis_key)
         if raw is None:
@@ -25,19 +26,19 @@ class SchwabRedisTokenManager:
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8")
 
-        data = json.loads(raw)
-        token = SchwabAccessTokenResponse(**data)
-        return token
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return raw
 
-    def put(
-        self,
-        token: SchwabAccessTokenResponse,
-        key: str | None = None,
-    ) -> None:
+    def put(self, key: str, value: str, ttl_seconds: Optional[int] = None) -> None:
+        if ttl_seconds is None:
+            ttl_seconds = self.TOKEN_TTL_SECONDS
+
         redis_key = self._redis_key(key)
-        payload = token.model_dump_json()
-        self.redis_client.setex(redis_key, self.TOKEN_TTL_SECONDS, payload)
+        payload = json.dumps(value)
+        self.redis_client.setex(redis_key, ttl_seconds, payload)
 
-    def delete(self, key: str | None = None) -> int:
+    def delete(self, key: str) -> int:
         redis_key = self._redis_key(key)
         return self.redis_client.delete(redis_key)

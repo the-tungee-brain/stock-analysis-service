@@ -1,10 +1,23 @@
 from app.adapters.schwab.schwab_auth import SchwabAuth
 from app.models.schwab_models import SchwabAccessTokenResponse
+from app.models.schwab_models import SchwabAuthTokenItem
+from app.adapters.schwab.schwab_auth_access_token_adapter import (
+    SchwabAuthAccessTokenAdapter,
+)
+from app.adapters.schwab.schwab_redis_token_manager import SchwabRedisTokenManager
+from typing import Optional, Any
 
 
 class SchwabAuthBuilder:
-    def __init__(self):
-        self.schwab_auth = SchwabAuth()
+    def __init__(
+        self,
+        schwab_auth: SchwabAuth,
+        schwab_auth_access_token_adapter: SchwabAuthAccessTokenAdapter,
+        schwab_redis_token_manager: SchwabRedisTokenManager,
+    ):
+        self.schwab_auth = schwab_auth
+        self.schwab_auth_access_token_adapter = schwab_auth_access_token_adapter
+        self.schwab_redis_token_manager = schwab_redis_token_manager
 
     def get_access_token(self, auth_code: str) -> SchwabAccessTokenResponse:
         response = self.schwab_auth.get_access_token(auth_code=auth_code)
@@ -23,3 +36,27 @@ class SchwabAuthBuilder:
         token = SchwabAccessTokenResponse(**token_data)
         token.set_expiration()
         return token
+
+    def get_cached_access_token(self, key: str) -> Optional[SchwabAccessTokenResponse]:
+        raw_token = self.schwab_redis_token_manager.get(key=key)
+        if not raw_token:
+            return None
+        return SchwabAccessTokenResponse(**raw_token)
+
+    def cache_access_token(self, key: str, value: SchwabAuthTokenItem):
+        raw_token = value.model_dump_json()
+        self.schwab_redis_token_manager.put(key=key, value=raw_token)
+
+    def get_cached_raw_data(self, key: str) -> Optional[Any]:
+        return self.schwab_redis_token_manager.get(key=key)
+
+    def delete_cache(self, key: str) -> int:
+        return self.schwab_redis_token_manager.delete(key=key)
+
+    def save_item(self, item: SchwabAuthTokenItem) -> int:
+        return self.schwab_auth_access_token_adapter.save(item=item)
+
+    def cache(self, key: str, value: str, ttl_seconds: int) -> None:
+        self.schwab_redis_token_manager.put(
+            key=key, value=value, ttl_seconds=ttl_seconds
+        )

@@ -11,11 +11,17 @@ from app.builders.schwab_trader_builder import SchwabTraderBuilder
 from app.services.llm_service import LLMService
 from app.services.portfolio_service import PortfolioService
 from app.services.schwab_auth_service import SchwabAuthService
+from app.builders.schwab_auth_builder import SchwabAuthBuilder
+from app.adapters.schwab.schwab_auth import SchwabAuth
+from app.adapters.schwab.schwab_auth_access_token_adapter import (
+    SchwabAuthAccessTokenAdapter,
+)
+import oracledb
 
 
 def get_redis_client() -> redis.Redis:
-    host = os.getenv("REDIS_HOST", "localhost")
-    port = int(os.getenv("REDIS_PORT", "6379"))
+    host = os.getenv("REDIS_HOST")
+    port = int(os.getenv("REDIS_PORT"))
     password = os.getenv("REDIS_PASSWORD")
 
     return redis.Redis(
@@ -32,17 +38,50 @@ def get_schwab_trader_builder(session: requests.Session) -> SchwabTraderBuilder:
     return SchwabTraderBuilder(schwab_trader_adapter=adapter)
 
 
+def get_powerpocketdb_client() -> oracledb.ConnectionPool:
+    user = os.getenv("POWERPOCKETDB_USER")
+    password = os.getenv("POWERPOCKETDB_PASSWORD")
+    dsn = os.getenv("POWERPOCKETDB_TP_TNS")
+
+    if not all([user, password, dsn]):
+        raise ValueError("Missing ORACLE_USER, ORACLE_PASSWORD, or ORACLE_DSN env vars")
+
+    return oracledb.create_pool(user=user, password=password, dsn=dsn)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    schwab_client_id = os.getenv("SCHWAB_CLIENT_ID")
+    schwab_client_secret = os.getenv("SCHWAB_CLIENT_SECRET")
+    schwab_redirect_uri = os.getenv("SCHWAB_REDIRECT_URI")
+    schwab_oauth_uri = os.getenv("SCHWAB_OAUTH_URI")
+
     session = requests.Session()
     redis_client = get_redis_client()
+    powerpocketdb_client = get_powerpocketdb_client()
 
+    schwab_auth_access_token_adapter = SchwabAuthAccessTokenAdapter(
+        client=powerpocketdb_client
+    )
+    schwab_auth = SchwabAuth(
+        client_id=schwab_client_id,
+        client_secret=schwab_client_secret,
+        redirect_uri=schwab_redirect_uri,
+    )
+    schwab_redis_token_manager = SchwabRedisTokenManager(redis_client)
+    schwab_auth_builder = SchwabAuthBuilder(
+        schwab_auth=schwab_auth,
+        schwab_auth_access_token_adapter=schwab_auth_access_token_adapter,
+        schwab_redis_token_manager=schwab_redis_token_manager,
+    )
     schwab_trader_builder = get_schwab_trader_builder(session)
     llm_service = LLMService()
     portfolio_service = PortfolioService(schwab_trader_builder=schwab_trader_builder)
-    schwab_redis_token_manager = SchwabRedisTokenManager(redis_client)
     schwab_auth_service = SchwabAuthService(
-        schwab_redis_token_manager=schwab_redis_token_manager
+        schwab_oauth_uri=schwab_oauth_uri,
+        schwab_client_id=schwab_client_id,
+        schwab_redirect_uri=schwab_redirect_uri,
+        schwab_auth_builder=schwab_auth_builder,
     )
 
     app.state.http_session = session

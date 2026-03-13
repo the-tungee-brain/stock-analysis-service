@@ -60,10 +60,14 @@ jobs:
             -e SCHWAB_CLIENT_SECRET="${{ secrets.SCHWAB_CLIENT_SECRET }}" \
             -e SCHWAB_REDIRECT_URI="${{ secrets.SCHWAB_REDIRECT_URI }}" \
             -e SCHWAB_TRADER_API_URI="${{ secrets.SCHWAB_TRADER_API_URI }}" \
+            -e SCHWAB_OAUTH_URI="${{ secrets.SCHWAB_OAUTH_URI }}" \
+            -e POWERPOCKET_FRONTEND_URI="${{ secrets.POWERPOCKET_FRONTEND_URI }}" \
+            -e POWERPOCKETDB_TP_TNS="${{ secrets.POWERPOCKETDB_TP_TNS }}" \
+            -e POWERPOCKETDB_USER="${{ secrets.POWERPOCKETDB_USER }}" \
+            -e POWERPOCKETDB_PASSWORD="${{ secrets.POWERPOCKETDB_PASSWORD }}" \
             -e REDIS_HOST="${{ secrets.REDIS_HOST }}" \
             -e REDIS_PORT="${{ secrets.REDIS_PORT }}" \
             -e REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
-            -e POWERPOCKET_FRONTEND_URI="${{ secrets.POWERPOCKET_FRONTEND_URI }}" \
             -p 8000:8000 \
             --restart always \
             tungxd96/sas-server:latest
