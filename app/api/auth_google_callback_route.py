@@ -25,6 +25,7 @@ class GoogleSignInResponse(BaseModel):
 async def auth_google_callback(
     payload: GoogleSignInRequest, user_service: UserService = Depends(get_user_service)
 ):
+    print(payload)
     try:
         idinfo = id_token.verify_oauth2_token(
             payload.id_token,

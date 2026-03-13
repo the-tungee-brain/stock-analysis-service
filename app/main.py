@@ -9,7 +9,7 @@ from app.api.health_check_route import router as health_check_router
 from app.api.auth_schwab_callback_route import router as auth_schwab_callback_router
 from app.api.auth_schwab_connect_route import router as auth_schwab_connect_router
 from app.dependencies.lifespan import lifespan
-from app.auth.dependencies import get_current_user, allow_anonymous
+from app.auth.dependencies import get_current_user
 from app.api.auth_google_callback_route import router as auth_google_callback_route
 
 API_PREFIX = "/api/v1"
