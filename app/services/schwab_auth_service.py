@@ -2,7 +2,7 @@ from app.builders.schwab_auth_builder import SchwabAuthBuilder
 from app.mapper.schwab_auth_mapper import schwab_token_to_item
 from typing import Optional
 from urllib.parse import urlencode
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from app.models.schwab_models import SchwabAuthTokenItem
 
 
@@ -58,7 +58,7 @@ class SchwabAuthService:
         return f"{self.schwab_oauth_uri}/authorize?{query}"
 
     def is_schwab_authorized(self, user_id: str) -> bool:
-        token = self.get_token_by_user_id(user_id=user_id)
+        token = self.get_cached_token_by_user_id(user_id=user_id)
         if not token or not token.refresh_token:
             return False
 
@@ -68,10 +68,44 @@ class SchwabAuthService:
 
         return refresh_expires_at > datetime.now(timezone.utc)
 
-    def get_token_by_user_id(self, user_id: str) -> Optional[SchwabAuthTokenItem]:
+    def get_valid_token_by_user_id(self, user_id: str) -> SchwabAuthTokenItem:
+        token = self.get_cached_token_by_user_id(user_id=user_id)
+        if not self._is_access_expired(token):
+            return token
+        schwab_refreshed_token = self.schwab_auth_builder.get_refreshed_access_token(
+            refresh_token=token.refresh_token
+        )
+        refreshed_item = schwab_token_to_item(
+            user_id=user_id,
+            token=schwab_refreshed_token,
+        )
+
+        self.schwab_auth_builder.save_item(item=refreshed_item)
+        self.schwab_auth_builder.cache_access_token(
+            key=self._token_key(user_id=user_id),
+            value=refreshed_item,
+        )
+
+        return refreshed_item
+
+    def get_cached_token_by_user_id(
+        self, user_id: str
+    ) -> Optional[SchwabAuthTokenItem]:
         cached_access_token = self.schwab_auth_builder.get_cached_access_token(
             key=self._token_key(user_id=user_id)
         )
         if cached_access_token:
             return cached_access_token
         return self.schwab_auth_builder.get_token_by_user_id(user_id=user_id)
+
+    def _is_access_expired(self, token: SchwabAuthTokenItem) -> bool:
+        access_expires_at = token.access_expires_at
+        if access_expires_at is None:
+            return True
+
+        if access_expires_at.tzinfo is None:
+            access_expires_at = access_expires_at.replace(tzinfo=timezone.utc)
+
+        buffer = timedelta(seconds=60)
+        now = datetime.now(timezone.utc)
+        return now >= (access_expires_at - buffer)

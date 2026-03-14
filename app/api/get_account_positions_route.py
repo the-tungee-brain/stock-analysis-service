@@ -15,7 +15,7 @@ def get_account_positions(
     portfolio_service: PortfolioService = Depends(get_portfolio_service),
     schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
 ):
-    schwab_token = schwab_auth_service.get_token_by_user_id(user_id=user_id)
+    schwab_token = schwab_auth_service.get_valid_token_by_user_id(user_id=user_id)
 
     schwab_positions = portfolio_service.get_account_positions(
         access_token=schwab_token.access_token
