@@ -9,6 +9,7 @@ from app.api.analyze_positions_by_symbol_route import (
 from app.api.health_check_route import router as health_check_router
 from app.api.auth_schwab_callback_route import router as auth_schwab_callback_router
 from app.api.auth_schwab_connect_route import router as auth_schwab_connect_router
+from app.api.auth_schwab_status_route import router as auth_schwab_status_route
 from app.dependencies.lifespan import lifespan
 from app.auth.dependencies import get_current_user
 from app.api.auth_google_callback_route import router as auth_google_callback_route
@@ -40,6 +41,11 @@ app.include_router(auth_schwab_callback_router, prefix=AUTH_SCHWAB_PREFIX)
 
 app.include_router(
     auth_schwab_connect_router,
+    prefix=AUTH_SCHWAB_PREFIX,
+    dependencies=[Depends(get_current_user)],
+)
+app.include_router(
+    auth_schwab_status_route,
     prefix=AUTH_SCHWAB_PREFIX,
     dependencies=[Depends(get_current_user)],
 )

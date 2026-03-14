@@ -60,3 +60,6 @@ class SchwabAuthBuilder:
         self.schwab_redis_token_manager.put(
             key=key, value=value, ttl_seconds=ttl_seconds
         )
+
+    def get_token_by_user_id(self, user_id: str) -> SchwabAuthTokenItem:
+        return self.schwab_auth_access_token_adapter.get_by_user_id(user_id=user_id)

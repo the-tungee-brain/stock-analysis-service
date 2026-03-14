@@ -2,6 +2,7 @@ from app.builders.schwab_auth_builder import SchwabAuthBuilder
 from app.mapper.schwab_auth_mapper import schwab_token_to_item
 from typing import Optional
 from urllib.parse import urlencode
+from datetime import datetime, timezone
 
 
 class SchwabAuthService:
@@ -53,3 +54,9 @@ class SchwabAuthService:
         }
         query = urlencode(params)
         return f"{self.schwab_oauth_uri}/authorize?{query}"
+
+    def is_schwab_authorized(self, user_id: str) -> bool:
+        token = self.schwab_auth_builder.get_token_by_user_id(user_id=user_id)
+        if not token or not token.refresh_token:
+            return False
+        return token.refresh_expires_at > datetime.now(timezone.utc)
