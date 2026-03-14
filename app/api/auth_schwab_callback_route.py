@@ -9,7 +9,7 @@ router = APIRouter()
 
 
 def redirect_to_oauth_result(frontend_uri: str, status: str) -> RedirectResponse:
-    return RedirectResponse(url=f"{frontend_uri}/oauth?status={status}")
+    return RedirectResponse(url=f"{frontend_uri}/?status={status}")
 
 
 @router.get("/callback")
