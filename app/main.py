@@ -36,8 +36,13 @@ app.add_middleware(
 
 app.include_router(health_check_router)
 app.include_router(auth_google_callback_route, prefix=AUTH_GOOGLE_PREFIX)
-app.include_router(auth_schwab_connect_router, prefix=AUTH_SCHWAB_PREFIX)
 app.include_router(auth_schwab_callback_router, prefix=AUTH_SCHWAB_PREFIX)
+
+app.include_router(
+    auth_schwab_connect_router,
+    prefix=AUTH_SCHWAB_PREFIX,
+    dependencies=[Depends(get_current_user)],
+)
 
 protected_api = APIRouter(
     prefix=API_PREFIX,
