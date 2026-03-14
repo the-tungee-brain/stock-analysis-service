@@ -41,7 +41,11 @@ class SchwabAuthBuilder:
         raw_token = self.schwab_redis_token_manager.get(key=key)
         if not raw_token:
             return None
-        return SchwabAccessTokenResponse(**raw_token)
+
+        if isinstance(raw_token, bytes):
+            raw_token = raw_token.decode("utf-8")
+
+        return SchwabAccessTokenResponse.model_validate_json(raw_token)
 
     def cache_access_token(self, key: str, value: SchwabAuthTokenItem):
         raw_token = value.model_dump_json()
