@@ -34,19 +34,37 @@ class SchwabAuthAccessTokenAdapter:
 
             sql = f"""
             MERGE INTO {self.table_name} t
-            USING (SELECT :user_id as user_id, :access_token as access_token, 
-                          :refresh_token as refresh_token, :expires_at as expires_at 
-                   FROM dual) s
+            USING (
+                SELECT :user_id            AS user_id,
+                    :access_token       AS access_token, 
+                    :refresh_token      AS refresh_token,
+                    :access_expires_at  AS access_expires_at,
+                    :refresh_expires_at AS refresh_expires_at
+                FROM dual
+            ) s
             ON (t.user_id = s.user_id)
             WHEN MATCHED THEN
                 UPDATE SET 
-                    access_token = s.access_token,
-                    refresh_token = s.refresh_token,
-                    expires_at = s.expires_at,
-                    updated_at = SYSTIMESTAMP
+                    access_token       = s.access_token,
+                    refresh_token      = s.refresh_token,
+                    access_expires_at  = s.access_expires_at,
+                    refresh_expires_at = s.refresh_expires_at,
+                    updated_at         = SYSTIMESTAMP
             WHEN NOT MATCHED THEN
-                INSERT (user_id, access_token, refresh_token, expires_at)
-                VALUES (s.user_id, s.access_token, s.refresh_token, s.expires_at)
+                INSERT (
+                    user_id,
+                    access_token,
+                    refresh_token,
+                    access_expires_at,
+                    refresh_expires_at
+                )
+                VALUES (
+                    s.user_id,
+                    s.access_token,
+                    s.refresh_token,
+                    s.access_expires_at,
+                    s.refresh_expires_at
+                )
             """
 
             bind_vars = self.item_to_dict(item)
