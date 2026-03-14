@@ -16,4 +16,4 @@ def auth_schwab_connect(
     state = secrets.token_urlsafe(32)
     schwab_auth_service.cache_state(state=state, user_id=user_id)
     auth_url = schwab_auth_service.build_authorization_url(state=state)
-    return RedirectResponse(url=auth_url)
+    return {"auth_url": auth_url}
