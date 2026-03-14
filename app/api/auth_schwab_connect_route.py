@@ -2,20 +2,14 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import RedirectResponse
 from app.services.schwab_auth_service import SchwabAuthService
 from app.dependencies.service_dependencies import get_schwab_auth_service
-from pydantic import BaseModel
 from app.auth.dependencies import get_current_user_id
 import secrets
 
 router = APIRouter()
 
 
-class AuthSchwabConnectRequest(BaseModel):
-    pass
-
-
-@router.post("/connect")
+@router.get("/connect")
 def auth_schwab_connect(
-    request: AuthSchwabConnectRequest,
     user_id: str = Depends(get_current_user_id),
     schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
 ):
