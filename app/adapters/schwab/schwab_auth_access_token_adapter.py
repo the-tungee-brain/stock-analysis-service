@@ -6,6 +6,7 @@ from app.models.schwab_models import SchwabAuthTokenItem
 class SchwabAuthAccessTokenAdapter:
     def __init__(self, client: oracledb.ConnectionPool):
         self.client = client
+        self.table_name = "schwab_auth_access_token"
 
     def item_to_dict(self, item: SchwabAuthTokenItem) -> Dict[str, Any]:
         return {
