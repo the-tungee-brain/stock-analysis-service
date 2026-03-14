@@ -42,6 +42,8 @@ def get_schwab_trader_builder(session: requests.Session) -> SchwabTraderBuilder:
 
 
 def get_powerpocketdb_client() -> oracledb.ConnectionPool:
+    oracledb.defaults.fetch_lobs = False
+
     user = os.getenv("POWERPOCKETDB_USER")
     password = os.getenv("POWERPOCKETDB_PASSWORD")
     dsn = os.getenv("POWERPOCKETDB_TP_TNS")
