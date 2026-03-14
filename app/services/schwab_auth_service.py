@@ -59,4 +59,9 @@ class SchwabAuthService:
         token = self.schwab_auth_builder.get_token_by_user_id(user_id=user_id)
         if not token or not token.refresh_token:
             return False
-        return token.refresh_expires_at > datetime.now(timezone.utc)
+
+        refresh_expires_at = token.refresh_expires_at
+        if refresh_expires_at.tzinfo is None:
+            refresh_expires_at = refresh_expires_at.replace(tzinfo=timezone.utc)
+
+        return refresh_expires_at > datetime.now(timezone.utc)
