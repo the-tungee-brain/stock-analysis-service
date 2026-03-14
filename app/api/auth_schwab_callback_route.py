@@ -3,6 +3,7 @@ from fastapi.responses import RedirectResponse
 from app.services.schwab_auth_service import SchwabAuthService
 from app.dependencies.service_dependencies import get_schwab_auth_service
 import os
+import traceback
 
 router = APIRouter()
 
@@ -33,7 +34,9 @@ def auth_schwab_callback(
     print("Getting access token: ", user_id, code, state)
     try:
         schwab_auth_service.claim_access_token(user_id=user_id, auth_code=code)
-    except:
+    except Exception as e:
+        print("Error in callback:" + user_id + ":" + code, e, flush=True)
+        traceback.print_exc()
         return redirect_to_oauth_result(powerpocket_frontend_uri, "error_token")
 
     return redirect_to_oauth_result(powerpocket_frontend_uri, "success")
