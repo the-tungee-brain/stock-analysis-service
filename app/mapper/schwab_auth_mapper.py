@@ -14,3 +14,16 @@ def schwab_token_to_item(
         created_at=None,
         updated_at=None,
     )
+
+
+def item_to_schwab_token(item: SchwabAuthTokenItem) -> SchwabAccessTokenResponse:
+    return SchwabAccessTokenResponse(
+        access_token=item.access_token,
+        refresh_token=item.refresh_token or "",
+        expires_in=0,
+        token_type="Bearer",
+        scope="",
+        access_expires_at=item.access_expires_at,
+        refresh_expires_at=item.refresh_expires_at,
+        id_token=None,
+    )

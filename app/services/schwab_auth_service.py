@@ -1,9 +1,9 @@
 from app.builders.schwab_auth_builder import SchwabAuthBuilder
-from app.mapper.schwab_auth_mapper import schwab_token_to_item
+from app.mapper.schwab_auth_mapper import schwab_token_to_item, item_to_schwab_token
 from typing import Optional
 from urllib.parse import urlencode
 from datetime import datetime, timezone
-from app.models.schwab_models import SchwabAuthTokenItem
+from app.models.schwab_models import SchwabAccessTokenResponse
 
 
 class SchwabAuthService:
@@ -58,7 +58,9 @@ class SchwabAuthService:
         return f"{self.schwab_oauth_uri}/authorize?{query}"
 
     def is_schwab_authorized(self, user_id: str) -> bool:
-        token = self.get_token_by_user_id(user_id=user_id)
+        token: Optional[SchwabAccessTokenResponse] = self.get_token_by_user_id(
+            user_id=user_id
+        )
         if not token or not token.refresh_token:
             return False
 
@@ -68,10 +70,11 @@ class SchwabAuthService:
 
         return refresh_expires_at > datetime.now(timezone.utc)
 
-    def get_token_by_user_id(self, user_id: str) -> Optional[SchwabAuthTokenItem]:
+    def get_token_by_user_id(self, user_id: str) -> Optional[SchwabAccessTokenResponse]:
         cached_access_token = self.schwab_auth_builder.get_cached_access_token(
             key=self._token_key(user_id=user_id)
         )
         if cached_access_token:
-            return schwab_token_to_item(user_id=user_id, token=cached_access_token)
-        return self.schwab_auth_builder.get_token_by_user_id(user_id=user_id)
+            return cached_access_token
+        token_item = self.schwab_auth_builder.get_token_by_user_id(user_id=user_id)
+        return item_to_schwab_token(item=token_item)
