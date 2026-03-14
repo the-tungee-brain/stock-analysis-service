@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
         client_secret=schwab_client_secret,
         redirect_uri=schwab_redirect_uri,
     )
-    schwab_redis_token_manager = SchwabRedisTokenManager(redis_client)
+    schwab_redis_token_manager = SchwabRedisTokenManager(redis_client=redis_client)
 
     schwab_auth_builder = SchwabAuthBuilder(
         schwab_auth=schwab_auth,
