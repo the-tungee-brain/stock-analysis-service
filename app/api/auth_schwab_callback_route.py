@@ -30,7 +30,7 @@ def auth_schwab_callback(
         return redirect_to_oauth_result(powerpocket_frontend_uri, "error_state")
 
     schwab_auth_service.delete_cache(key=state)
-
+    print("Getting access token: ", user_id, code, state)
     try:
         schwab_auth_service.claim_access_token(user_id=user_id, auth_code=code)
     except:
