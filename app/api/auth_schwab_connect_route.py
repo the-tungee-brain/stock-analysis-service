@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends
-from fastapi.responses import RedirectResponse
 from app.services.schwab_auth_service import SchwabAuthService
 from app.dependencies.service_dependencies import get_schwab_auth_service
 from app.auth.dependencies import get_current_user_id
