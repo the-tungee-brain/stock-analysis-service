@@ -28,7 +28,7 @@ async def get_current_user(
     except InvalidTokenError:
         raise credentials_exc
 
-    user = await user_service.get_user_by_identity_sub(identity_sub=user_id)
+    user = user_service.get_user_by_identity_sub(identity_sub=user_id)
     if not user:
         raise credentials_exc
 
