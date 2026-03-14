@@ -37,7 +37,7 @@ class SchwabAuthBuilder:
         token.set_expiration()
         return token
 
-    def get_cached_access_token(self, key: str) -> Optional[SchwabAccessTokenResponse]:
+    def get_cached_access_token(self, key: str) -> Optional[SchwabAuthTokenItem]:
         raw_token = self.schwab_redis_token_manager.get(key=key)
         if not raw_token:
             return None
@@ -45,7 +45,7 @@ class SchwabAuthBuilder:
         if isinstance(raw_token, bytes):
             raw_token = raw_token.decode("utf-8")
 
-        return SchwabAccessTokenResponse.model_validate_json(raw_token)
+        return SchwabAuthTokenItem.model_validate_json(raw_token)
 
     def cache_access_token(self, key: str, value: SchwabAuthTokenItem):
         raw_token = value.model_dump_json()
