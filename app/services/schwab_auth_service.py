@@ -29,7 +29,7 @@ class SchwabAuthService:
         return self.schwab_auth_builder.delete_cache(key=key)
 
     def claim_access_token(self, user_id: str, auth_code: str) -> None:
-        print("Fetching access token")
+        print("Fetching access token:", user_id, auth_code)
         access_token = self.schwab_auth_builder.get_access_token(auth_code=auth_code)
         print("Access token:", access_token)
         access_token_item = schwab_token_to_item(user_id=user_id, token=access_token)
