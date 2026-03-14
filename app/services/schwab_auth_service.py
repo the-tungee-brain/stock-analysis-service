@@ -50,4 +50,4 @@ class SchwabAuthService:
             "state": state,
         }
         query = urlencode(params)
-        return f"{self.schwab_oauth_uri}?{query}"
+        return f"{self.schwab_oauth_uri}/authorize?{query}"

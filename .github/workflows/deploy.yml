@@ -38,7 +38,6 @@ jobs:
         username: ubuntu
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         script: |
-          # Start/refresh Redis container
           docker stop redis || true
           docker rm redis || true
           docker run -d \
@@ -49,7 +48,6 @@ jobs:
             redis:7-alpine \
             redis-server --appendonly yes --requirepass "${{ secrets.REDIS_PASSWORD }}"
 
-          # Deploy app container
           docker pull tungxd96/sas-server:latest
           docker stop sas-server || true
           docker rm sas-server || true
