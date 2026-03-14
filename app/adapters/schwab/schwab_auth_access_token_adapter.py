@@ -13,7 +13,8 @@ class SchwabAuthAccessTokenAdapter:
             "user_id": item.user_id,
             "access_token": item.access_token,
             "refresh_token": item.refresh_token,
-            "expires_at": item.expires_at,
+            "access_expires_at": item.access_expires_at,
+            "refresh_expires_at": item.refresh_expires_at,
         }
 
     def dict_to_item(self, row: Dict[str, Any]) -> SchwabAuthTokenItem:
@@ -22,7 +23,8 @@ class SchwabAuthAccessTokenAdapter:
             user_id=row["USER_ID"],
             access_token=row["ACCESS_TOKEN"],
             refresh_token=row.get("REFRESH_TOKEN"),
-            expires_at=row.get("EXPIRES_AT"),
+            access_expires_at=row["ACCESS_EXPIRES_AT"],
+            refresh_expires_at=row.get("REFRESH_EXPIRES_AT"),
             created_at=row.get("CREATED_AT"),
             updated_at=row.get("UPDATED_AT"),
         )
