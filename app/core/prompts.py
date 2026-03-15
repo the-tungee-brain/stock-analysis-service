@@ -1,42 +1,9 @@
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 from app.models.schwab_models import Position
 
 
-def build_option_prompt(positions: List[Position]) -> str:
-    """
-    Build a natural-language prompt for the LLM to analyze one or more Schwab Position
-    objects (including options) and return a concise, user-friendly recommendation.
-    """
-    now_iso = datetime.now(timezone.utc).isoformat()
-
-    return f"""
-You are an experienced options and equity trading strategist advising a retail trader.
-Your job is to carefully analyze the user’s current position(s) in a single stock (and any related options)
-and then give ONE clear, concrete plan with specific execution details.
-
-Today is {now_iso}.
-
-Below are the raw position objects from Charles Schwab, serialized as Python objects:
-
-[POSITIONS_JSON]
-{positions}
-[/POSITIONS_JSON]
-
----
-
-## Strategy preferences (very important)
-
-- The user strongly prefers **not** to sell stock at a loss just to cut risk.
-- When the stock is fundamentally strong or in a healthy long‑term uptrend, the user would rather:
-  - Keep the shares, and
-  - Generate income or reduce effective cost basis by **selling covered calls** (or similar overlay), instead of dumping stock.
-- The model should:
-  - Only recommend outright selling stock at a loss when risk is clearly excessive (e.g., position way too big for a normal retail account, or the stock is seriously broken).
-  - Proactively consider covered calls, rolls, or staggered calls as the *first* tool for managing drawdowns and generating income from strong names.
-
----
-
+BASE_TASK_BLOCK = """
 ## Your task
 
 1. **Understand the position(s)**  
@@ -91,11 +58,71 @@ In 3–6 sentences, explain **why** this plan is reasonable, referencing:
 - Position size and margin/maintenance impact (if relevant).
 - Time left (for options) and likely risk/reward trade‑off.
 Be decisive and opinionated; avoid generic hedging like “it depends”.
+"""
+
+USER_PROMPT_TASK_BLOCK_TEMPLATE = """
+## Your task
+
+The user provided the following explicit question or instructions. Treat this as the primary task:
+
+[USER_PROMPT]
+{user_prompt}
+[/USER_PROMPT]
+
+Use the positions and strategy preferences above to answer this prompt as clearly and concretely as possible.
+If the user’s request conflicts with prudent risk management, briefly explain why and propose a safer variant.
+
+---
+
+## Output format (Markdown)
+
+Respond in **Markdown** with clear headings and bullet points where appropriate.
+Whenever possible, include **specific numbers** (shares, contracts, or %) and concrete execution steps
+(side, size, rough timing).
+"""
+
+
+def build_option_prompt(prompt: Optional[str], positions: List[Position]) -> str:
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if prompt:
+        task_block = USER_PROMPT_TASK_BLOCK_TEMPLATE.format(user_prompt=prompt)
+    else:
+        task_block = BASE_TASK_BLOCK
+
+    return f"""
+You are an experienced options and equity trading strategist advising a retail trader.
+Your job is to carefully analyze the user’s current position(s) in a single stock (and any related options)
+and then give ONE clear, concrete plan with specific execution details.
+
+Today is {now_iso}.
+
+Below are the raw position objects from Charles Schwab, serialized as Python objects:
+
+[POSITIONS_JSON]
+{positions}
+[/POSITIONS_JSON]
+
+---
+
+## Strategy preferences (very important)
+
+- The user strongly prefers **not** to sell stock at a loss just to cut risk.
+- When the stock is fundamentally strong or in a healthy long‑term uptrend, the user would rather:
+  - Keep the shares, and
+  - Generate income or reduce effective cost basis by **selling covered calls** (or similar overlay), instead of dumping stock.
+- The model should:
+  - Only recommend outright selling stock at a loss when risk is clearly excessive (e.g., position way too big for a normal retail account, or the stock is seriously broken).
+  - Proactively consider covered calls, rolls, or staggered calls as the *first* tool for managing drawdowns and generating income from strong names.
+
+---
+
+{task_block}
 
 ---
 
 Rules:
-- Provide **one** clear path only; do not suggest multiple alternative strategies.
+- Provide **one** clear path only; do not suggest multiple alternative strategies unless the user explicitly asks for multiple.
 - Always use at least one concrete number (shares, contracts, or %) in the Recommendation or Execution plan (preferably both).
 - Do not ask the user follow‑up questions.
 - Do not mention that you are an AI or that you are reading “position objects”.
