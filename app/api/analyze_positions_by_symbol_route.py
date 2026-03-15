@@ -19,10 +19,11 @@ async def analyze_positions_by_symbol(
     request: AnalyzePositionsBySymbolRequest,
     llm_service: LLMService = Depends(get_llm_service),
 ):
-    positions = request.positions
-
     async def streamer():
-        async for chunk in llm_service.analyze_option_position(positions=positions):
+        async for chunk in llm_service.analyze_option_position(
+            input_prompt=request.prompt,
+            positions=request.positions,
+        ):
             yield chunk
 
     return StreamingResponse(
