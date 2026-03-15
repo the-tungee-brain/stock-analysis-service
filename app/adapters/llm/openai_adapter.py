@@ -1,5 +1,8 @@
-from openai import OpenAI
+from typing import AsyncGenerator
+
 import asyncio
+from openai import OpenAI
+
 from app.adapters.llm.base import BaseLLM
 from app.core.llm_config import settings
 
@@ -8,22 +11,15 @@ class OpenAIAdapter(BaseLLM):
     def __init__(self, client: OpenAI):
         self.client = client
 
-    async def generate(self, prompt: str):
-        stream = await asyncio.to_thread(
-            self.client.responses.create,
+    async def generate(self, prompt: str) -> AsyncGenerator[str, None]:
+        stream = self.client.responses.create(
             model=settings.OPENAI_MODEL,
             input=prompt,
             max_output_tokens=settings.MAX_OUTPUT_TOKENS,
             stream=True,
         )
 
-        loop = asyncio.get_event_loop()
-
-        def iter_events():
-            for event in stream:
-                yield event
-
-        for event in await loop.run_in_executor(None, lambda: list(iter_events())):
+        for event in stream:
             if getattr(event, "type", "") != "response.output_text.delta":
                 continue
 
@@ -40,5 +36,8 @@ class OpenAIAdapter(BaseLLM):
             else:
                 chunk = str(text)
 
-            if chunk:
-                yield chunk
+            if not chunk:
+                continue
+
+            yield chunk
+            await asyncio.sleep(0)
