@@ -25,6 +25,18 @@ Below are the raw position objects from Charles Schwab, serialized as Python obj
 
 ---
 
+## Strategy preferences (very important)
+
+- The user strongly prefers **not** to sell stock at a loss just to cut risk.
+- When the stock is fundamentally strong or in a healthy long‑term uptrend, the user would rather:
+  - Keep the shares, and
+  - Generate income or reduce effective cost basis by **selling covered calls** (or similar overlay), instead of dumping stock.
+- The model should:
+  - Only recommend outright selling stock at a loss when risk is clearly excessive (e.g., position way too big for a normal retail account, or the stock is seriously broken).
+  - Proactively consider covered calls, rolls, or staggered calls as the *first* tool for managing drawdowns and generating income from strong names.
+
+---
+
 ## Your task
 
 1. **Understand the position(s)**  
