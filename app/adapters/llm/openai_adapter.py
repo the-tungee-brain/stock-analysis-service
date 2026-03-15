@@ -15,7 +15,6 @@ class OpenAIAdapter(BaseLLM):
         stream = self.client.responses.create(
             model=settings.OPENAI_MODEL,
             input=prompt,
-            max_output_tokens=settings.MAX_OUTPUT_TOKENS,
             stream=True,
         )
 
