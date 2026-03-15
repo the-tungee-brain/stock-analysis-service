@@ -11,11 +11,11 @@ router = APIRouter()
 
 class AnalyzePositionsBySymbolRequest(BaseModel):
     positions: List[Position]
-    prompt: Optional[str]
+    prompt: Optional[str] = None
 
 
 @router.post("/analyze-positions-by-symbol")
-def analyze_positions_by_symbol(
+async def analyze_positions_by_symbol(
     request: AnalyzePositionsBySymbolRequest,
     llm_service: LLMService = Depends(get_llm_service),
 ):
