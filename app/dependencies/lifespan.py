@@ -19,6 +19,9 @@ from app.adapters.schwab.schwab_auth_access_token_adapter import (
 from app.adapters.user.app_user_adapter import AppUserAdapter
 from app.builders.app_user_builder import AppUserBuilder
 from app.services.user_service import UserService
+from app.adapters.llm.openai_adapter import OpenAIAdapter
+from app.core.llm_config import settings
+from openai import OpenAI
 import oracledb
 
 
@@ -65,6 +68,7 @@ async def lifespan(app: FastAPI):
     session = requests.Session()
     redis_client = get_redis_client()
     powerpocketdb_client = get_powerpocketdb_client()
+    openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
     schwab_auth_access_token_adapter = SchwabAuthAccessTokenAdapter(
         client=powerpocketdb_client
@@ -76,6 +80,7 @@ async def lifespan(app: FastAPI):
         redirect_uri=schwab_redirect_uri,
     )
     schwab_redis_token_manager = SchwabRedisTokenManager(redis_client=redis_client)
+    openai_adapter = OpenAIAdapter(client=openai_client)
 
     schwab_auth_builder = SchwabAuthBuilder(
         schwab_auth=schwab_auth,
@@ -85,7 +90,7 @@ async def lifespan(app: FastAPI):
     schwab_trader_builder = get_schwab_trader_builder(session)
     app_user_builder = AppUserBuilder(app_user_adapter=app_user_adapter)
 
-    llm_service = LLMService()
+    llm_service = LLMService(openai_adapter=openai_adapter)
     portfolio_service = PortfolioService(schwab_trader_builder=schwab_trader_builder)
     schwab_auth_service = SchwabAuthService(
         schwab_oauth_uri=schwab_oauth_uri,

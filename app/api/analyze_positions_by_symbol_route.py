@@ -1,16 +1,31 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
+from fastapi.responses import StreamingResponse
 from app.models.schwab_models import Position
+from app.services.llm_service import LLMService
+from app.dependencies.service_dependencies import get_llm_service
 
 router = APIRouter()
 
 
 class AnalyzePositionsBySymbolRequest(BaseModel):
     positions: List[Position]
-    prompt: str
+    prompt: Optional[str]
 
 
 @router.post("/analyze-positions-by-symbol")
-def analyze_positions_by_symbol(request: AnalyzePositionsBySymbolRequest):
-    pass
+def analyze_positions_by_symbol(
+    request: AnalyzePositionsBySymbolRequest,
+    llm_service: LLMService = Depends(get_llm_service),
+):
+    positions = request.positions
+
+    async def streamer():
+        async for chunk in llm_service.analyze_option_position(positions):
+            yield chunk
+
+    return StreamingResponse(
+        streamer(),
+        media_type="text/plain; charset=utf-8",
+    )
