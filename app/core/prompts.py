@@ -1,6 +1,15 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 from app.models.schwab_models import Position
+from enum import Enum
+
+
+class AnalysisAction(str, Enum):
+    FREE_FORM = "free-form"
+    DAILY_SUMMARY = "daily-summary"
+    RISK_CHECK = "risk-check"
+    TAX_ANGLE = "tax-angle"
+    WHAT_CHANGED = "what-changed"
 
 
 BASE_TASK_BLOCK = """
@@ -127,3 +136,56 @@ Rules:
 - Do not ask the user follow‑up questions.
 - Do not mention that you are an AI or that you are reading “position objects”.
 """
+
+
+def build_quick_prompt(
+    action: AnalysisAction,
+    symbol: str,
+    user_prompt: Optional[str],
+) -> Optional[str]:
+    if action == AnalysisAction.FREE_FORM:
+        return user_prompt
+
+    if action == AnalysisAction.DAILY_SUMMARY:
+        return f"""You are an investment analyst reviewing the user's {symbol} position.
+
+Provide a concise daily summary:
+- Today's price move and percentage (if inferable from the data or your tools)
+- Change in unrealized P/L for today and overall
+- Key news or catalysts affecting {symbol} today
+- One or two bullet points on whether their current positioning still makes sense.
+"""
+
+    if action == AnalysisAction.RISK_CHECK:
+        return f"""Act as a risk manager reviewing the user's {symbol} position.
+
+Identify and explain:
+- Position size relative to a diversified single-stock allocation
+- Main risks (price, volatility, event risk, liquidity, leverage)
+- How this position might interact with a diversified US equity portfolio
+- Concrete risk-reducing adjustments they could consider.
+"""
+
+    if action == AnalysisAction.TAX_ANGLE:
+        return f"""Analyze the user's {symbol} position from a U.S. tax perspective.
+This is general educational information, not tax advice.
+
+Consider:
+- Short-term vs long-term holding considerations
+- Realizing losses vs gains (tax loss harvesting or gain management)
+- Typical wash sale and holding-period gotchas for a position like this
+
+Explain clearly and briefly.
+"""
+
+    if action == AnalysisAction.WHAT_CHANGED:
+        return f"""Explain what materially changed today for {symbol} that matters to an investor holding this position.
+
+Cover:
+- Price and volume action
+- Any major news, macro or sector events you can infer or know about
+- How today's move fits into the recent trend
+- Whether today's info suggests holding, trimming, or adding (and why).
+"""
+
+    return user_prompt
