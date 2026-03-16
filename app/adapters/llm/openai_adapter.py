@@ -17,7 +17,7 @@ class OpenAIAdapter(BaseLLM):
         self, model: Optional[ResponsesModel], prompt: str
     ) -> AsyncGenerator[str, None]:
         stream = self.client.responses.create(
-            model=model | settings.OPENAI_MODEL,
+            model=model or settings.OPENAI_MODEL,
             input=prompt,
             stream=True,
         )
