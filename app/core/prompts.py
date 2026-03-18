@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from app.models.schwab_models import Position
 from enum import Enum
+from collections import defaultdict
 
 
 class AnalysisAction(str, Enum):
@@ -91,6 +92,55 @@ Whenever possible, include **specific numbers** (shares, contracts, or %) and co
 """
 
 
+def enrich_positions_for_prompt(positions: List[Position]) -> str:
+    enriched = []
+    for p in positions:
+        net_qty = p.longQuantity - p.shortQuantity
+        direction = "LONG" if net_qty > 0 else "SHORT" if net_qty < 0 else "NEUTRAL"
+
+        unrealized_pct = 0.0
+        if p.marketValue > 0:
+            total_pl = (p.longOpenProfitLoss or 0) + (p.shortOpenProfitLoss or 0)
+            unrealized_pct = (total_pl / p.marketValue) * 100
+
+        day_pl_pct = p.currentDayProfitLossPercentage * 100
+
+        summary = {
+            "symbol": p.instrument.symbol,
+            "type": direction,
+            "net_qty": abs(net_qty),
+            "avg_price": p.averagePrice,
+            "market_value": p.marketValue,
+            "unrealized_pl_pct": round(unrealized_pct, 2),
+            "day_pl_pct": round(day_pl_pct, 2),
+            "maint_req": p.maintenanceRequirement,
+        }
+        enriched.append(summary)
+
+    grouped = defaultdict(list)
+    for e in enriched:
+        grouped[e["symbol"]].append(e)
+
+    table = "| Symbol | Type | Net Qty | Avg Price | Mkt Value | Unreal PL% | Day PL% | Maint Req |\n"
+    table += "|--------|------|---------|-----------|-----------|------------|---------|-----------|\n"
+    for symbol, items in grouped.items():
+        net_qty = sum(i["net_qty"] for i in items)
+        avg_price = (
+            sum(i["avg_price"] * i["net_qty"] for i in items) / net_qty
+            if net_qty
+            else 0
+        )
+        mkt_val = sum(i["market_value"] for i in items)
+        avg_unpl = (
+            sum(i["unrealized_pl_pct"] * i["market_value"] for i in items) / mkt_val
+            if mkt_val
+            else 0
+        )
+        table += f"| {symbol} | {items[0]['type']} | {net_qty:.0f} | ${avg_price:.2f} | ${mkt_val:.0f} | {avg_unpl:.1f}% | {items[0]['day_pl_pct']:.1f}% | ${items[0]['maint_req']:.0f} |\n"
+
+    return f"""Current positions as of {datetime.now().strftime('%Y-%m-%d')}:\n\n{table}\n\nAnalyze P&L drivers and recommend next steps (hold/sell/roll/buy more)."""
+
+
 def build_option_prompt(prompt: Optional[str], positions: List[Position]) -> str:
     now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -109,7 +159,7 @@ Today is {now_iso}.
 Below are the raw position objects from Charles Schwab, serialized as Python objects:
 
 [POSITIONS_JSON]
-{positions}
+{enrich_positions_for_prompt(positions=positions)}
 [/POSITIONS_JSON]
 
 ---
