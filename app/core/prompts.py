@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import List, Optional
-from app.models.schwab_models import Position
+from app.models.schwab_models import Position, SchwabAccounts
 from enum import Enum
 from collections import defaultdict
 
@@ -141,13 +141,43 @@ def enrich_positions_for_prompt(positions: List[Position]) -> str:
     return f"""Current positions as of {datetime.now().strftime('%Y-%m-%d')}:\n\n{table}\n\nAnalyze P&L drivers and recommend next steps (hold/sell/roll/buy more)."""
 
 
-def build_option_prompt(prompt: Optional[str], positions: List[Position]) -> str:
+def build_account_summary(acc: SchwabAccounts) -> str:
+    sa = acc.securitiesAccount
+    cur = sa.currentBalances
+    proj = sa.projectedBalances
+    agg = acc.aggregatedBalance
+
+    return (
+        f"Account summary:\n"
+        f"- Account value: ~${sa.initialBalances.accountValue:,.0f}; "
+        f"equity {cur.equityPercentage:.1f}%.\n"
+        f"- Cash: ~${cur.cashBalance:,.0f}; "
+        f"margin balance: ~${cur.marginBalance:,.0f}; "
+        f"maintenance requirement: ~${cur.maintenanceRequirement:,.0f}; "
+        f"{'IN' if proj.isInCall else 'Not in'} margin call.\n"
+        f"- Exposure: long MV ~${cur.longMarketValue:,.0f}, "
+        f"short MV ~${cur.shortMarketValue:,.0f}, "
+        f"long options ~${cur.longOptionMarketValue:,.0f}, "
+        f"short options ~${cur.shortOptionMarketValue:,.0f}.\n"
+        f"- Buying power: stock ~${proj.stockBuyingPower:,.0f}, "
+        f"overall ~${proj.buyingPower:,.0f}.\n"
+        f"- Current liquidation value: ~${agg.currentLiquidationValue:,.0f}.\n"
+    )
+
+
+def build_option_prompt(
+    prompt: Optional[str],
+    account: SchwabAccounts,
+    positions: List[Position],
+) -> str:
     now_iso = datetime.now(timezone.utc).isoformat()
 
     if prompt:
         task_block = USER_PROMPT_TASK_BLOCK_TEMPLATE.format(user_prompt=prompt)
     else:
         task_block = BASE_TASK_BLOCK
+
+    account_summary = build_account_summary(acc=account)
 
     return f"""
 You are an experienced options and equity trading strategist advising a retail trader.
@@ -156,11 +186,18 @@ and then give ONE clear, concrete plan with specific execution details.
 
 Today is {now_iso}.
 
-Below are the raw position objects from Charles Schwab, serialized as Python objects:
+=== ACCOUNT CONTEXT ===
+The following is a brief summary of the user's overall Schwab account. Use this to size risk
+and position recommendations appropriately.
 
-[POSITIONS_JSON]
+{account_summary}
+
+=== POSITION DATA (FOCUS OF THIS ANALYSIS) ===
+Below are the raw position objects from Charles Schwab, summarized into a compact table:
+
+[POSITIONS_TABLE]
 {enrich_positions_for_prompt(positions=positions)}
-[/POSITIONS_JSON]
+[/POSITIONS_TABLE]
 
 ---
 

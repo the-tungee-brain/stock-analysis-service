@@ -1,7 +1,7 @@
 from typing import List, AsyncGenerator
 from app.core.prompts import build_option_prompt
 from app.adapters.llm.openai_adapter import OpenAIAdapter
-from app.models.schwab_models import Position
+from app.models.schwab_models import Position, SchwabAccounts
 from typing import Optional
 from openai.types.shared import ResponsesModel
 
@@ -14,9 +14,12 @@ class LLMService:
         self,
         model: Optional[ResponsesModel],
         input_prompt: Optional[str],
+        account: SchwabAccounts,
         positions: List[Position],
     ) -> AsyncGenerator[str, None]:
-        prompt = build_option_prompt(prompt=input_prompt, positions=positions)
+        prompt = build_option_prompt(
+            prompt=input_prompt, account=account, positions=positions
+        )
 
         async for chunk in self.openai_adapter.generate(model=model, prompt=prompt):
             yield chunk

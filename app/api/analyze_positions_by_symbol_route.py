@@ -7,11 +7,13 @@ from app.services.llm_service import LLMService
 from app.dependencies.service_dependencies import get_llm_service
 from openai.types.shared import ResponsesModel
 from app.core.prompts import AnalysisAction, build_quick_prompt
+from app.models.schwab_models import SchwabAccounts
 
 router = APIRouter()
 
 
 class AnalyzePositionsBySymbolRequest(BaseModel):
+    account: SchwabAccounts
     positions: List[Position]
     symbol: Optional[str] = ""
     prompt: Optional[str] = None
@@ -34,6 +36,7 @@ async def analyze_positions_by_symbol(
         async for chunk in llm_service.analyze_option_position(
             model=request.model,
             input_prompt=input_prompt,
+            account=request.account,
             positions=request.positions,
         ):
             yield chunk
