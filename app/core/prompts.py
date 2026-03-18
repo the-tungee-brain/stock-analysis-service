@@ -324,11 +324,6 @@ def build_portfolio_prompt(
     account: SchwabAccounts,
     positions: List[Position],
 ) -> str:
-    """
-    Portfolio-level analysis: if user prompt is provided, treat it as the main task.
-    Otherwise, use a default diversification/risk/rebalancing task.
-    """
-
     now_iso = datetime.now(timezone.utc).isoformat()
     account_summary = build_account_summary(acc=account)
     positions_table = enrich_positions_for_prompt(positions=positions)
@@ -408,10 +403,23 @@ def build_portfolio_prompt(
                  - 3–5 bullet points summarizing the main strengths and weaknesses of the current portfolio.
                  - 3–5 bullet points with the highest‑impact changes to consider first.
 
+            ## Output format (Markdown)
+
+            Use exactly these headings, in this order, as top-level sections:
+            1. ### Diversification & concentration
+            2. ### Risk profile
+            3. ### Return and drawdown behavior
+            4. ### Correlation structure
+            5. ### Position sizing
+            6. ### Rebalancing ideas
+            7. ### Summary
+
             Constraints:
             - Be concise and actionable; avoid vague language like “it depends”.
             - Use specific numbers and percentages when referring to concentrations and suggested sizing changes.
             - Assume the user is a long‑term investor (3–5+ years) unless the positions clearly imply otherwise.
+            - Do **not** ask the user follow‑up questions or suggest that they ask for further analysis later.
+            - Do **not** include sentences offering additional services.
             """
         )
 
