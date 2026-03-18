@@ -17,7 +17,10 @@ def get_account_positions(
 ):
     schwab_token = schwab_auth_service.get_valid_token_by_user_id(user_id=user_id)
 
-    schwab_positions = portfolio_service.get_account_positions(
+    account_map = portfolio_service.get_enriched_account(
         access_token=schwab_token.access_token
     )
-    return {"schwab_positions": schwab_positions}
+    return {
+        "schwab_positions": account_map["positions"],
+        "account": account_map["account"],
+    }

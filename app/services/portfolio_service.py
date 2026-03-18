@@ -1,5 +1,5 @@
 from app.builders.schwab_trader_builder import SchwabTraderBuilder
-from app.models.schwab_models import Position
+from app.models.schwab_models import Position, SchwabAccounts
 from typing import List, Dict
 
 
@@ -7,14 +7,21 @@ class PortfolioService:
     def __init__(self, schwab_trader_builder: SchwabTraderBuilder):
         self.schwab_trader_builder = schwab_trader_builder
 
-    def get_account_positions(self, access_token: str) -> Dict[str, List[Position]]:
-        positions = self.schwab_trader_builder.get_account_positions(
+    def get_enriched_account(self, access_token: str) -> Dict[str, object]:
+        account: SchwabAccounts = self.schwab_trader_builder.get_account(
             access_token=access_token
         )
 
-        return {
+        positions = account.securitiesAccount.positions
+
+        positions_by_symbol: Dict[str, List[Position]] = {
             symbol: [p for p in positions if self._symbol_key(p) == symbol]
             for symbol in {self._symbol_key(p) for p in positions}
+        }
+
+        return {
+            "account": account,
+            "positions": positions_by_symbol,
         }
 
     def _symbol_key(self, pos: Position) -> str:
