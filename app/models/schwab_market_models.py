@@ -35,8 +35,8 @@ class Reference(BaseModel):
 
 
 class Quote(BaseModel):
-    _52WeekHigh: Optional[float] = Field(None, alias="52WeekHigh")
-    _52WeekLow: Optional[float] = Field(None, alias="52WeekLow")
+    week_high_52: Optional[float] = Field(None, alias="52WeekHigh")
+    week_low_52: Optional[float] = Field(None, alias="52WeekLow")
     askMICId: Optional[str] = None
     askPrice: Optional[float] = None
     askSize: Optional[int] = None
