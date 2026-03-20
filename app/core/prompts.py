@@ -258,14 +258,15 @@ def build_option_prompt(
 
         ---
 
-        === MARKET CONTEXT (ASSUME) ===
-        - US equities: Neutral to slightly volatile environment unless clearly implied otherwise
-        - Volatility: Moderate
-        - Interest rates: Elevated but stable
+        === MARKET CONTEXT (REAL-TIME) ===
+        Use the REAL-TIME MACRO CONTEXT table above to infer:
+        - Whether US equities are currently strong, weak, or sideways (from index levels and % changes).
+        - Whether volatility is elevated or subdued (from the volatility benchmark such as VIX or equivalent).
+        - Whether interest-rate-sensitive assets (like long-duration Treasuries) are rising or falling.
 
         Behavior rules:
-        - In uncertainty → favor **risk reduction + income (covered calls)**
-        - In strength → allow **holding or adding selectively**
+        - If broad equities are weak or volatility is high → favor **risk reduction + income (covered calls)**.
+        - If broad equities are strong and volatility is moderate → allow **holding or adding selectively**, but avoid oversized risk.
 
         ---
 
