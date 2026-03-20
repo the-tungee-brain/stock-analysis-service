@@ -83,6 +83,7 @@ async def analyze_positions_by_symbol(
         option_chains = market_service.get_option_chains(
             access_token=access_token, symbol=symbol, strike_count=10
         )
+        print(option_chains)
         option_chains_markdown = prompt_enrichment_service.build_option_chain_markdown(
             chain=option_chains, max_rows=15
         )

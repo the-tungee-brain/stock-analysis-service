@@ -58,11 +58,14 @@ class PromptEnrichmentService:
         def parse_exp_key(k: str) -> datetime:
             return datetime.fromisoformat(k.split(":")[0])
 
-        all_exp = sorted(
-            set(chain.callExpDateMap.keys()) | set(chain.putExpDateMap.keys()),
-            key=parse_exp_key,
+        all_exp_keys = list(
+            set(chain.callExpDateMap.keys()) | set(chain.putExpDateMap.keys())
         )
-        first_exp_key = all_exp[0]
+        if not all_exp_keys:
+            return "No option chain data available."
+
+        all_exp_keys.sort(key=parse_exp_key)
+        first_exp_key = all_exp_keys[0]
 
         calls_by_strike = chain.callExpDateMap.get(first_exp_key, {})
         puts_by_strike = chain.putExpDateMap.get(first_exp_key, {})
@@ -70,7 +73,10 @@ class PromptEnrichmentService:
         rows: List[Tuple[float, OptionContract | None, OptionContract | None]] = []
 
         for strike_str, call_list in calls_by_strike.items():
-            strike = float(strike_str)
+            try:
+                strike = float(strike_str)
+            except ValueError:
+                continue
             call = call_list[0] if call_list else None
             put_list = puts_by_strike.get(strike_str) or []
             put = put_list[0] if put_list else None
@@ -91,14 +97,23 @@ class PromptEnrichmentService:
             bid = opt.bidPrice
             ask = opt.askPrice
             return (
-                f"{bid:.2f}" if isinstance(bid, (int, float)) else "",
-                f"{ask:.2f}" if isinstance(ask, (int, float)) else "",
+                (
+                    f"{bid:.2f}"
+                    if isinstance(bid, (int, float)) and bid not in (0, None)
+                    else ""
+                ),
+                (
+                    f"{ask:.2f}"
+                    if isinstance(ask, (int, float)) and ask not in (0, None)
+                    else ""
+                ),
             )
 
         def fmt_iv(opt: OptionContract | None) -> str:
             if not opt or opt.volatility is None:
                 return ""
-            return f"{opt.volatility * 100:.0f}%"
+            iv = opt.volatility
+            return f"{iv:.0f}%"
 
         lines: List[str] = []
         for strike, call, put in sorted(rows, key=lambda t: t[0]):
