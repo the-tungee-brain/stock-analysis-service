@@ -62,7 +62,7 @@ async def analyze_positions_by_symbol(
         access_token = schwab_token.access_token
 
         market_snapshots = market_service.get_enriched_quote_snapshot(
-            access_token=access_token, symbol=symbol
+            access_token=access_token, symbols=[symbol]
         )
         market_snapshots_markdown = (
             prompt_enrichment_service.build_market_snapshot_markdown(
