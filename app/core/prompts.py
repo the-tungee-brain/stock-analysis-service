@@ -198,6 +198,7 @@ def build_option_prompt(
     positions: List[Position],
     market_snapshots: Optional[str] = None,
     market_context_snapshots: Optional[str] = None,
+    option_chains: Optional[str] = None,
 ) -> str:
     now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -208,6 +209,7 @@ def build_option_prompt(
     market_context_block = (
         market_context_snapshots or "No macro benchmark data available."
     )
+    option_chain_block = option_chains or "No option chain available."
 
     user_task = (
         USER_PROMPT_TASK_BLOCK_TEMPLATE.format(user_prompt=prompt)
@@ -269,6 +271,13 @@ def build_option_prompt(
         - If broad equities are strong and volatility is moderate → allow **holding or adding selectively**, but avoid oversized risk.
 
         ---
+        
+        === NEAREST EXPIRATION OPTION CHAIN (AROUND ATM) ===
+        Use this ladder to choose realistic strikes and expirations. Prefer strikes in or near this table.
+
+        [OPTION_CHAIN]
+        {option_chain_block}
+        [/OPTION_CHAIN]
 
         === DECISION ENGINE (MANDATORY RULES) ===
 
