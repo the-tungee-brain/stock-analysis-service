@@ -14,7 +14,7 @@ class MarketService:
             access_token=access_token, symbols=[symbol]
         )
         try:
-            instrument: InstrumentQuote = quotes_response.__root__[symbol]
+            instrument: InstrumentQuote = quotes_response.root[symbol]
         except KeyError:
             raise ValueError(f"No quote data returned for symbol {symbol!r}")
 
