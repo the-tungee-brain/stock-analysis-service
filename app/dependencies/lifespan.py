@@ -23,6 +23,10 @@ from app.adapters.llm.openai_adapter import OpenAIAdapter
 from app.core.llm_config import settings
 from openai import OpenAI
 import oracledb
+from app.adapters.schwab.schwab_market_adapter import SchwabMarketAdapter
+from app.builders.schwab_market_builder import SchwabMarketBuilder
+from app.services.market_service import MarketService
+from app.services.prompt_enrichment_service import PromptEnrichmentService
 
 
 def get_redis_client() -> redis.Redis:
@@ -64,12 +68,16 @@ async def lifespan(app: FastAPI):
     schwab_client_secret = os.getenv("SCHWAB_CLIENT_SECRET")
     schwab_redirect_uri = os.getenv("SCHWAB_REDIRECT_URI")
     schwab_oauth_uri = os.getenv("SCHWAB_OAUTH_URI")
+    schwab_market_uri = os.getenv("SCHWAB_MARKET_URI")
 
     session = requests.Session()
     redis_client = get_redis_client()
     powerpocketdb_client = get_powerpocketdb_client()
     openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
+    schwab_market_adapter = SchwabMarketAdapter(
+        session=session, base_uri=schwab_market_uri
+    )
     schwab_auth_access_token_adapter = SchwabAuthAccessTokenAdapter(
         client=powerpocketdb_client
     )
@@ -82,6 +90,9 @@ async def lifespan(app: FastAPI):
     schwab_redis_token_manager = SchwabRedisTokenManager(redis_client=redis_client)
     openai_adapter = OpenAIAdapter(client=openai_client)
 
+    schwab_market_builder = SchwabMarketBuilder(
+        schwab_market_adapter=schwab_market_adapter
+    )
     schwab_auth_builder = SchwabAuthBuilder(
         schwab_auth=schwab_auth,
         schwab_auth_access_token_adapter=schwab_auth_access_token_adapter,
@@ -90,6 +101,8 @@ async def lifespan(app: FastAPI):
     schwab_trader_builder = get_schwab_trader_builder(session)
     app_user_builder = AppUserBuilder(app_user_adapter=app_user_adapter)
 
+    market_service = MarketService(schwab_market_builder=schwab_market_builder)
+    prompt_enrichment_service = PromptEnrichmentService()
     llm_service = LLMService(openai_adapter=openai_adapter)
     portfolio_service = PortfolioService(schwab_trader_builder=schwab_trader_builder)
     schwab_auth_service = SchwabAuthService(
@@ -102,6 +115,8 @@ async def lifespan(app: FastAPI):
 
     app.state.http_session = session
     app.state.redis_client = redis_client
+    app.state.prompt_enrichment_service = prompt_enrichment_service
+    app.state.market_service = market_service
     app.state.llm_service = llm_service
     app.state.portfolio_service = portfolio_service
     app.state.schwab_redis_token_manager = schwab_redis_token_manager

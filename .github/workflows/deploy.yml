@@ -68,6 +68,7 @@ jobs:
             -e GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
             -e JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}" \
             -e POWERPOCKETDB_TP_TNS="${{ secrets.POWERPOCKETDB_TP_TNS }}" \
+            -e SCHWAB_MARKET_URI="${{ secrets.SCHWAB_MARKET_URI }}" \
             -p 8000:8000 \
             --restart always \
             tungxd96/sas-server:latest

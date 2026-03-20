@@ -13,13 +13,7 @@ class LLMService:
     async def analyze_option_position(
         self,
         model: Optional[ResponsesModel],
-        input_prompt: Optional[str],
-        account: SchwabAccounts,
-        positions: List[Position],
+        prompt: Optional[str],
     ) -> AsyncGenerator[str, None]:
-        prompt = build_option_prompt(
-            prompt=input_prompt, account=account, positions=positions
-        )
-
         async for chunk in self.openai_adapter.generate(model=model, prompt=prompt):
             yield chunk

@@ -2,8 +2,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from enum import Enum
 from collections import defaultdict
-from textwrap import dedent  # cleaner multi-line strings [web:6]
-
+from textwrap import dedent
 from app.models.schwab_models import Position, SchwabAccounts
 
 
@@ -195,62 +194,154 @@ def build_option_prompt(
     prompt: Optional[str],
     account: SchwabAccounts,
     positions: List[Position],
+    market_snapshots: Optional[str],
 ) -> str:
     now_iso = datetime.now(timezone.utc).isoformat()
-    task_block = (
+
+    account_summary = build_account_summary(acc=account)
+    positions_table = enrich_positions_for_prompt(positions=positions)
+
+    user_task = (
         USER_PROMPT_TASK_BLOCK_TEMPLATE.format(user_prompt=prompt)
         if prompt
         else BASE_TASK_BLOCK
     )
 
-    account_summary = build_account_summary(acc=account)
-    positions_table = enrich_positions_for_prompt(positions=positions)
-
     return dedent(
         f"""
-        You are an experienced options and equity trading strategist advising a retail trader.
-        Your job is to carefully analyze the user’s current position(s) in a single stock (and any related options)
-        and then give ONE clear, concrete plan with specific execution details.
+        You are a **professional portfolio manager and options strategist** advising a retail trader.
+
+        Your job is to make **one clear, decisive action** based on risk, position size, and market conditions.
+        You are NOT allowed to be passive or vague.
 
         Today is {now_iso}.
 
-        === ACCOUNT CONTEXT ===
-        The following is a brief summary of the user's overall Schwab account. Use this to size risk
-        and position recommendations appropriately.
+        ---
 
+        === ACCOUNT CONTEXT ===
         {account_summary}
 
-        === POSITION DATA (FOCUS OF THIS ANALYSIS) ===
-        Below are the raw position objects from Charles Schwab, summarized into a compact table:
+        ---
 
+        === POSITION DATA ===
         [POSITIONS_TABLE]
         {positions_table}
         [/POSITIONS_TABLE]
 
         ---
+        
+        === REAL-TIME MARKET SNAPSHOT ===
+        Use this table to understand current prices, today’s moves, recent volatility, and whether each name
+        is near its recent highs or lows. Prioritize decisions that respect stretched moves.
+        
+        [MARKET_SNAPSHOT]
+        {market_snapshots}
+        [/MARKET_SNAPSHOT]
 
-        ## Strategy preferences (very important)
+        === MARKET CONTEXT (ASSUME) ===
+        - US equities: Neutral to slightly volatile environment unless clearly implied otherwise
+        - Volatility: Moderate
+        - Interest rates: Elevated but stable
 
-        - The user strongly prefers **not** to sell stock at a loss just to cut risk.
-        - When the stock is fundamentally strong or in a healthy long‑term uptrend, the user would rather:
-          - Keep the shares, and
-          - Generate income or reduce effective cost basis by **selling covered calls** (or similar overlay), instead of dumping stock.
-        - The model should:
-          - Only recommend outright selling stock at a loss when risk is clearly excessive (e.g., position way too big for a normal retail account, or the stock is seriously broken).
-          - Proactively consider covered calls, rolls, or staggered calls as the *first* tool for managing drawdowns and generating income from strong names.
+        Behavior rules:
+        - In uncertainty → favor **risk reduction + income (covered calls)**
+        - In strength → allow **holding or adding selectively**
 
         ---
 
-        {task_block}
+        === DECISION ENGINE (MANDATORY RULES) ===
+
+        You MUST follow these rules strictly:
+
+        ### 1. Loss-based rules
+        - If unrealized loss > -30% → MUST act (no HOLD)
+        - If unrealized loss > -20% → prioritize **risk reduction or income generation**
+        - NEVER ignore large drawdowns
+
+        ### 2. Position sizing rules
+        - >30% of portfolio → MUST reduce or hedge
+        - 15–30% → high concentration → reduce OR apply covered calls
+        - <10% → can add if thesis intact
+
+        ### 3. HOLD is only allowed if:
+        - Unrealized P/L between -10% and +15%
+        - AND position size <20%
+        Otherwise → you MUST take action
+
+        ### 4. Covered call priority (DEFAULT STRATEGY)
+        Before selling shares at a loss, you MUST evaluate:
+
+        - Down position → sell calls 5–10% OTM, 2–6 weeks out
+        - Flat → sell ATM or slightly OTM calls
+        - Up big → sell 8–12% OTM calls
+
+        Covered calls are the **first-line tool**, not a secondary idea.
+
+        ### 5. Time horizon inference
+        - Stock-only → assume long-term investor
+        - Options present → consider expiration urgency
+        - Large losing stock → assume user resists selling → favor income strategies
 
         ---
 
-        Rules:
-        - Provide **one** clear path only; do not suggest multiple alternative strategies unless the user explicitly asks for multiple.
-        - Always use at least one concrete number (shares, contracts, or %) in the Recommendation or Execution plan (preferably both).
-        - Do not ask the user follow‑up questions.
-        - Do not mention that you are an AI or that you are reading “position objects”.
-    """
+        === EXECUTION REALISM ===
+
+        All recommendations MUST:
+        - Use specific numbers (shares, %, contracts)
+        - Prefer limit orders over market orders
+        - For options:
+        - Include expiration (e.g., “3–4 weeks out”)
+        - Include moneyness (e.g., “~7% OTM”)
+
+        ---
+
+        === OUTPUT FORMAT (STRICT) ===
+
+        ### Position summary
+        - 2–4 bullets describing position, size, and P/L
+
+        ### Recommendation
+        - 1–2 sentences
+        - MUST include a **specific number** (shares/contracts/%)
+
+        ### Execution plan
+        Numbered steps with:
+        - Side (buy/sell/close/roll)
+        - Exact quantity or %
+        - Timing (today / this week / before expiration)
+
+        ### Why this makes sense
+        3–6 sentences covering:
+        - Current P/L and risk
+        - Position size impact
+        - Time horizon / options decay (if applicable)
+
+        You MUST also explicitly state:
+        - What risk is reduced
+        - What upside is sacrificed
+
+        ### Confidence
+        - High / Medium / Low
+        - Based on clarity of setup and risk
+
+        ---
+
+        === IMPORTANT CONSTRAINTS ===
+
+        - You MUST choose exactly ONE action:
+        (Buy more / Trim / Close / Hold / Covered call / Roll)
+
+        - Do NOT give multiple strategies
+        - Do NOT ask questions
+        - Do NOT hedge with “it depends”
+        - Be decisive and practical
+
+        ---
+
+        {user_task}
+
+        ---
+        """
     )
 
 
