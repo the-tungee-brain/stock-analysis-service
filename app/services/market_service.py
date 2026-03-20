@@ -46,7 +46,7 @@ class MarketService:
         access_token: str,
         symbol: str,
         contract_type: ContractType = "ALL",
-        strike_count: int = 5,
+        strike_count: int = 10,
         include_underlying_quote: bool = True,
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,

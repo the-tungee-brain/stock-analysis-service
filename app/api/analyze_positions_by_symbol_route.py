@@ -81,11 +81,10 @@ async def analyze_positions_by_symbol(
         )
 
         option_chains = market_service.get_option_chains(
-            access_token=access_token, symbol=symbol, strike_count=10
+            access_token=access_token, symbol=symbol, strike_count=16
         )
-        print(option_chains)
         option_chains_markdown = prompt_enrichment_service.build_option_chain_markdown(
-            chain=option_chains, max_rows=15
+            chain=option_chains, max_rows=20
         )
 
         quick_prompt = build_quick_prompt(
@@ -101,8 +100,6 @@ async def analyze_positions_by_symbol(
             market_context_snapshots=market_context_snapshots_markdown,
             option_chains=option_chains_markdown,
         )
-
-        print(input_prompt)
 
     async def streamer():
         async for chunk in llm_service.analyze_option_position(
