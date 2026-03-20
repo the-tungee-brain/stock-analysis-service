@@ -1,11 +1,11 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from pydantic import BaseModel
 
 
 class OptionDeliverable(BaseModel):
     symbol: Optional[str] = None
     assetType: Optional[str] = None
-    deliverableUnits: Optional[str] = None
+    deliverableUnits: Optional[Any] = None
     currencyType: Optional[str] = None
 
 
