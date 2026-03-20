@@ -36,4 +36,5 @@ class PromptEnrichmentService:
             "Current market snapshot for relevant symbols:\n\n"
             + header
             + "\n".join(rows)
+            + "\n"
         )
