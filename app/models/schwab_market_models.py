@@ -1,5 +1,5 @@
 from typing import Dict, Optional
-from pydantic import BaseModel, RootModel
+from pydantic import BaseModel, RootModel, Field
 
 
 class Reference(BaseModel):
@@ -35,8 +35,8 @@ class Reference(BaseModel):
 
 
 class Quote(BaseModel):
-    _52WeekHigh: Optional[float] = None
-    _52WeekLow: Optional[float] = None
+    _52WeekHigh: Optional[float] = Field(None, alias="52WeekHigh")
+    _52WeekLow: Optional[float] = Field(None, alias="52WeekLow")
     askMICId: Optional[str] = None
     askPrice: Optional[float] = None
     askSize: Optional[int] = None
