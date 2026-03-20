@@ -35,7 +35,7 @@ class AnalyzePositionsBySymbolRequest(BaseModel):
     model: Optional[ResponsesModel] = "gpt-4.1-mini"
 
 
-BENCHMARK_SYMBOLS = ["$SPX", "$DJI", "VIX", "TLT"]
+BENCHMARK_SYMBOLS = ["$SPX", "$DJI", "$VIX", "TLT"]
 
 
 @router.post("/analyze-positions-by-symbol")
