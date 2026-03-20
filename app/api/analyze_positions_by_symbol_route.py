@@ -93,8 +93,6 @@ async def analyze_positions_by_symbol(
             market_context_snapshots=market_context_snapshots_markdown,
         )
 
-        print(input_prompt)
-
     async def streamer():
         async for chunk in llm_service.analyze_option_position(
             model=request.model,
