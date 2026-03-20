@@ -269,11 +269,12 @@ def build_option_prompt(
         Otherwise → you MUST take action
 
         ### 4. Covered call priority (DEFAULT STRATEGY)
-        Before selling shares at a loss, you MUST evaluate:
+        Before selling shares at a loss, you MUST evaluate **weekly covered calls**:
 
-        - Down position → sell calls 5–10% OTM, 2–6 weeks out
-        - Flat → sell ATM or slightly OTM calls
-        - Up big → sell 8–12% OTM calls
+        - Use expirations around **7 days to expiration (7 DTE)** for covered calls.
+        - Down stock position → sell covered calls 5–10% OTM with ~7 DTE.
+        - Flat stock position → sell covered calls ATM or slightly OTM with ~7 DTE.
+        - Up big → sell covered calls 8–12% OTM with ~7 DTE.
 
         Covered calls are the **first-line tool**, not a secondary idea.
 
@@ -287,11 +288,13 @@ def build_option_prompt(
         === EXECUTION REALISM ===
 
         All recommendations MUST:
-        - Use specific numbers (shares, %, contracts)
-        - Prefer limit orders over market orders
-        - For options:
-        - Include expiration (e.g., “3–4 weeks out”)
-        - Include moneyness (e.g., “~7% OTM”)
+        - Use specific numbers (shares, %, contracts).
+        - Prefer limit orders over market orders whenever liquidity allows.
+        - For options (covered calls only):
+        - Prefer expirations around **7 days to expiration (7 DTE weekly options)** unless clearly inappropriate.
+        - Include expiration detail (e.g., “sell 1 covered call expiring in ~7 days” or “next Friday’s weekly cycle (~7 DTE)”).
+        - Include moneyness detail (e.g., “~5–10% OTM” when the stock is down, “ATM to slightly OTM” when flat, “8–12% OTM” after a strong move up).
+        - Make it clear the user must be comfortable having shares called away at the strike price when selling covered calls.
 
         ---
 
