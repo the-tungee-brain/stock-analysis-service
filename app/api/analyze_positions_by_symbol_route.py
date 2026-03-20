@@ -35,6 +35,9 @@ class AnalyzePositionsBySymbolRequest(BaseModel):
     model: Optional[ResponsesModel] = "gpt-4.1-mini"
 
 
+BENCHMARK_SYMBOLS = ["$SPX", "$DJI", "VIX", "TLT"]
+
+
 @router.post("/analyze-positions-by-symbol")
 async def analyze_positions_by_symbol(
     request: AnalyzePositionsBySymbolRequest,
@@ -61,10 +64,19 @@ async def analyze_positions_by_symbol(
         market_snapshots = market_service.get_enriched_quote_snapshot(
             access_token=access_token, symbol=symbol
         )
-
         market_snapshots_markdown = (
             prompt_enrichment_service.build_market_snapshot_markdown(
                 snapshots=market_snapshots
+            )
+        )
+
+        market_context_snapshots = market_service.get_enriched_quote_snapshot(
+            access_token=access_token,
+            symbols=BENCHMARK_SYMBOLS,
+        )
+        market_context_snapshots_markdown = (
+            prompt_enrichment_service.build_market_snapshot_markdown(
+                snapshots=market_context_snapshots
             )
         )
 
@@ -78,6 +90,7 @@ async def analyze_positions_by_symbol(
             account=request.account,
             positions=request.positions,
             market_snapshots=market_snapshots_markdown,
+            market_context_snapshots=market_context_snapshots_markdown,
         )
 
     async def streamer():

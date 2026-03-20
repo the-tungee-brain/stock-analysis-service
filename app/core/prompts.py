@@ -195,6 +195,7 @@ def build_option_prompt(
     account: SchwabAccounts,
     positions: List[Position],
     market_snapshots: Optional[str],
+    market_context_snapshots: Optional[str],
 ) -> str:
     now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -238,10 +239,13 @@ def build_option_prompt(
         {market_snapshots}
         [/MARKET_SNAPSHOT]
 
-        === MARKET CONTEXT (ASSUME) ===
-        - US equities: Neutral to slightly volatile environment unless clearly implied otherwise
-        - Volatility: Moderate
-        - Interest rates: Elevated but stable
+        === REAL-TIME MACRO CONTEXT ===
+        Use these benchmarks (broad index, volatility, and rates proxy) to judge whether moves are stock-specific
+        or driven by the overall market environment.
+
+        [MARKET_CONTEXT]
+        {market_context_snapshots}
+        [/MARKET_CONTEXT]
 
         Behavior rules:
         - In uncertainty → favor **risk reduction + income (covered calls)**

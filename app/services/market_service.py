@@ -1,6 +1,6 @@
 from app.builders.schwab_market_builder import SchwabMarketBuilder
 from app.models.schwab_market_models import InstrumentQuote, PromptQuoteSnapshot
-from typing import Dict
+from typing import Dict, List
 
 
 class MarketService:
@@ -8,22 +8,20 @@ class MarketService:
         self.schwab_market_builder = schwab_market_builder
 
     def get_enriched_quote_snapshot(
-        self, access_token: str, symbol: str
+        self, access_token: str, symbols: List[str]
     ) -> Dict[str, PromptQuoteSnapshot]:
         quotes_response = self.schwab_market_builder.get_quotes(
-            access_token=access_token, symbols=[symbol]
+            access_token=access_token, symbols=symbols
         )
-        try:
-            instrument: InstrumentQuote = quotes_response.root[symbol]
-        except KeyError:
-            raise ValueError(f"No quote data returned for symbol {symbol!r}")
 
-        q = instrument.quote
-        ref = instrument.reference
-        f = instrument.fundamental
+        snapshots: Dict[str, PromptQuoteSnapshot] = {}
 
-        return {
-            symbol: PromptQuoteSnapshot(
+        for symbol, instrument in quotes_response.root.items():
+            q = instrument.quote
+            ref = instrument.reference
+            f = instrument.fundamental
+
+            snapshots[symbol] = PromptQuoteSnapshot(
                 symbol=instrument.symbol,
                 asset_main_type=instrument.assetMainType,
                 asset_sub_type=instrument.assetSubType,
@@ -38,4 +36,5 @@ class MarketService:
                 avg_1y_volume=f.avg1YearVolume if f else None,
                 implied_vol=q.volatility,
             )
-        }
+
+        return snapshots
