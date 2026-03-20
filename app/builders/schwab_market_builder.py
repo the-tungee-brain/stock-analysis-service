@@ -1,10 +1,8 @@
-from app.adapters.schwab.schwab_market_adapter import (
-    SchwabMarketAdapter,
-    ContractType,
-    StrategyType,
-)
+from app.adapters.schwab.schwab_market_adapter import SchwabMarketAdapter
+from typing import List, Literal, Optional
+from app.models.schwab_market_models import QuotesResponse
+from app.adapters.schwab.schwab_market_adapter import ContractType, StrategyType
 from app.models.schwab_option_chain_models import OptionChain
-from typing import Literal, Optional
 
 QuoteField = Literal["quote", "fundamental", "all"]
 
@@ -12,6 +10,22 @@ QuoteField = Literal["quote", "fundamental", "all"]
 class SchwabMarketBuilder:
     def __init__(self, schwab_market_adapter: SchwabMarketAdapter):
         self.schwab_market_adapter = schwab_market_adapter
+
+    def get_quotes(
+        self,
+        access_token: str,
+        symbols: List[str],
+        fields: List[QuoteField] = [],
+        indicative: bool = False,
+    ) -> QuotesResponse:
+        raw_quote_data = self.schwab_market_adapter.get_quotes(
+            access_token=access_token,
+            symbols=",".join(symbols),
+            fields=",".join(fields),
+            indicative=indicative,
+        )
+
+        return QuotesResponse.model_validate(raw_quote_data)
 
     def get_option_chains(
         self,
