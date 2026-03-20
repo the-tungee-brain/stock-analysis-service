@@ -3,6 +3,7 @@ from typing import List, Optional
 from enum import Enum
 from collections import defaultdict
 from textwrap import dedent
+
 from app.models.schwab_models import Position, SchwabAccounts
 
 
@@ -70,8 +71,9 @@ BASE_TASK_BLOCK = dedent(
     - Position size and margin/maintenance impact (if relevant).
     - Time left (for options) and likely risk/reward trade‑off.
     Be decisive and opinionated; avoid generic hedging like “it depends”.
-"""
+    """
 )
+
 
 USER_PROMPT_TASK_BLOCK_TEMPLATE = dedent(
     """
@@ -93,7 +95,7 @@ USER_PROMPT_TASK_BLOCK_TEMPLATE = dedent(
     Respond in **Markdown** with clear headings and bullet points where appropriate.
     Whenever possible, include **specific numbers** (shares, contracts, or %) and concrete execution steps
     (side, size, rough timing).
-"""
+    """
 )
 
 
@@ -194,13 +196,18 @@ def build_option_prompt(
     prompt: Optional[str],
     account: SchwabAccounts,
     positions: List[Position],
-    market_snapshots: Optional[str],
-    market_context_snapshots: Optional[str],
+    market_snapshots: Optional[str] = None,
+    market_context_snapshots: Optional[str] = None,
 ) -> str:
     now_iso = datetime.now(timezone.utc).isoformat()
 
     account_summary = build_account_summary(acc=account)
     positions_table = enrich_positions_for_prompt(positions=positions)
+
+    market_block = market_snapshots or "No market snapshot available."
+    market_context_block = (
+        market_context_snapshots or "No macro benchmark data available."
+    )
 
     user_task = (
         USER_PROMPT_TASK_BLOCK_TEMPLATE.format(user_prompt=prompt)
@@ -230,22 +237,31 @@ def build_option_prompt(
         [/POSITIONS_TABLE]
 
         ---
-        
+
         === REAL-TIME MARKET SNAPSHOT ===
         Use this table to understand current prices, today’s moves, recent volatility, and whether each name
         is near its recent highs or lows. Prioritize decisions that respect stretched moves.
-        
+
         [MARKET_SNAPSHOT]
-        {market_snapshots}
+        {market_block}
         [/MARKET_SNAPSHOT]
+
+        ---
 
         === REAL-TIME MACRO CONTEXT ===
         Use these benchmarks (broad index, volatility, and rates proxy) to judge whether moves are stock-specific
         or driven by the overall market environment.
 
         [MARKET_CONTEXT]
-        {market_context_snapshots}
+        {market_context_block}
         [/MARKET_CONTEXT]
+
+        ---
+
+        === MARKET CONTEXT (ASSUME) ===
+        - US equities: Neutral to slightly volatile environment unless clearly implied otherwise
+        - Volatility: Moderate
+        - Interest rates: Elevated but stable
 
         Behavior rules:
         - In uncertainty → favor **risk reduction + income (covered calls)**
@@ -275,6 +291,10 @@ def build_option_prompt(
         ### 4. Covered call priority (DEFAULT STRATEGY)
         Before selling shares at a loss, you MUST evaluate **weekly covered calls**:
 
+        - Each standard equity option contract controls **100 shares**.
+        - You may ONLY recommend covered calls in whole contracts backed by at least 100 shares per contract.
+        - If the user holds fewer than 100 shares of the underlying, you MUST NOT recommend a covered call.
+
         - Use expirations around **7 days to expiration (7 DTE)** for covered calls.
         - Down stock position → sell covered calls 5–10% OTM with ~7 DTE.
         - Flat stock position → sell covered calls ATM or slightly OTM with ~7 DTE.
@@ -295,10 +315,10 @@ def build_option_prompt(
         - Use specific numbers (shares, %, contracts).
         - Prefer limit orders over market orders whenever liquidity allows.
         - For options (covered calls only):
-        - Prefer expirations around **7 days to expiration (7 DTE weekly options)** unless clearly inappropriate.
-        - Include expiration detail (e.g., “sell 1 covered call expiring in ~7 days” or “next Friday’s weekly cycle (~7 DTE)”).
-        - Include moneyness detail (e.g., “~5–10% OTM” when the stock is down, “ATM to slightly OTM” when flat, “8–12% OTM” after a strong move up).
-        - Make it clear the user must be comfortable having shares called away at the strike price when selling covered calls.
+          - Prefer expirations around **7 days to expiration (7 DTE weekly options)** unless clearly inappropriate.
+          - Include expiration detail (e.g., “sell 1 covered call expiring in ~7 days” or “next Friday’s weekly cycle (~7 DTE)”).
+          - Include moneyness detail (e.g., “~5–10% OTM” when the stock is down, “ATM to slightly OTM” when flat, “8–12% OTM” after a strong move up).
+          - Make it clear the user must be comfortable having shares called away at the strike price when selling covered calls.
 
         ---
 
@@ -336,7 +356,7 @@ def build_option_prompt(
         === IMPORTANT CONSTRAINTS ===
 
         - You MUST choose exactly ONE action:
-        (Buy more / Trim / Close / Hold / Covered call / Roll)
+          (Buy more / Trim / Close / Hold / Covered call / Roll)
 
         - Do NOT give multiple strategies
         - Do NOT ask questions
@@ -370,7 +390,7 @@ def build_quick_prompt(
             - Change in unrealized P/L for today and overall
             - Key news or catalysts affecting {symbol} today
             - One or two bullet points on whether their current positioning still makes sense.
-        """
+            """
         )
 
     if action is AnalysisAction.RISK_CHECK:
@@ -383,7 +403,7 @@ def build_quick_prompt(
             - Main risks (price, volatility, event risk, liquidity, leverage)
             - How this position might interact with a diversified US equity portfolio
             - Concrete risk-reducing adjustments they could consider.
-        """
+            """
         )
 
     if action is AnalysisAction.TAX_ANGLE:
@@ -398,7 +418,7 @@ def build_quick_prompt(
             - Typical wash sale and holding-period gotchas for a position like this
 
             Explain clearly and briefly.
-        """
+            """
         )
 
     if action is AnalysisAction.WHAT_CHANGED:
@@ -411,7 +431,7 @@ def build_quick_prompt(
             - Any major news, macro or sector events you can infer or know about
             - How today's move fits into the recent trend
             - Whether today's info suggests holding, trimming, or adding (and why).
-        """
+            """
         )
 
     return user_prompt
