@@ -29,6 +29,7 @@ class SchwabAuth:
     def get_refreshed_access_token(self, refresh_token):
         headers = self._get_basic_auth_header()
         data = {"grant_type": "refresh_token", "refresh_token": refresh_token}
+        print(data, self.TOKEN_URL, headers)
         response = requests.post(self.TOKEN_URL, headers=headers, data=data)
         if response.status_code == 200:
             return response
