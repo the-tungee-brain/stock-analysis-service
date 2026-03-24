@@ -9,9 +9,8 @@ class NewsService:
 
     def get_company_news(self, symbol: str) -> NewsResponse:
         today = date.today()
-        seven_days_ago = today - timedelta(days=7)
         return self.finnhub_builder.get_company_news(
             symbol=symbol,
-            _from=seven_days_ago,
+            _from=today,
             to=today,
         )
