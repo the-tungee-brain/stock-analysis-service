@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import List
-from pydantic import RootModel, BaseModel, HttpUrl, field_validator
+from typing import List, Optional
+from pydantic import BaseModel, HttpUrl, RootModel, field_validator
 
 
 class NewsItem(BaseModel):
@@ -8,7 +8,7 @@ class NewsItem(BaseModel):
     datetime: datetime
     headline: str
     id: int
-    image: HttpUrl
+    image: Optional[HttpUrl] = None
     related: str
     source: str
     summary: str
@@ -19,6 +19,13 @@ class NewsItem(BaseModel):
     def parse_unix_ts(cls, v):
         if isinstance(v, (int, float)):
             return datetime.fromtimestamp(v)
+        return v
+
+    @field_validator("image", mode="before")
+    @classmethod
+    def empty_image_to_none(cls, v):
+        if v == "" or v is None:
+            return None
         return v
 
 
