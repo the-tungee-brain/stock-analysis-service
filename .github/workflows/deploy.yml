@@ -69,6 +69,7 @@ jobs:
             -e JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}" \
             -e POWERPOCKETDB_TP_TNS="${{ secrets.POWERPOCKETDB_TP_TNS }}" \
             -e SCHWAB_MARKET_URI="${{ secrets.SCHWAB_MARKET_URI }}" \
+            -e FINNHUB_API_KEY="${{ secrets.FINNHUB_API_KEY }}" \
             -p 8000:8000 \
             --restart always \
             tungxd96/sas-server:latest

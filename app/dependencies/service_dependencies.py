@@ -5,6 +5,7 @@ from app.services.schwab_auth_service import SchwabAuthService
 from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.user_service import UserService
 from app.services.portfolio_service import PortfolioService
+from app.services.news_service import NewsService
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -29,3 +30,7 @@ def get_market_service(request: Request) -> MarketService:
 
 def get_prompt_enrichment_service(request: Request) -> PromptEnrichmentService:
     return request.app.state.prompt_enrichment_service
+
+
+def get_news_service(request: Request) -> NewsService:
+    return request.app.state.news_service

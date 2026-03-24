@@ -27,6 +27,9 @@ from app.adapters.schwab.schwab_market_adapter import SchwabMarketAdapter
 from app.builders.schwab_market_builder import SchwabMarketBuilder
 from app.services.market_service import MarketService
 from app.services.prompt_enrichment_service import PromptEnrichmentService
+from app.adapters.finnhub.finnhub_adapter import FinnhubAdapter
+from app.builders.finnhub_builder import FinnhubBuilder
+from app.services.news_service import NewsService
 
 
 def get_redis_client() -> redis.Redis:
@@ -69,12 +72,14 @@ async def lifespan(app: FastAPI):
     schwab_redirect_uri = os.getenv("SCHWAB_REDIRECT_URI")
     schwab_oauth_uri = os.getenv("SCHWAB_OAUTH_URI")
     schwab_market_uri = os.getenv("SCHWAB_MARKET_URI")
+    finnhub_api_key = os.getenv("FINNHUB_API_KEY")
 
     session = requests.Session()
     redis_client = get_redis_client()
     powerpocketdb_client = get_powerpocketdb_client()
     openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
+    finnhub_adapter = FinnhubAdapter(api_key=finnhub_api_key)
     schwab_market_adapter = SchwabMarketAdapter(
         session=session, base_uri=schwab_market_uri
     )
@@ -90,6 +95,7 @@ async def lifespan(app: FastAPI):
     schwab_redis_token_manager = SchwabRedisTokenManager(redis_client=redis_client)
     openai_adapter = OpenAIAdapter(client=openai_client)
 
+    finnhub_builder = FinnhubBuilder(finnhub_adapter=finnhub_adapter)
     schwab_market_builder = SchwabMarketBuilder(
         schwab_market_adapter=schwab_market_adapter
     )
@@ -101,6 +107,7 @@ async def lifespan(app: FastAPI):
     schwab_trader_builder = get_schwab_trader_builder(session)
     app_user_builder = AppUserBuilder(app_user_adapter=app_user_adapter)
 
+    news_service = NewsService(finnhub_builder=finnhub_builder)
     market_service = MarketService(schwab_market_builder=schwab_market_builder)
     prompt_enrichment_service = PromptEnrichmentService()
     llm_service = LLMService(openai_adapter=openai_adapter)
@@ -115,6 +122,7 @@ async def lifespan(app: FastAPI):
 
     app.state.http_session = session
     app.state.redis_client = redis_client
+    app.state.news_service = news_service
     app.state.prompt_enrichment_service = prompt_enrichment_service
     app.state.market_service = market_service
     app.state.llm_service = llm_service

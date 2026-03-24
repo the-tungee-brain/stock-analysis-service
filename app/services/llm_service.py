@@ -1,7 +1,5 @@
-from typing import List, AsyncGenerator
-from app.core.prompts import build_option_prompt
+from typing import AsyncGenerator
 from app.adapters.llm.openai_adapter import OpenAIAdapter
-from app.models.schwab_models import Position, SchwabAccounts
 from typing import Optional
 from openai.types.shared import ResponsesModel
 

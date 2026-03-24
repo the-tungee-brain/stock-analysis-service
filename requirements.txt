@@ -10,6 +10,7 @@ distro==1.9.0
 dnspython==2.8.0
 email-validator==2.3.0
 fastapi==0.135.1
+finnhub-python==2.4.27
 google-auth==2.49.1
 google-auth-oauthlib==1.3.0
 gunicorn==25.1.0
