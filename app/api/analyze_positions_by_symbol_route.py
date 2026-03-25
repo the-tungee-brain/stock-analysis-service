@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import List, Optional
 from fastapi.responses import StreamingResponse
+
 from app.models.schwab_models import Position, SchwabAccounts
 from app.services.llm_service import LLMService
 from app.services.market_service import MarketService
@@ -16,12 +17,14 @@ from app.dependencies.service_dependencies import (
 from openai.types.shared import ResponsesModel
 from app.core.prompts import (
     AnalysisAction,
-    build_quick_prompt,
-    build_option_prompt,
+    SYSTEM_MESSAGE,
+    SymbolContext,
+    PortfolioContext,
+    build_symbol_prompt,
     build_portfolio_prompt,
 )
 from app.auth.dependencies import get_current_user_id
-
+from app.core.llm_config import settings
 
 router = APIRouter()
 
@@ -52,17 +55,20 @@ async def analyze_positions_by_symbol(
     symbol = request.symbol
 
     if not symbol:
-        input_prompt = build_portfolio_prompt(
-            prompt=request.prompt,
-            account=request.account,
-            positions=request.positions,
+        user_prompt = build_portfolio_prompt(
+            PortfolioContext(
+                account=request.account,
+                positions=request.positions,
+                user_prompt=request.prompt,
+            )
         )
     else:
         schwab_token = schwab_auth_service.get_valid_token_by_user_id(user_id=user_id)
         access_token = schwab_token.access_token
 
         market_snapshots = market_service.get_enriched_quote_snapshot(
-            access_token=access_token, symbols=[symbol]
+            access_token=access_token,
+            symbols=[symbol],
         )
         market_snapshots_markdown = (
             prompt_enrichment_service.build_market_snapshot_markdown(
@@ -81,30 +87,32 @@ async def analyze_positions_by_symbol(
         )
 
         option_chains = market_service.get_option_chains(
-            access_token=access_token, symbol=symbol, strike_count=16
+            access_token=access_token,
+            symbol=symbol,
+            strike_count=10,
         )
         option_chains_markdown = prompt_enrichment_service.build_option_chain_markdown(
-            chain=option_chains, max_rows=20
+            chain=option_chains,
+            max_rows=10,
         )
 
-        quick_prompt = build_quick_prompt(
-            action=request.action,
+        symbol_ctx = SymbolContext(
             symbol=symbol,
-            user_prompt=request.prompt,
-        )
-        input_prompt = build_option_prompt(
-            prompt=quick_prompt,
             account=request.account,
             positions=request.positions,
-            market_snapshots=market_snapshots_markdown,
-            market_context_snapshots=market_context_snapshots_markdown,
-            option_chains=option_chains_markdown,
+            user_prompt=request.prompt,
+            market_snapshot=market_snapshots_markdown,
+            market_context=market_context_snapshots_markdown,
+            option_chain=option_chains_markdown,
+            action=request.action,
         )
+        user_prompt = build_symbol_prompt(symbol_ctx)
 
     async def streamer():
         async for chunk in llm_service.analyze_option_position(
-            model=request.model,
-            prompt=input_prompt,
+            model=request.model or settings.OPENAI_MODEL,
+            system_prompt=SYSTEM_MESSAGE,
+            user_prompt=user_prompt,
         ):
             yield chunk
 

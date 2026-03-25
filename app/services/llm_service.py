@@ -24,10 +24,13 @@ class LLMService:
     async def analyze_option_position(
         self,
         model: Optional[ResponsesModel],
-        prompt: Optional[str],
+        system_prompt: Optional[str],
+        user_prompt: Optional[str],
     ) -> AsyncGenerator[str, None]:
         async for chunk in self.openai_adapter.generate_stream(
-            model=model, prompt=prompt
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
         ):
             yield chunk
 

@@ -13,11 +13,27 @@ class OpenAIAdapter(BaseLLM):
         self.client = client
 
     async def generate_stream(
-        self, model: Optional[ResponsesModel], prompt: str
+        self,
+        model: Optional[ResponsesModel],
+        system_prompt: str,
+        user_prompt: str,
     ) -> AsyncGenerator[str, None]:
         stream = self.client.responses.create(
             model=model or settings.OPENAI_MODEL,
-            input=prompt,
+            input=[
+                {
+                    "role": "system",
+                    "content": [
+                        {"type": "input_text", "text": system_prompt},
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": user_prompt},
+                    ],
+                },
+            ],
             stream=True,
         )
 

@@ -6,7 +6,10 @@ from typing import Optional, List, Any, AsyncGenerator
 class BaseLLM(ABC):
     @abstractmethod
     async def generate_stream(
-        self, model: Optional[ResponsesModel], prompt: str
+        self,
+        model: Optional[ResponsesModel],
+        system_prompt: str,
+        user_prompt: str,
     ) -> AsyncGenerator[str, None]:
         pass
 
