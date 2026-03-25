@@ -96,6 +96,7 @@ async def analyze_positions_by_symbol(
             chain=option_chains,
             max_rows=10,
         )
+        print(option_chains_markdown)
 
         symbol_ctx = SymbolContext(
             symbol=symbol,
