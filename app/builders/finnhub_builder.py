@@ -13,4 +13,5 @@ class FinnhubBuilder:
         raw_news_response = self.finnhub_adapter.get_company_news(
             symbol=symbol, _from=_from, to=to
         )
+        print("News", symbol, raw_news_response)
         return NewsResponse.model_validate(raw_news_response)
