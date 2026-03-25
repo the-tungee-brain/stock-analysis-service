@@ -9,8 +9,10 @@ class NewsService:
 
     def get_company_news(self, symbol: str) -> NewsResponse:
         today = date.today()
+        yesterday = today - timedelta(days=1)
+
         return self.finnhub_builder.get_company_news(
             symbol=symbol,
-            _from=today,
+            _from=yesterday,
             to=today,
         )
