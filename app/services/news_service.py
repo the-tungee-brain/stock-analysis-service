@@ -11,8 +11,12 @@ class NewsService:
         today = date.today()
         yesterday = today - timedelta(days=1)
 
-        return self.finnhub_builder.get_company_news(
+        news_response = self.finnhub_builder.get_company_news(
             symbol=symbol,
             _from=yesterday,
             to=today,
         )
+
+        news_response.root = news_response.root[:10]
+
+        return news_response
