@@ -91,6 +91,7 @@ async def analyze_positions_by_symbol(
             symbol=symbol,
             strike_count=10,
         )
+        print(option_chains)
         option_chains_markdown = prompt_enrichment_service.build_option_chain_markdown(
             chain=option_chains,
             max_rows=10,
