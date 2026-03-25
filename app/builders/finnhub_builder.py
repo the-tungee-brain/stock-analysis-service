@@ -1,6 +1,7 @@
 from app.adapters.finnhub.finnhub_adapter import FinnhubAdapter
 from app.models.finnhub_news_models import NewsResponse
 from datetime import date
+from operator import attrgetter
 
 
 class FinnhubBuilder:
@@ -13,4 +14,7 @@ class FinnhubBuilder:
         raw_news_response = self.finnhub_adapter.get_company_news(
             symbol=symbol, _from=_from, to=to
         )
-        return NewsResponse.model_validate(raw_news_response)
+        news_response = NewsResponse.model_validate(raw_news_response)
+
+        news_response.root.sort(key=attrgetter("datetime"), reverse=True)
+        return news_response

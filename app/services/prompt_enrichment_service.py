@@ -2,6 +2,8 @@ from app.models.schwab_market_models import PromptQuoteSnapshot
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
 from datetime import datetime
 from typing import List, Tuple, Dict
+from app.models.finnhub_news_models import NewsResponse
+from textwrap import dedent
 
 
 class PromptEnrichmentService:
@@ -133,3 +135,58 @@ class PromptEnrichmentService:
             + "\n".join(lines)
             + "\n"
         )
+
+    def _format_news_block(self, news: NewsResponse) -> str:
+        parts: list[str] = []
+        for idx, n in enumerate(news.root):
+            dt_str = n.datetime.isoformat()
+            parts.append(
+                dedent(
+                    f"""
+                    #{idx + 1}
+                    id: {n.id}
+                    datetime: {dt_str}
+                    source: {n.source}
+                    headline: {n.headline}
+                    summary: {n.summary or "(none)"}
+                    """
+                ).strip()
+            )
+        return "\n\n".join(parts)
+
+    def enrich_news_prompt(self, symbol: str, news: NewsResponse) -> List[str]:
+        news_block = self._format_news_block(news)
+
+        system_msg = dedent(
+            """
+            You are a professional equity research assistant.
+            Analyze news about a single stock and produce structured JSON with
+            trader-style sentiment labels: "bullish", "bearish", or "neutral".
+            """
+        ).strip()
+
+        user_msg = dedent(
+            f"""
+            Stock ticker: {symbol}
+
+            News items:
+            {news_block}
+
+            For EACH item, determine:
+            - sentiment: "bullish" (likely positive for the stock price), "bearish" (likely negative), or "neutral"
+            - confidence: number between 0 and 1
+            - summary: one concise sentence focused on what matters to investors in this stock
+            - topics: array of short tags like ["earnings","guidance","product","macro","regulation","management","competition","crypto","trading_activity","valuation","flows","buybacks"].
+
+            Return ONLY a JSON array, one element per item, in the same order, each object:
+            {{
+              "id": number,
+              "sentiment": "bullish" | "bearish" | "neutral",
+              "confidence": number,
+              "summary": string,
+              "topics": string[]
+            }}
+            """
+        ).strip()
+
+        return [system_msg, user_msg]

@@ -30,6 +30,8 @@ from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.adapters.finnhub.finnhub_adapter import FinnhubAdapter
 from app.builders.finnhub_builder import FinnhubBuilder
 from app.services.news_service import NewsService
+from app.builders.news_analytics_builder import NewsAnalyticsBuilder
+from app.builders.prompt_builder import PromptBuilder
 
 
 def get_redis_client() -> redis.Redis:
@@ -106,11 +108,17 @@ async def lifespan(app: FastAPI):
     )
     schwab_trader_builder = get_schwab_trader_builder(session)
     app_user_builder = AppUserBuilder(app_user_adapter=app_user_adapter)
+    news_analytics_builder = NewsAnalyticsBuilder(openai_adapter=openai_adapter)
+    prompt_builder = PromptBuilder(openai_adapter=openai_adapter)
 
     news_service = NewsService(finnhub_builder=finnhub_builder)
     market_service = MarketService(schwab_market_builder=schwab_market_builder)
     prompt_enrichment_service = PromptEnrichmentService()
-    llm_service = LLMService(openai_adapter=openai_adapter)
+    llm_service = LLMService(
+        openai_adapter=openai_adapter,
+        news_analytics_builder=news_analytics_builder,
+        prompt_builder=prompt_builder,
+    )
     portfolio_service = PortfolioService(schwab_trader_builder=schwab_trader_builder)
     schwab_auth_service = SchwabAuthService(
         schwab_oauth_uri=schwab_oauth_uri,
