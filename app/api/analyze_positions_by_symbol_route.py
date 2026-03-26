@@ -18,6 +18,7 @@ from openai.types.shared import ResponsesModel
 from app.core.prompts import (
     AnalysisAction,
     SYSTEM_MESSAGE,
+    SYSTEM_NATURAL_MESSAGE,
     SymbolContext,
     PortfolioContext,
     build_symbol_prompt,
@@ -114,7 +115,7 @@ async def analyze_positions_by_symbol(
     async def streamer():
         async for chunk in llm_service.analyze_option_position(
             model=request.model or settings.OPENAI_MODEL,
-            system_prompt=SYSTEM_MESSAGE,
+            system_prompt=SYSTEM_NATURAL_MESSAGE if request.prompt else SYSTEM_MESSAGE,
             user_prompt=user_prompt,
         ):
             yield chunk
