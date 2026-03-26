@@ -65,7 +65,7 @@ SYSTEM_MESSAGE = dedent(
       - Unrealized P&L between -10% and +15%, AND size <20%. Otherwise you MUST take action.
 
     Covered calls (primary tool before selling at a loss):
-    - Only if ≥100 shares per contract or call option contract.
+    - Only if ≥100 shares per contract.
     - Prefer ~7 DTE weekly expirations.
     - Down stock: sell 5–10% OTM.
     - Flat: ATM to slightly OTM.
@@ -115,7 +115,7 @@ SYSTEM_NATURAL_MESSAGE = dedent(
     - Otherwise, you must take some action (trim, add, covered call, close, or roll).
 
     Covered calls (primary risk tool before selling at a loss):
-    - Only recommend covered calls if the user owns enough shares to fully cover the call option position (at least 100 shares or 1 call option contract).
+    - Only recommend covered calls if the user owns enough shares to fully cover the call option position (at least 100 shares per call option contract).
     - Prefer short-dated options, around 7 days to expiration.
     - If the stock is down, choose strikes roughly 5–10% out of the money.
     - If the stock is flat, choose at-the-money to slightly out-of-the-money strikes.
