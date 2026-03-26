@@ -34,6 +34,7 @@ class OpenAIAdapter(BaseLLM):
                     ],
                 },
             ],
+            temperature=0.4,
             stream=True,
         )
 
@@ -61,8 +62,7 @@ class OpenAIAdapter(BaseLLM):
             {"role": "user", "content": user_msg},
         ]
         response = self.client.responses.create(
-            model=model or settings.OPENAI_MODEL,
-            input=input,
+            model=model or settings.OPENAI_MODEL, input=input, temperature=0.4
         )
 
         return response.output[0].content[0].text
