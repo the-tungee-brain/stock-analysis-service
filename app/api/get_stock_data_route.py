@@ -13,12 +13,6 @@ def get_stock_data(
         "1d", description="1m,2m,5m,15m,30m,60m,90m,1h,1d,5d,1wk,1mo,3mo"
     ),
 ):
-    """
-    Fetch OHLCV data from Yahoo Finance.
-
-    period: 1d,5d,1mo,3mo,6mo,1y,2y,5y,10y,ytd,max
-    interval: 1m,2m,5m,15m,30m,60m,90m,1h,1d,5d,1wk,1mo,3mo
-    """
     ticker = yf.Ticker(symbol.upper())
     hist = ticker.history(period=period, interval=interval)
 
@@ -27,26 +21,16 @@ def get_stock_data(
 
     if hist.index.name is None:
         hist.index.name = "Date"
-
     hist = hist.reset_index()
 
-    cols = {c.lower(): c for c in hist.columns}
-    date_col = cols.get("date")
-    open_col = cols.get("open")
-    high_col = cols.get("high")
-    low_col = cols.get("low")
-    close_col = cols.get("close")
-    volume_col = cols.get("volume")
-
-    if not all([date_col, open_col, high_col, low_col, close_col, volume_col]):
+    if "Date" not in hist.columns:
         raise HTTPException(
-            status_code=500,
-            detail="Unexpected data format from yfinance (missing expected columns)",
+            status_code=500, detail="Missing Date column in history data"
         )
 
     data = []
     for _, row in hist.iterrows():
-        date_value = row[date_col]
+        date_value = row["Date"]
         if isinstance(date_value, pd.Timestamp):
             date_str = date_value.isoformat()
         else:
@@ -55,11 +39,11 @@ def get_stock_data(
         data.append(
             {
                 "date": date_str,
-                "open": float(row[open_col]),
-                "high": float(row[high_col]),
-                "low": float(row[low_col]),
-                "close": float(row[close_col]),
-                "volume": int(row[volume_col]),
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+                "volume": int(row["Volume"]),
             }
         )
 
