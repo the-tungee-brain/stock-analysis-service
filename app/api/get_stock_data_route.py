@@ -19,22 +19,30 @@ def get_stock_data(
     if hist.empty:
         raise HTTPException(status_code=404, detail="No data found")
 
-    if hist.index.name is None:
-        hist.index.name = "Date"
-    hist = hist.reset_index()
+    index_is_datetime = isinstance(hist.index, pd.DatetimeIndex)
 
-    if "Date" not in hist.columns:
+    if index_is_datetime:
+        date_values = hist.index
+    else:
+        date_values = pd.to_datetime(hist.index, errors="coerce")
+        if date_values.isna().all():
+            date_values = hist.index
+
+    required_cols = ["Open", "High", "Low", "Close", "Volume"]
+    missing = [c for c in required_cols if c not in hist.columns]
+    if missing:
         raise HTTPException(
-            status_code=500, detail="Missing Date column in history data"
+            status_code=500,
+            detail=f"Missing expected OHLCV columns: {', '.join(missing)}",
         )
 
     data = []
-    for _, row in hist.iterrows():
-        date_value = row["Date"]
-        if isinstance(date_value, pd.Timestamp):
-            date_str = date_value.isoformat()
+    for i, (_, row) in enumerate(hist.iterrows()):
+        dv = date_values[i]
+        if isinstance(dv, pd.Timestamp):
+            date_str = dv.isoformat()
         else:
-            date_str = str(date_value)
+            date_str = str(dv)
 
         data.append(
             {
