@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, HTTPException
 import yfinance as yf
 
-router = FastAPI()
+router = APIRouter()
 
 
 @router.get("/get-stock-data")
