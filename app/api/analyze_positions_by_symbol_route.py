@@ -26,9 +26,7 @@ from app.core.prompts import (
 )
 from app.auth.dependencies import get_current_user_id
 from app.core.llm_config import settings
-import logging
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -98,7 +96,6 @@ async def analyze_positions_by_symbol(
             chain=option_chains,
             max_rows=10,
         )
-        logger.info("Markdown: %s", option_chains_markdown)
 
         symbol_ctx = SymbolContext(
             symbol=symbol,

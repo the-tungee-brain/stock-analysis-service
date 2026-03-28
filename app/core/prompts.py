@@ -1,5 +1,3 @@
-# app/llm/prompts.py
-
 from __future__ import annotations
 
 from collections import defaultdict
@@ -10,9 +8,6 @@ from textwrap import dedent
 from typing import List, Optional
 
 from app.models.schwab_models import Position, SchwabAccounts
-
-
-# ====== Core types ======
 
 
 class AnalysisAction(str, Enum):
@@ -29,9 +24,9 @@ class SymbolContext:
     account: SchwabAccounts
     positions: List[Position]
     user_prompt: Optional[str] = None
-    market_snapshot: Optional[str] = None  # compact text / small table
-    market_context: Optional[str] = None  # compact macro text
-    option_chain: Optional[str] = None  # small ladder near ATM
+    market_snapshot: Optional[str] = None
+    market_context: Optional[str] = None
+    option_chain: Optional[str] = None
     action: AnalysisAction = AnalysisAction.FREE_FORM
 
 
@@ -41,8 +36,6 @@ class PortfolioContext:
     positions: List[Position]
     user_prompt: Optional[str] = None
 
-
-# ====== Global system message (short, reused every call) ======
 
 SYSTEM_MESSAGE = dedent(
     """
@@ -148,9 +141,6 @@ SYSTEM_NATURAL_MESSAGE = dedent(
 ).strip()
 
 
-# ====== Helpers ======
-
-
 def _format_currency(value: float) -> str:
     return f"${value:,.0f}"
 
@@ -191,12 +181,10 @@ def _enrich_positions_table(
     if not enriched:
         return "No open positions."
 
-    # group by symbol
     grouped = defaultdict(list)
     for e in enriched:
         grouped[e["symbol"]].append(e)
 
-    # aggregate by symbol
     rows_data = []
     for symbol, items in grouped.items():
         net_qty = sum(i["net_qty"] for i in items)
@@ -227,7 +215,6 @@ def _enrich_positions_table(
             }
         )
 
-    # sort by market value descending
     rows_data.sort(key=lambda r: abs(r["mkt_val"]), reverse=True)
 
     if max_symbols is not None:
@@ -320,11 +307,7 @@ def _build_action_prompt(
             """
         ).strip()
 
-    # fallback
     return user_prompt or f"Give a clear, actionable plan for {symbol}."
-
-
-# ====== Public builders ======
 
 
 def build_symbol_prompt(ctx: SymbolContext) -> str:
@@ -334,9 +317,7 @@ def build_symbol_prompt(ctx: SymbolContext) -> str:
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     account_summary = _build_account_summary(ctx.account)
-    positions_table = _enrich_positions_table(
-        ctx.positions
-    )  # these are already symbol-filtered on your side
+    positions_table = _enrich_positions_table(ctx.positions)
 
     market_block = ctx.market_snapshot or "No per-symbol market snapshot provided."
     macro_block = ctx.market_context or "No macro benchmark data provided."

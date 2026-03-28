@@ -8,7 +8,7 @@ class Instrument(BaseModel):
     cusip: str
     symbol: str
     description: Optional[str] = None
-    netChange: float
+    netChange: Optional[float] = None
     type: Optional[str] = None
     putCall: Optional[Literal["CALL", "PUT"]] = None
     underlyingSymbol: Optional[str] = None
