@@ -62,9 +62,9 @@ class PortfolioAnalysisService:
                 ),
                 asyncio.to_thread(
                     self.market_service.get_option_chains,
-                    access_token,
-                    symbol,
-                    10,
+                    access_token=access_token,
+                    symbol=symbol,
+                    strike_count=10,
                 ),
             )
         )
