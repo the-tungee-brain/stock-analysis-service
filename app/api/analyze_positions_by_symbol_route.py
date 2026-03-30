@@ -5,24 +5,18 @@ from fastapi.responses import StreamingResponse
 
 from app.models.schwab_models import Position, SchwabAccounts
 from app.services.llm_service import LLMService
-from app.services.market_service import MarketService
-from app.services.schwab_auth_service import SchwabAuthService
+from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.dependencies.service_dependencies import (
     get_llm_service,
+    get_portfolio_analysis_service,
     get_prompt_enrichment_service,
-    get_market_service,
-    get_schwab_auth_service,
 )
 from openai.types.shared import ResponsesModel
 from app.core.prompts import (
     AnalysisAction,
     SYSTEM_MESSAGE,
     SYSTEM_NATURAL_MESSAGE,
-    SymbolContext,
-    PortfolioContext,
-    build_symbol_prompt,
-    build_portfolio_prompt,
 )
 from app.auth.dependencies import get_current_user_id
 from app.core.llm_config import settings
@@ -33,81 +27,36 @@ router = APIRouter()
 class AnalyzePositionsBySymbolRequest(BaseModel):
     account: SchwabAccounts
     positions: List[Position]
+    session_id: Optional[str] = None
     symbol: Optional[str] = None
     prompt: Optional[str] = None
     action: AnalysisAction = AnalysisAction.FREE_FORM
     model: Optional[ResponsesModel] = "gpt-4.1-mini"
 
 
-BENCHMARK_SYMBOLS = ["$SPX", "$DJI", "$VIX", "TLT"]
-
-
 @router.post("/analyze-positions-by-symbol")
 async def analyze_positions_by_symbol(
     request: AnalyzePositionsBySymbolRequest,
     user_id: str = Depends(get_current_user_id),
-    schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
     llm_service: LLMService = Depends(get_llm_service),
-    market_service: MarketService = Depends(get_market_service),
+    portfolio_analysis_service: PortfolioAnalysisService = Depends(
+        get_portfolio_analysis_service
+    ),
     prompt_enrichment_service: PromptEnrichmentService = Depends(
         get_prompt_enrichment_service
     ),
 ):
-    symbol = request.symbol
+    ctx = await portfolio_analysis_service.build_analysis_context(
+        user_id=user_id,
+        account=request.account,
+        positions=request.positions,
+        session_id=request.session_id,
+        symbol=request.symbol,
+        user_prompt=request.prompt,
+        action=request.action,
+    )
 
-    if not symbol:
-        user_prompt = build_portfolio_prompt(
-            PortfolioContext(
-                account=request.account,
-                positions=request.positions,
-                user_prompt=request.prompt,
-            )
-        )
-    else:
-        schwab_token = schwab_auth_service.get_valid_token_by_user_id(user_id=user_id)
-        access_token = schwab_token.access_token
-
-        market_snapshots = market_service.get_enriched_quote_snapshot(
-            access_token=access_token,
-            symbols=[symbol],
-        )
-        market_snapshots_markdown = (
-            prompt_enrichment_service.build_market_snapshot_markdown(
-                snapshots=market_snapshots
-            )
-        )
-
-        market_context_snapshots = market_service.get_enriched_quote_snapshot(
-            access_token=access_token,
-            symbols=BENCHMARK_SYMBOLS,
-        )
-        market_context_snapshots_markdown = (
-            prompt_enrichment_service.build_market_snapshot_markdown(
-                snapshots=market_context_snapshots
-            )
-        )
-
-        option_chains = market_service.get_option_chains(
-            access_token=access_token,
-            symbol=symbol,
-            strike_count=10,
-        )
-        option_chains_markdown = prompt_enrichment_service.build_option_chain_markdown(
-            chain=option_chains,
-            max_rows=10,
-        )
-
-        symbol_ctx = SymbolContext(
-            symbol=symbol,
-            account=request.account,
-            positions=request.positions,
-            user_prompt=request.prompt,
-            market_snapshot=market_snapshots_markdown,
-            market_context=market_context_snapshots_markdown,
-            option_chain=option_chains_markdown,
-            action=request.action,
-        )
-        user_prompt = build_symbol_prompt(symbol_ctx)
+    user_prompt = prompt_enrichment_service.build_portfolio_strategy_prompt(ctx=ctx)
 
     async def streamer():
         async for chunk in llm_service.analyze_option_position(

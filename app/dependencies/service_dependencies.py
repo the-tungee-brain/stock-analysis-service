@@ -6,6 +6,7 @@ from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.user_service import UserService
 from app.services.portfolio_service import PortfolioService
 from app.services.news_service import NewsService
+from app.services.portfolio_analysis_service import PortfolioAnalysisService
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -34,3 +35,7 @@ def get_prompt_enrichment_service(request: Request) -> PromptEnrichmentService:
 
 def get_news_service(request: Request) -> NewsService:
     return request.app.state.news_service
+
+
+def get_portfolio_analysis_service(request: Request) -> PortfolioAnalysisService:
+    return request.app.state.portfolio_analysis_service

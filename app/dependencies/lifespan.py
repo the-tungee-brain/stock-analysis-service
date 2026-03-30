@@ -32,6 +32,7 @@ from app.builders.finnhub_builder import FinnhubBuilder
 from app.services.news_service import NewsService
 from app.builders.news_analytics_builder import NewsAnalyticsBuilder
 from app.builders.prompt_builder import PromptBuilder
+from app.services.portfolio_analysis_service import PortfolioAnalysisService
 
 
 def get_redis_client() -> redis.Redis:
@@ -126,6 +127,11 @@ async def lifespan(app: FastAPI):
         schwab_redirect_uri=schwab_redirect_uri,
         schwab_auth_builder=schwab_auth_builder,
     )
+    portfolio_analysis_service = PortfolioAnalysisService(
+        market_service=market_service,
+        schwab_auth_service=schwab_auth_service,
+        prompt_enrichment_service=prompt_enrichment_service,
+    )
     user_service = UserService(app_user_builder=app_user_builder)
 
     app.state.http_session = session
@@ -138,6 +144,7 @@ async def lifespan(app: FastAPI):
     app.state.schwab_redis_token_manager = schwab_redis_token_manager
     app.state.schwab_auth_service = schwab_auth_service
     app.state.user_service = user_service
+    app.state.portfolio_analysis_service = portfolio_analysis_service
 
     try:
         yield

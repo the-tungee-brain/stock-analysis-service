@@ -18,23 +18,26 @@ class AnalysisAction(str, Enum):
     WHAT_CHANGED = "what-changed"
 
 
-@dataclass
-class SymbolContext:
-    symbol: str
+@dataclass(kw_only=True)
+class BaseAnalysisContext:
     account: SchwabAccounts
     positions: List[Position]
+    session_id: Optional[str] = None
     user_prompt: Optional[str] = None
+
+
+@dataclass(kw_only=True)
+class PortfolioContext(BaseAnalysisContext):
+    pass
+
+
+@dataclass(kw_only=True)
+class SymbolContext(BaseAnalysisContext):
+    symbol: str
+    action: AnalysisAction = AnalysisAction.FREE_FORM
     market_snapshot: Optional[str] = None
     market_context: Optional[str] = None
     option_chain: Optional[str] = None
-    action: AnalysisAction = AnalysisAction.FREE_FORM
-
-
-@dataclass
-class PortfolioContext:
-    account: SchwabAccounts
-    positions: List[Position]
-    user_prompt: Optional[str] = None
 
 
 SYSTEM_MESSAGE = dedent(

@@ -4,6 +4,13 @@ from datetime import datetime
 from typing import List, Tuple, Dict
 from app.models.finnhub_news_models import NewsResponse
 from textwrap import dedent
+from app.core.prompts import (
+    BaseAnalysisContext,
+    build_symbol_prompt,
+    build_portfolio_prompt,
+    PortfolioContext,
+    SymbolContext,
+)
 
 
 class PromptEnrichmentService:
@@ -190,3 +197,11 @@ class PromptEnrichmentService:
         ).strip()
 
         return [system_msg, user_msg]
+
+    def build_portfolio_strategy_prompt(self, ctx: BaseAnalysisContext):
+        if isinstance(ctx, SymbolContext):
+            return build_symbol_prompt(ctx=ctx)
+        elif isinstance(ctx, PortfolioContext):
+            return build_portfolio_prompt(ctx=ctx)
+        else:
+            raise ValueError(f"Unknown context type: {type(ctx)}")
