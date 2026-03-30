@@ -52,13 +52,13 @@ class PortfolioAnalysisService:
             await asyncio.gather(
                 asyncio.to_thread(
                     self.market_service.get_enriched_quote_snapshot,
-                    access_token,
-                    [symbol],
+                    access_token=access_token,
+                    symbols=[symbol],
                 ),
                 asyncio.to_thread(
                     self.market_service.get_enriched_quote_snapshot,
-                    access_token,
-                    BENCHMARK_SYMBOLS,
+                    access_token=access_token,
+                    symbols=BENCHMARK_SYMBOLS,
                 ),
                 asyncio.to_thread(
                     self.market_service.get_option_chains,
