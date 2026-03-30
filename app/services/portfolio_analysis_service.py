@@ -11,7 +11,6 @@ from app.core.prompts import (
     BaseAnalysisContext,
 )
 
-
 BENCHMARK_SYMBOLS = ["$SPX", "$DJI", "$VIX", "TLT"]
 
 
@@ -51,18 +50,21 @@ class PortfolioAnalysisService:
 
         market_snapshots, market_context_snapshots, option_chains = (
             await asyncio.gather(
-                self.market_service.get_enriched_quote_snapshot(
-                    access_token=access_token,
-                    symbols=[symbol],
+                asyncio.to_thread(
+                    self.market_service.get_enriched_quote_snapshot,
+                    access_token,
+                    [symbol],
                 ),
-                self.market_service.get_enriched_quote_snapshot(
-                    access_token=access_token,
-                    symbols=BENCHMARK_SYMBOLS,
+                asyncio.to_thread(
+                    self.market_service.get_enriched_quote_snapshot,
+                    access_token,
+                    BENCHMARK_SYMBOLS,
                 ),
-                self.market_service.get_option_chains(
-                    access_token=access_token,
-                    symbol=symbol,
-                    strike_count=10,
+                asyncio.to_thread(
+                    self.market_service.get_option_chains,
+                    access_token,
+                    symbol,
+                    10,
                 ),
             )
         )
