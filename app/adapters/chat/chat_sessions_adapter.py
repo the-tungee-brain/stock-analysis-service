@@ -10,14 +10,11 @@ from app.models.chat_sessions_models import ChatSession
 
 
 class ChatSessionsAdapter:
-    """CRUD adapter for CHAT_SESSIONS table using oracledb."""
-
     def __init__(self, client: oracledb.ConnectionPool):
         self.client = client
         self.table_name = "CHAT_SESSIONS"
 
     async def create_session(self, session: ChatSession) -> ChatSession:
-        """Insert a new chat session and return it with DB-generated defaults."""
         sql = f"""
             INSERT INTO {self.table_name} (
                 id, user_id, title, model, system_prompt, metadata,

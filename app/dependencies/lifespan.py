@@ -33,6 +33,11 @@ from app.services.news_service import NewsService
 from app.builders.news_analytics_builder import NewsAnalyticsBuilder
 from app.builders.prompt_builder import PromptBuilder
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
+from app.adapters.chat.chat_messages_adapter import ChatMessagesAdapter
+from app.adapters.chat.chat_sessions_adapter import ChatSessionsAdapter
+from app.builders.chat_messages_builder import ChatMessagesBuilder
+from app.builders.chat_sessions_builder import ChatSessionsBuilder
+from app.services.chat_service import ChatService
 
 
 def get_redis_client() -> redis.Redis:
@@ -97,6 +102,8 @@ async def lifespan(app: FastAPI):
     )
     schwab_redis_token_manager = SchwabRedisTokenManager(redis_client=redis_client)
     openai_adapter = OpenAIAdapter(client=openai_client)
+    chat_messages_adapter = ChatMessagesAdapter(client=powerpocketdb_client)
+    chat_sessions_adapter = ChatSessionsAdapter(client=powerpocketdb_client)
 
     finnhub_builder = FinnhubBuilder(finnhub_adapter=finnhub_adapter)
     schwab_market_builder = SchwabMarketBuilder(
@@ -111,6 +118,12 @@ async def lifespan(app: FastAPI):
     app_user_builder = AppUserBuilder(app_user_adapter=app_user_adapter)
     news_analytics_builder = NewsAnalyticsBuilder(openai_adapter=openai_adapter)
     prompt_builder = PromptBuilder(openai_adapter=openai_adapter)
+    chat_messages_builder = ChatMessagesBuilder(
+        chat_messages_adapter=chat_messages_adapter
+    )
+    chat_sessions_builder = ChatSessionsBuilder(
+        chat_sessions_adapter=chat_sessions_adapter
+    )
 
     news_service = NewsService(finnhub_builder=finnhub_builder)
     market_service = MarketService(schwab_market_builder=schwab_market_builder)
@@ -133,6 +146,10 @@ async def lifespan(app: FastAPI):
         prompt_enrichment_service=prompt_enrichment_service,
     )
     user_service = UserService(app_user_builder=app_user_builder)
+    chat_service = ChatService(
+        chat_sessions_builder=chat_sessions_builder,
+        chat_messages_builder=chat_messages_builder,
+    )
 
     app.state.http_session = session
     app.state.redis_client = redis_client
@@ -145,6 +162,7 @@ async def lifespan(app: FastAPI):
     app.state.schwab_auth_service = schwab_auth_service
     app.state.user_service = user_service
     app.state.portfolio_analysis_service = portfolio_analysis_service
+    app.state.chat_service = chat_service
 
     try:
         yield

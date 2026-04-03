@@ -7,10 +7,12 @@ from app.models.schwab_models import Position, SchwabAccounts
 from app.services.llm_service import LLMService
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.services.prompt_enrichment_service import PromptEnrichmentService
+from app.services.chat_service import ChatService
 from app.dependencies.service_dependencies import (
     get_llm_service,
     get_portfolio_analysis_service,
     get_prompt_enrichment_service,
+    get_chat_service,
 )
 from openai.types.shared import ResponsesModel
 from app.core.prompts import (
@@ -45,6 +47,7 @@ async def analyze_positions_by_symbol(
     prompt_enrichment_service: PromptEnrichmentService = Depends(
         get_prompt_enrichment_service
     ),
+    chat_service: ChatService = Depends(get_chat_service),
 ):
     ctx = await portfolio_analysis_service.build_analysis_context(
         user_id=user_id,
@@ -57,14 +60,41 @@ async def analyze_positions_by_symbol(
     )
 
     user_prompt = prompt_enrichment_service.build_portfolio_strategy_prompt(ctx=ctx)
+    session_id = chat_service.get_chat_session_id(
+        user_id=user_id,
+        session_id=request.session_id,
+        prompt=request.prompt,
+    )
+    recent_messages = await chat_service.get_chat_messages_by_session(
+        session_id=session_id
+    )
+
+    if session_id:
+        await chat_service.create_message(
+            session_id=session_id,
+            role=user_prompt["role"],
+            content=user_prompt["content"],
+        )
+
+    assistant_content_parts: List[str] = []
 
     async def streamer():
         async for chunk in llm_service.analyze_option_position(
             model=request.model or settings.OPENAI_MODEL,
             system_prompt=SYSTEM_NATURAL_MESSAGE if request.prompt else SYSTEM_MESSAGE,
-            user_prompt=user_prompt,
+            user_prompt=[*recent_messages, user_prompt],
         ):
+            assistant_content_parts.append(chunk)
             yield chunk
+
+        if session_id:
+            assistant_content = "".join(assistant_content_parts)
+            if assistant_content:
+                await chat_service.chat_messages_builder.create_message(
+                    session_id=session_id,
+                    role="assistant",
+                    content=assistant_content,
+                )
 
     return StreamingResponse(
         streamer(),

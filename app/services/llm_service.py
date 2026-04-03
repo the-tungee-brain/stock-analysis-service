@@ -4,7 +4,7 @@ from typing import Optional
 from openai.types.shared import ResponsesModel
 from app.builders.news_analytics_builder import NewsAnalyticsBuilder
 from app.models.finnhub_news_models import NewsResponse
-from typing import List
+from typing import List, Dict, Any
 from app.models.news_analytics_models import StockNewsView
 from app.builders.prompt_builder import PromptBuilder
 from app.core.llm_config import settings
@@ -25,7 +25,7 @@ class LLMService:
         self,
         model: Optional[ResponsesModel],
         system_prompt: Optional[str],
-        user_prompt: Optional[str],
+        user_prompt: List[Dict[str, Any]],
     ) -> AsyncGenerator[str, None]:
         async for chunk in self.openai_adapter.generate_stream(
             model=model,

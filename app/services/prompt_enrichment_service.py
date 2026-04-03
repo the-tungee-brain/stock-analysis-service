@@ -1,7 +1,7 @@
 from app.models.schwab_market_models import PromptQuoteSnapshot
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
 from datetime import datetime
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Any
 from app.models.finnhub_news_models import NewsResponse
 from textwrap import dedent
 from app.core.prompts import (
@@ -14,7 +14,6 @@ from app.core.prompts import (
 
 
 class PromptEnrichmentService:
-
     def build_market_snapshot_markdown(
         self,
         snapshots: Dict[str, PromptQuoteSnapshot],
@@ -198,10 +197,14 @@ class PromptEnrichmentService:
 
         return [system_msg, user_msg]
 
-    def build_portfolio_strategy_prompt(self, ctx: BaseAnalysisContext):
+    def build_portfolio_strategy_prompt(
+        self, ctx: BaseAnalysisContext
+    ) -> Dict[str, Any]:
         if isinstance(ctx, SymbolContext):
-            return build_symbol_prompt(ctx=ctx)
+            user_content = build_symbol_prompt(ctx=ctx)
         elif isinstance(ctx, PortfolioContext):
-            return build_portfolio_prompt(ctx=ctx)
+            user_content = build_portfolio_prompt(ctx=ctx)
         else:
             raise ValueError(f"Unknown context type: {type(ctx)}")
+
+        return {"role": "user", "content": user_content}

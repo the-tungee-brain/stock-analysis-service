@@ -7,6 +7,7 @@ from app.services.user_service import UserService
 from app.services.portfolio_service import PortfolioService
 from app.services.news_service import NewsService
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
+from app.services.chat_service import ChatService
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -39,3 +40,7 @@ def get_news_service(request: Request) -> NewsService:
 
 def get_portfolio_analysis_service(request: Request) -> PortfolioAnalysisService:
     return request.app.state.portfolio_analysis_service
+
+
+def get_chat_service(request: Request) -> ChatService:
+    return request.app.state.chat_service

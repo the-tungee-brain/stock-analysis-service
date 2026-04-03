@@ -5,7 +5,7 @@ from openai import OpenAI
 from openai.types.shared import ResponsesModel
 from app.adapters.llm.base import BaseLLM
 from app.core.llm_config import settings
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 
 class OpenAIAdapter(BaseLLM):
@@ -16,24 +16,21 @@ class OpenAIAdapter(BaseLLM):
         self,
         model: Optional[ResponsesModel],
         system_prompt: str,
-        user_prompt: str,
+        user_prompt: List[Dict[str, Any]],
     ) -> AsyncGenerator[str, None]:
+        input = [
+            {
+                "role": "system",
+                "content": [
+                    {"type": "input_text", "text": system_prompt},
+                ],
+            },
+            *user_prompt,
+        ]
+        print("openai_input", input)
         stream = self.client.responses.create(
             model=model or settings.OPENAI_MODEL,
-            input=[
-                {
-                    "role": "system",
-                    "content": [
-                        {"type": "input_text", "text": system_prompt},
-                    ],
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": user_prompt},
-                    ],
-                },
-            ],
+            input=input,
             temperature=0.4,
             stream=True,
         )
