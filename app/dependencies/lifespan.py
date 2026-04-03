@@ -48,7 +48,7 @@ def get_redis_client() -> redis.Redis:
     return redis.Redis(
         host=host,
         port=port,
-        # password=password,
+        password=password,
         decode_responses=True,
     )
 
