@@ -66,7 +66,6 @@ async def analyze_positions_by_symbol(
         prompt=request.prompt,
         model=request.model,
     )
-    print("session_id", session_id)
     recent_messages = chat_service.get_chat_messages_by_session(session_id=session_id)
 
     if session_id:
@@ -99,4 +98,5 @@ async def analyze_positions_by_symbol(
     return StreamingResponse(
         streamer(),
         media_type="text/plain; charset=utf-8",
+        headers={"X-Session-Id": session_id or ""},
     )
