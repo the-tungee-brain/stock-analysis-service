@@ -8,6 +8,7 @@ from app.core.prompts import SYSTEM_NATURAL_MESSAGE
 from app.core.prompts import (
     SYSTEM_NATURAL_MESSAGE,
 )
+from openai.types.shared import ResponsesModel
 
 
 class ChatService:
@@ -19,54 +20,48 @@ class ChatService:
         self.chat_sessions_builder = chat_sessions_builder
         self.chat_messages_builder = chat_messages_builder
 
-    async def get_chat_session_id(
+    def get_chat_session_id(
         self,
         user_id: str,
         session_id: Optional[str],
         prompt: Optional[str],
+        model: ResponsesModel,
     ) -> Optional[str]:
         if not prompt:
             return None
 
         if not session_id:
             new_session = ChatSession(
-                id="",
                 user_id=user_id,
                 title=prompt,
+                model=model,
                 system_prompt=SYSTEM_NATURAL_MESSAGE,
             )
-            created_session = await self.chat_sessions_builder.create_session(
+            created_session = self.chat_sessions_builder.create_session(
                 session=new_session
             )
             return created_session.id
 
         return session_id
 
-    async def create_message(
+    def create_message(
         self,
         session_id: str,
         role: str,
         content: str,
-        metadata: Optional[dict] = None,
     ) -> ChatMessage:
-        message = ChatMessage(
-            id=None,
-            session_id=UUID(session_id),
-            role=role,
-            content=content,
-            metadata=metadata,
-            created_at=None,
+        return self.chat_messages_builder.create_message(
+            session_id=session_id, role=role, content=content
         )
-        return await self.chat_messages_builder.create_message(message=message)
 
-    async def get_chat_messages_by_session(
+    def get_chat_messages_by_session(
         self,
         session_id: Optional[str],
     ) -> List[Dict[str, Any]]:
         if not session_id:
             return []
 
-        messages = await self.chat_messages_builder.list_messages_by_session(
+        messages = self.chat_messages_builder.list_messages_by_session(
             session_id=session_id,
             limit=10,
             order="desc",

@@ -14,6 +14,8 @@ class ChatMessagesAdapter:
         self.client = client
         self.table_name = "CHAT_MESSAGES"
 
+    # ---------- Helpers ----------
+
     def _uuid_to_raw(self, uuid_val: UUID | str) -> bytes:
         if isinstance(uuid_val, str):
             uuid_val = UUID(uuid_val)
@@ -32,6 +34,8 @@ class ChatMessagesAdapter:
             return None
         return json.loads(clob_val)
 
+    # ---------- CRUD ----------
+
     def create(self, message: ChatMessage) -> ChatMessage:
         sql = f"""
             INSERT INTO {self.table_name} (
@@ -48,34 +52,44 @@ class ChatMessagesAdapter:
             RETURNING id, created_at INTO :id, :created_at
         """
 
-        with self.client.acquire() as conn:
-            with conn.cursor() as cur:
-                id_var = cur.var(oracledb.NUMBER)
-                created_at_var = cur.var(oracledb.TIMESTAMP_TZ)
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
 
-                cur.execute(
-                    sql,
-                    session_id=self._uuid_to_raw(message.session_id),
-                    role=message.role,
-                    content=message.content,
-                    metadata=self._json_to_clob(message.metadata),
-                    id=id_var,
-                    created_at=created_at_var,
-                )
+            id_var = cur.var(oracledb.DB_TYPE_NUMBER)
+            created_at_var = cur.var(oracledb.DB_TYPE_TIMESTAMP_TZ)
 
-                conn.commit()
+            cur.execute(
+                sql,
+                session_id=self._uuid_to_raw(message.session_id),
+                role=message.role,
+                content=message.content,
+                metadata=self._json_to_clob(message.metadata),
+                id=id_var,
+                created_at=created_at_var,
+            )
 
-                new_id = int(id_var.getvalue())
-                created_at = created_at_var.getvalue()
+            con.commit()
 
-        return ChatMessage(
-            id=new_id,
-            session_id=message.session_id,
-            role=message.role,
-            content=message.content,
-            metadata=message.metadata,
-            created_at=created_at,
-        )
+            id_val = id_var.getvalue()
+            if isinstance(id_val, list):
+                id_val = id_val[0]
+            new_id = int(id_val)
+
+            created_at = created_at_var.getvalue()
+            if isinstance(created_at, list):
+                created_at = created_at[0]
+
+            return ChatMessage(
+                id=new_id,
+                session_id=message.session_id,
+                role=message.role,
+                content=message.content,
+                metadata=message.metadata,
+                created_at=created_at,
+            )
+        finally:
+            con.close()
 
     def get_by_id(self, message_id: int) -> Optional[ChatMessage]:
         sql = f"""
@@ -84,27 +98,30 @@ class ChatMessagesAdapter:
             WHERE id = :id
         """
 
-        with self.client.acquire() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, id=message_id)
-                row = cur.fetchone()
-                if row is None:
-                    return None
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            cur.execute(sql, id=message_id)
+            row = cur.fetchone()
+            if row is None:
+                return None
 
-                id_val, session_id_raw, role, content, metadata_clob, created_at = row
+            id_val, session_id_raw, role, content, metadata_clob, created_at = row
 
-        return ChatMessage(
-            id=id_val,
-            session_id=self._raw_to_uuid(session_id_raw),
-            role=role,
-            content=content.read() if hasattr(content, "read") else content,
-            metadata=self._clob_to_json(
-                metadata_clob.read()
-                if hasattr(metadata_clob, "read")
-                else metadata_clob
-            ),
-            created_at=created_at,
-        )
+            return ChatMessage(
+                id=id_val,
+                session_id=self._raw_to_uuid(session_id_raw),
+                role=role,
+                content=content.read() if hasattr(content, "read") else content,
+                metadata=self._clob_to_json(
+                    metadata_clob.read()
+                    if hasattr(metadata_clob, "read")
+                    else metadata_clob
+                ),
+                created_at=created_at,
+            )
+        finally:
+            con.close()
 
     def list_by_session(
         self,
@@ -133,31 +150,31 @@ class ChatMessagesAdapter:
 
         messages: list[ChatMessage] = []
 
-        with self.client.acquire() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, params)
-                rows = cur.fetchall()
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            cur.execute(sql, params)
+            rows = cur.fetchall()
 
-                for row in rows:
-                    id_val, session_id_raw, role, content, metadata_clob, created_at = (
-                        row
+            for row in rows:
+                id_val, session_id_raw, role, content, metadata_clob, created_at = row
+                messages.append(
+                    ChatMessage(
+                        id=id_val,
+                        session_id=self._raw_to_uuid(session_id_raw),
+                        role=role,
+                        content=content.read() if hasattr(content, "read") else content,
+                        metadata=self._clob_to_json(
+                            metadata_clob.read()
+                            if hasattr(metadata_clob, "read")
+                            else metadata_clob
+                        ),
+                        created_at=created_at,
                     )
-                    messages.append(
-                        ChatMessage(
-                            id=id_val,
-                            session_id=self._raw_to_uuid(session_id_raw),
-                            role=role,
-                            content=(
-                                content.read() if hasattr(content, "read") else content
-                            ),
-                            metadata=self._clob_to_json(
-                                metadata_clob.read()
-                                if hasattr(metadata_clob, "read")
-                                else metadata_clob
-                            ),
-                            created_at=created_at,
-                        )
-                    )
+                )
+
+        finally:
+            con.close()
 
         return messages
 
@@ -170,7 +187,7 @@ class ChatMessagesAdapter:
         set_clauses = []
         params: dict[str, Any] = {"id": message_id}
 
-        for i, (key, value) in enumerate(filtered.items()):
+        for key, value in filtered.items():
             param_name = f"p_{key}"
             if key == "metadata":
                 set_clauses.append(f"metadata = :{param_name}")
@@ -186,24 +203,30 @@ class ChatMessagesAdapter:
             WHERE id = :id
         """
 
-        with self.client.acquire() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, params)
-                if cur.rowcount == 0:
-                    return None
-                conn.commit()
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            cur.execute(sql, params)
+            if cur.rowcount == 0:
+                return None
+            con.commit()
+        finally:
+            con.close()
 
         return self.get_by_id(message_id)
 
     def delete(self, message_id: int) -> bool:
         sql = f"DELETE FROM {self.table_name} WHERE id = :id"
 
-        with self.client.acquire() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, id=message_id)
-                deleted = cur.rowcount > 0
-                conn.commit()
-                return deleted
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            cur.execute(sql, id=message_id)
+            deleted = cur.rowcount > 0
+            con.commit()
+            return deleted
+        finally:
+            con.close()
 
     def delete_by_session(self, session_id: UUID | str) -> int:
         if isinstance(session_id, str):
@@ -211,9 +234,12 @@ class ChatMessagesAdapter:
 
         sql = f"DELETE FROM {self.table_name} WHERE session_id = :session_id"
 
-        with self.client.acquire() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, session_id=self._uuid_to_raw(session_id))
-                deleted_count = cur.rowcount
-                conn.commit()
-                return deleted_count
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            cur.execute(sql, session_id=self._uuid_to_raw(session_id))
+            deleted_count = cur.rowcount
+            con.commit()
+            return deleted_count
+        finally:
+            con.close()

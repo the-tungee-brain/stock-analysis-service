@@ -64,13 +64,13 @@ async def analyze_positions_by_symbol(
         user_id=user_id,
         session_id=request.session_id,
         prompt=request.prompt,
+        model=request.model,
     )
-    recent_messages = await chat_service.get_chat_messages_by_session(
-        session_id=session_id
-    )
+    print("session_id", session_id)
+    recent_messages = chat_service.get_chat_messages_by_session(session_id=session_id)
 
     if session_id:
-        await chat_service.create_message(
+        chat_service.create_message(
             session_id=session_id,
             role=user_prompt["role"],
             content=user_prompt["content"],
@@ -90,7 +90,7 @@ async def analyze_positions_by_symbol(
         if session_id:
             assistant_content = "".join(assistant_content_parts)
             if assistant_content:
-                await chat_service.chat_messages_builder.create_message(
+                chat_service.create_message(
                     session_id=session_id,
                     role="assistant",
                     content=assistant_content,
