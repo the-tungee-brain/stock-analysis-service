@@ -1,6 +1,6 @@
 create table chat_sessions (
    id            raw(16) default sys_guid() primary key,
-   user_id       raw(16) not null,
+   user_id       varchar2(64) not null,
    title         varchar2(255),
    model         varchar2(64) not null,
    system_prompt clob,

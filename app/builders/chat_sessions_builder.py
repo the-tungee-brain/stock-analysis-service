@@ -19,5 +19,4 @@ class ChatSessionsBuilder:
             limit=1,
             offset=0,
         )
-        print("Session", sessions)
         return sessions[0] if sessions else None

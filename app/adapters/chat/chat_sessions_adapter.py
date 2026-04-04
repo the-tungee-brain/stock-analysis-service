@@ -123,7 +123,7 @@ class ChatSessionsAdapter:
                    created_at, updated_at
             FROM {self.table_name}
             WHERE user_id = :user_id
-            ORDER BY created_at DESC
+            ORDER BY updated_at DESC
             OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
         """
 
