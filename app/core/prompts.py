@@ -363,7 +363,7 @@ def build_symbol_prompt(ctx: SymbolContext) -> str:
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     account_summary = _build_account_summary(ctx.account)
-    positions_table = _enrich_positions_table(ctx.positions)
+    positions_table = ctx.positions
 
     market_block = ctx.market_snapshot or "No per-symbol market snapshot provided."
     macro_block = ctx.market_context or "No macro benchmark data provided."
