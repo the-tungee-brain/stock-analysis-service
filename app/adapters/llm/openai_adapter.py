@@ -27,7 +27,7 @@ class OpenAIAdapter(BaseLLM):
             },
             *user_prompt,
         ]
-        print("openai_input", input)
+        print("openai_input", len(input))
         stream = self.client.responses.create(
             model=model or settings.OPENAI_MODEL,
             input=input,
