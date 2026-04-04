@@ -67,7 +67,7 @@ class ChatService:
 
         messages = self.chat_messages_builder.list_messages_by_session(
             session_id=session_id,
-            limit=10,
+            limit=20,
             order="desc",
         )
         messages = list(reversed(messages))

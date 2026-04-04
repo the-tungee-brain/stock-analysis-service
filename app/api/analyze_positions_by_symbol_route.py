@@ -68,7 +68,6 @@ async def analyze_positions_by_symbol(
         is_first_chat=is_first_chat, ctx=ctx
     )
     recent_messages = chat_service.get_chat_messages_by_session(session_id=session_id)
-    print("Recent", len(recent_messages))
 
     if session_id:
         chat_service.create_message(
