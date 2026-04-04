@@ -97,5 +97,4 @@ async def analyze_positions_by_symbol(
     return StreamingResponse(
         streamer(),
         media_type="text/plain; charset=utf-8",
-        headers={"X-Session-Id": session_id or ""},
     )
