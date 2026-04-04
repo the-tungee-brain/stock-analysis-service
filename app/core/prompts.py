@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from textwrap import dedent
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 
 from app.models.schwab_models import Position, SchwabAccounts
 
@@ -149,137 +149,67 @@ def _format_currency(value: float) -> str:
 
 
 def _enrich_positions_table(
-    positions: List["Position"],  # or concrete type if you have it
-    max_symbols: int | None = None,
+    positions: List[Position], max_symbols: int | None = None
 ) -> str:
-    """
-    Build a compact markdown table summarizing positions by symbol.
-
-    - Uses Schwab's longOpenProfitLoss / shortOpenProfitLoss fields as the
-      source of unrealized P/L in dollars.
-    - Computes unrealized P/L% at the symbol level as:
-        total_unrealized_pl / abs(total_market_value) * 100
-      so shorts get a sensible sign.
-    - Uses currentDayProfitLossPercentage directly (no extra * 100).
-    """
-
-    enriched: List[Dict[str, Any]] = []
-
-    for p in positions:
-        long_qty = p.longQuantity or 0.0
-        short_qty = p.shortQuantity or 0.0
-        net_qty = long_qty - short_qty
-        if net_qty == 0:
-            continue
-
-        direction = "LONG" if net_qty > 0 else "SHORT"
-
-        market_value = p.marketValue or 0.0
-
-        # Schwab fields: dollar open P/L for long and short sides.[web:11]
-        long_pl = p.longOpenProfitLoss or 0.0
-        short_pl = p.shortOpenProfitLoss or 0.0
-        total_pl = long_pl + short_pl
-
-        # Schwab's currentDayProfitLossPercentage is already a % value,
-        # not a fraction; use as-is.[web:11]
-        day_pl_pct = p.currentDayProfitLossPercentage or 0.0
-
-        enriched.append(
-            {
-                "symbol": p.instrument.symbol,
-                "type": direction,
-                "net_qty": net_qty,
-                "avg_price": p.averagePrice or 0.0,
-                "market_value": market_value,
-                "total_pl": total_pl,
-                "day_pl_pct": day_pl_pct,
-                "maint_req": p.maintenanceRequirement or 0.0,
-            }
-        )
-
-    if not enriched:
+    if not positions:
         return "No open positions."
 
-    # Group by symbol; this lets you combine multiple lots / legs if Schwab
-    # reports them separately.
-    grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for e in enriched:
-        grouped[e["symbol"]].append(e)
+    positions_sorted = sorted(
+        positions,
+        key=lambda p: abs(p.marketValue),
+        reverse=True,
+    )
 
-    rows_data: List[Dict[str, Any]] = []
+    if max_symbols:
+        positions_sorted = positions_sorted[:max_symbols]
 
-    for symbol, items in grouped.items():
-        net_qty = sum(i["net_qty"] for i in items)
-        if net_qty == 0:
-            continue
+    rows = []
 
-        mkt_val = sum(i["market_value"] for i in items)
+    for p in positions_sorted:
+        symbol = getattr(p.instrument, "symbol", "UNKNOWN")
 
-        # Weighted average price by absolute quantity.
-        total_abs_qty = sum(abs(i["net_qty"]) for i in items)
+        qty = p.longQuantity if p.longQuantity > 0 else -p.shortQuantity
         avg_price = (
-            sum(i["avg_price"] * abs(i["net_qty"]) for i in items) / total_abs_qty
-            if total_abs_qty
-            else 0.0
-        )
+            p.averageLongPrice if p.longQuantity > 0 else p.averageShortPrice
+        ) or p.averagePrice
 
-        # Aggregate unrealized P/L dollars then convert to % at the symbol level.
-        total_pl = sum(i["total_pl"] for i in items)
+        pnl = p.longOpenProfitLoss if p.longQuantity > 0 else p.shortOpenProfitLoss
+        pnl = pnl if pnl is not None else 0.0
 
-        denom = abs(mkt_val) if mkt_val else 0.0
-        unrealized_pl_pct = (total_pl / denom * 100) if denom > 0 else 0.0
+        day_pnl = p.currentDayProfitLoss
 
-        # Day P/L%: market-value-weighted average across items.
-        day_pl_pct = (
-            sum(i["day_pl_pct"] * i["market_value"] for i in items) / mkt_val
-            if mkt_val
-            else 0.0
-        )
-
-        # Maintenance requirement: sum across items (Schwab reports per position).[web:11]
-        maint_req = sum(i["maint_req"] for i in items)
-
-        # For type, if you have mixed long/short legs, you can keep it as LONG/SHORT
-        # by the net sign; otherwise, just use the first item's label.
-        direction = "LONG" if net_qty > 0 else "SHORT"
-
-        rows_data.append(
+        rows.append(
             {
                 "symbol": symbol,
-                "type": direction,
-                "net_qty": net_qty,
-                "avg_price": avg_price,
-                "mkt_val": mkt_val,
-                "unrealized_pl_pct": unrealized_pl_pct,
-                "day_pl_pct": day_pl_pct,
-                "maint_req": maint_req,
+                "qty": round(qty, 2),
+                "avg": round(avg_price or 0, 2),
+                "mkt_val": round(p.marketValue, 2),
+                "pnl": round(pnl, 2),
+                "day_pnl": round(day_pnl, 2),
+                "day_%": round(p.currentDayProfitLossPercentage, 2),
             }
         )
 
-    # Sort by absolute market value (largest positions first).
-    rows_data.sort(key=lambda r: abs(r["mkt_val"]), reverse=True)
+    header = "SYMBOL | QTY | AVG | MKT_VAL | PnL | DAY_PnL | DAY_%"
+    lines = [header]
 
-    if max_symbols is not None:
-        rows_data = rows_data[:max_symbols]
+    for r in rows:
+        lines.append(
+            f"{r['symbol']} | {r['qty']} | {r['avg']} | {r['mkt_val']} | {r['pnl']} | {r['day_pnl']} | {r['day_%']}%"
+        )
 
-    header = (
-        "| Symbol | Type | Net Qty | Avg Price | Mkt Value | Unreal PL% | Day PL% | Maint Req |\n"
-        "|--------|------|---------|-----------|-----------|------------|---------|-----------|\n"
+    table = "\n".join(lines)
+
+    total_value = sum(p.marketValue for p in positions_sorted)
+    total_day_pnl = sum(p.currentDayProfitLoss for p in positions_sorted)
+
+    summary = (
+        f"\n\nTOTAL_MKT_VAL: {round(total_value,2)}"
+        f"\nTOTAL_DAY_PnL: {round(total_day_pnl,2)}"
+        f"\nNUM_POSITIONS: {len(positions_sorted)}"
     )
 
-    rows = [
-        (
-            f"| {r['symbol']} | {r['type']} | {r['net_qty']:.0f} | "
-            f"${r['avg_price']:.2f} | ${r['mkt_val']:.0f} | "
-            f"{r['unrealized_pl_pct']:.1f}% | {r['day_pl_pct']:.1f}% | "
-            f"${r['maint_req']:.0f} |"
-        )
-        for r in rows_data
-    ]
-
-    today = datetime.now().strftime("%Y-%m-%d")
-    return f"Current positions as of {today}:\n\n{header}{chr(10).join(rows)}"
+    return table + summary
 
 
 def _build_account_summary(acc: SchwabAccounts) -> str:
@@ -363,7 +293,7 @@ def build_symbol_prompt(ctx: SymbolContext) -> str:
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     account_summary = _build_account_summary(ctx.account)
-    positions_table = ctx.positions
+    positions_table = _enrich_positions_table(ctx.positions)
 
     market_block = ctx.market_snapshot or "No per-symbol market snapshot provided."
     macro_block = ctx.market_context or "No macro benchmark data provided."
