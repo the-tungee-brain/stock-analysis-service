@@ -27,7 +27,7 @@ class ChatService:
         model: ResponsesModel,
     ) -> tuple[Optional[UUID], bool]:
         if not prompt:
-            return None
+            return None, True
 
         session = self.chat_sessions_builder.get_latest_session_by_user_id(
             user_id=user_id
