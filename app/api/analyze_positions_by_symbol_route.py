@@ -59,11 +59,13 @@ async def analyze_positions_by_symbol(
         action=request.action,
     )
 
-    user_prompt = prompt_enrichment_service.build_portfolio_strategy_prompt(ctx=ctx)
-    session_id = chat_service.get_chat_session_id(
+    session_id, is_first_chat = chat_service.get_chat_session_id(
         user_id=user_id,
         prompt=request.prompt,
         model=request.model,
+    )
+    user_prompt = prompt_enrichment_service.build_portfolio_strategy_prompt(
+        is_first_chat=is_first_chat, ctx=ctx
     )
     recent_messages = chat_service.get_chat_messages_by_session(session_id=session_id)
 

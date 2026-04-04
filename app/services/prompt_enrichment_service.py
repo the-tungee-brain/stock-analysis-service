@@ -198,8 +198,11 @@ class PromptEnrichmentService:
         return [system_msg, user_msg]
 
     def build_portfolio_strategy_prompt(
-        self, ctx: BaseAnalysisContext
+        self, is_first_chat: bool, ctx: BaseAnalysisContext
     ) -> Dict[str, Any]:
+        if not is_first_chat:
+            return {"role": "user", "content": ctx.user_prompt}
+
         if isinstance(ctx, SymbolContext):
             user_content = build_symbol_prompt(ctx=ctx)
         elif isinstance(ctx, PortfolioContext):

@@ -25,15 +25,16 @@ class ChatService:
         user_id: str,
         prompt: Optional[str],
         model: ResponsesModel,
-    ) -> Optional[UUID]:
+    ) -> tuple[Optional[UUID], bool]:
         if not prompt:
             return None
 
         session = self.chat_sessions_builder.get_latest_session_by_user_id(
             user_id=user_id
         )
+        is_first_chat = not session
 
-        if not session:
+        if is_first_chat:
             new_session = ChatSession(
                 user_id=user_id,
                 title=prompt,
@@ -43,9 +44,9 @@ class ChatService:
             created_session = self.chat_sessions_builder.create_session(
                 session=new_session
             )
-            return created_session.id
+            return created_session.id, is_first_chat
 
-        return session.id
+        return session.id, is_first_chat
 
     def create_message(
         self,
