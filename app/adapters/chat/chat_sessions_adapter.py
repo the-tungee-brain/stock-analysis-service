@@ -83,12 +83,6 @@ class ChatSessionsAdapter:
             created_val = out_created.getvalue()
             updated_val = out_updated.getvalue()
 
-            # If DB returns naive datetimes, optionally attach UTC once, but guard None
-            # if created_val and created_val.tzinfo is None:
-            #     created_val = created_val.replace(tzinfo=timezone.utc)
-            # if updated_val and updated_val.tzinfo is None:
-            #     updated_val = updated_val.replace(tzinfo=timezone.utc)
-
             return session.model_copy(
                 update={
                     "id": session_id,

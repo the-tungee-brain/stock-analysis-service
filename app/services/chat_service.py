@@ -23,14 +23,17 @@ class ChatService:
     def get_chat_session_id(
         self,
         user_id: str,
-        session_id: Optional[str],
         prompt: Optional[str],
         model: ResponsesModel,
-    ) -> Optional[str]:
+    ) -> Optional[UUID]:
         if not prompt:
             return None
 
-        if not session_id:
+        session = self.chat_sessions_builder.get_latest_session_by_user_id(
+            user_id=user_id
+        )
+
+        if not session:
             new_session = ChatSession(
                 user_id=user_id,
                 title=prompt,
@@ -42,7 +45,7 @@ class ChatService:
             )
             return created_session.id
 
-        return session_id
+        return session.id
 
     def create_message(
         self,
