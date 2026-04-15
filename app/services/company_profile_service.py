@@ -1,5 +1,6 @@
 from app.builders.finnhub_builder import FinnhubBuilder
 from app.models.company_research_models import ResearchSnapshot
+import yfinance as yf
 
 
 class CompanyProfileService:
@@ -9,7 +10,9 @@ class CompanyProfileService:
     def get_snapshot(self, symbol: str):
         profile = self.finnhub_builder.get_company_profile(symbol=symbol)
         quote = self.finnhub_builder.get_quote(symbol=symbol)
-        market_cap = self._format_market_cap(profile.marketCapitalization)
+        market_cap = self._format_market_cap(mc=profile.marketCapitalization)
+        low_52w, high_52w = self.get_52w_range_yf(symbol=symbol)
+        range_52w = f"${low_52w:.0f} – ${high_52w:.0f}"
 
         return ResearchSnapshot(
             symbol=profile.ticker or symbol.upper(),
@@ -19,7 +22,23 @@ class CompanyProfileService:
             price=quote.c,
             changePct=quote.dp if hasattr(quote, "dp") else 0.0,
             marketCap=market_cap,
+            range52w=range_52w,
         )
+
+    def get_52w_range_yf(self, symbol: str) -> tuple[float, float]:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period="1y", interval="1d")
+
+        if hist.empty:
+            raise ValueError(f"No historical data for {symbol}")
+
+        high_52w = float(hist["High"].max())
+        low_52w = float(hist["Low"].min())
+        return low_52w, high_52w
+
+    def format_52w_range(self, symbol: str) -> str:
+        low, high = self.get_52w_range_yf(symbol)
+        return f"${low:.2f} – ${high:.2f}"
 
     def _format_market_cap(self, mc: float) -> str:
         if mc >= 1_000_000:
