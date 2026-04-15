@@ -38,6 +38,7 @@ from app.adapters.chat.chat_sessions_adapter import ChatSessionsAdapter
 from app.builders.chat_messages_builder import ChatMessagesBuilder
 from app.builders.chat_sessions_builder import ChatSessionsBuilder
 from app.services.chat_service import ChatService
+from app.services.company_profile_service import CompanyProfileService
 
 
 def get_redis_client() -> redis.Redis:
@@ -150,6 +151,7 @@ async def lifespan(app: FastAPI):
         chat_sessions_builder=chat_sessions_builder,
         chat_messages_builder=chat_messages_builder,
     )
+    company_profile_service = CompanyProfileService(finnhub_builder=finnhub_builder)
 
     app.state.http_session = session
     app.state.redis_client = redis_client
@@ -163,6 +165,7 @@ async def lifespan(app: FastAPI):
     app.state.user_service = user_service
     app.state.portfolio_analysis_service = portfolio_analysis_service
     app.state.chat_service = chat_service
+    app.state.company_profile_service = company_profile_service
 
     try:
         yield

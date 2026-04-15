@@ -8,6 +8,7 @@ from app.services.portfolio_service import PortfolioService
 from app.services.news_service import NewsService
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.services.chat_service import ChatService
+from app.services.company_profile_service import CompanyProfileService
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -44,3 +45,7 @@ def get_portfolio_analysis_service(request: Request) -> PortfolioAnalysisService
 
 def get_chat_service(request: Request) -> ChatService:
     return request.app.state.chat_service
+
+
+def get_company_profile_service(request: Request) -> CompanyProfileService:
+    return request.app.state.company_profile_service

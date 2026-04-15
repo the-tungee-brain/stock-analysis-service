@@ -7,3 +7,9 @@ class FinnhubAdapter:
 
     def get_company_news(self, symbol: str, _from: str, to: str):
         return self.finnhub_client.company_news(symbol=symbol, _from=_from, to=to)
+
+    def get_company_profile(self, symbol: str):
+        return self.finnhub_client.company_profile2(symbol=symbol)
+
+    def get_quote(self, symbol: str):
+        return self.finnhub_client.quote(symbol=symbol)
