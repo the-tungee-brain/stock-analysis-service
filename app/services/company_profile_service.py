@@ -11,6 +11,10 @@ class CompanyProfileService:
         profile = self.finnhub_builder.get_company_profile(symbol=symbol)
         quote = self.finnhub_builder.get_quote(symbol=symbol)
         market_cap = self._format_market_cap(mc=profile.marketCapitalization)
+        change_pct = self._compute_change_pct(
+            current=getattr(quote, "c", None),
+            prev_close=getattr(quote, "pc", None),
+        )
         low_52w, high_52w = self.get_52w_range_yf(symbol=symbol)
         range_52w = f"${low_52w:.0f} – ${high_52w:.0f}"
 
@@ -20,10 +24,17 @@ class CompanyProfileService:
             sector=profile.finnhubIndustry,
             country=profile.country,
             price=quote.c,
-            changePct=quote.dp if hasattr(quote, "dp") else 0.0,
+            changePct=change_pct,
             marketCap=market_cap,
             range52w=range_52w,
         )
+
+    def _compute_change_pct(
+        self, current: float | None, prev_close: float | None
+    ) -> float:
+        if current is None or prev_close in (None, 0):
+            return 0.0
+        return (current / prev_close - 1.0) * 100.0
 
     def get_52w_range_yf(self, symbol: str) -> tuple[float, float]:
         ticker = yf.Ticker(symbol)
