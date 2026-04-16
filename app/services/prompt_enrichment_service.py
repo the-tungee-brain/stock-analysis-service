@@ -211,7 +211,7 @@ class PromptEnrichmentService:
 
     def build_stock_summary_prompt(self, symbol: str) -> List[str]:
         system_msg = dedent(
-            f"""
+            """
             You are helping a retail investor understand a stock in plain language.
 
             You will receive a JSON object with fields like price, 1m/3m/1y returns, 52w range,
@@ -238,7 +238,7 @@ class PromptEnrichmentService:
         ).strip()
 
         user_msg = dedent(
-            f"""
+            """
             Write this generic summary for the stock symbol {symbol}.
             Do not assume or state exact prices or returns; keep it high-level and illustrative only.
             """
