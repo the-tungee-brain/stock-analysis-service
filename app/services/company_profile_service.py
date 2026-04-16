@@ -27,6 +27,8 @@ class CompanyProfileService:
             changePct=change_pct,
             marketCap=market_cap,
             range52w=range_52w,
+            logo=profile.logo,
+            weburl=profile.weburl,
         )
 
     def _compute_change_pct(

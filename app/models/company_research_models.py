@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, HttpUrl
 from typing import Literal
 
 
@@ -14,6 +14,8 @@ class ResearchSnapshot(BaseModel):
     changePct: float
     marketCap: str
     range52w: str | None = None
+    weburl: HttpUrl
+    logo: HttpUrl
 
 
 class PerformanceSnapshot(BaseModel):
