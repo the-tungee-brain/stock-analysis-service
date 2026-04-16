@@ -9,6 +9,7 @@ from app.models.news_analytics_models import StockNewsView
 from app.builders.prompt_builder import PromptBuilder
 from app.core.llm_config import settings
 from app.models.company_research_models import AISummary
+from app.core.llm_config import Settings
 import json
 
 
@@ -62,7 +63,9 @@ class LLMService:
         )
 
     async def generate_stock_summary(self, prompts: List[str]) -> AISummary:
-        ai_response = await self.openai_adapter.generate(prompts=prompts)
+        ai_response = await self.openai_adapter.generate(
+            model=Settings.OPENAI_MODEL, prompts=prompts
+        )
 
         if isinstance(ai_response, str):
             try:
