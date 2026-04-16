@@ -38,21 +38,29 @@ jobs:
         username: ubuntu
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         script: |
+          # Shared Docker network for redis + sas-server
+          docker network create sas-net || true
+
+          # Redis
           docker stop redis || true
           docker rm redis || true
           docker run -d \
             --name redis \
+            --network sas-net \
             -p 6379:6379 \
             -v redis-data:/data \
             --restart unless-stopped \
             redis:7-alpine \
             redis-server --appendonly yes --requirepass "${{ secrets.REDIS_PASSWORD }}"
 
+          # Backend
           docker pull tungxd96/sas-server:latest
           docker stop sas-server || true
           docker rm sas-server || true
           docker run -d \
             --name sas-server \
+            --network sas-net \
+            -p 8000:8000 \
             -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
             -e SCHWAB_CLIENT_ID="${{ secrets.SCHWAB_CLIENT_ID }}" \
             -e SCHWAB_CLIENT_SECRET="${{ secrets.SCHWAB_CLIENT_SECRET }}" \
@@ -62,19 +70,17 @@ jobs:
             -e POWERPOCKET_FRONTEND_URI="${{ secrets.POWERPOCKET_FRONTEND_URI }}" \
             -e POWERPOCKETDB_USER="${{ secrets.POWERPOCKETDB_USER }}" \
             -e POWERPOCKETDB_PASSWORD="${{ secrets.POWERPOCKETDB_PASSWORD }}" \
-            -e REDIS_HOST="${{ secrets.REDIS_HOST }}" \
-            -e REDIS_PORT="${{ secrets.REDIS_PORT }}" \
-            -e REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
-            -e GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
-            -e JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}" \
             -e POWERPOCKETDB_TP_TNS="${{ secrets.POWERPOCKETDB_TP_TNS }}" \
             -e SCHWAB_MARKET_URI="${{ secrets.SCHWAB_MARKET_URI }}" \
             -e FINNHUB_API_KEY="${{ secrets.FINNHUB_API_KEY }}" \
-            -p 8000:8000 \
+            -e GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
+            -e JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}" \
+            -e REDIS_HOST="${{ secrets.REDIS_HOST }}" \
+            -e REDIS_PORT="${{ secrets.REDIS_PORT }}" \
+            -e REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
             --restart always \
             tungxd96/sas-server:latest
 
           sudo nginx -t && sudo systemctl restart nginx
           sleep 3
           curl -f localhost:8000 || echo "Health check failed"
-
