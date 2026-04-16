@@ -14,3 +14,11 @@ class ResearchSnapshot(BaseModel):
     changePct: float
     marketCap: str
     range52w: str | None = None
+
+
+class PerformanceSnapshot(BaseModel):
+    oneMonth: str
+    threeMonth: str
+    oneYear: str
+    trendLabel: str
+    volatilityNote: str

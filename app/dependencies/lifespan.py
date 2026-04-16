@@ -1,44 +1,49 @@
 import os
 from contextlib import asynccontextmanager
 
+import oracledb
 import redis
 import requests
 from fastapi import FastAPI
+from openai import OpenAI
 
-from app.adapters.schwab.schwab_redis_token_manager import SchwabRedisTokenManager
-from app.adapters.schwab.schwab_trader_adapter import SchwabTraderAdapter
-from app.builders.schwab_trader_builder import SchwabTraderBuilder
-from app.services.llm_service import LLMService
-from app.services.portfolio_service import PortfolioService
-from app.services.schwab_auth_service import SchwabAuthService
-from app.builders.schwab_auth_builder import SchwabAuthBuilder
+from app.adapters.chat.chat_messages_adapter import ChatMessagesAdapter
+from app.adapters.chat.chat_sessions_adapter import ChatSessionsAdapter
+from app.adapters.finnhub.finnhub_adapter import FinnhubAdapter
+from app.adapters.llm.openai_adapter import OpenAIAdapter
 from app.adapters.schwab.schwab_auth import SchwabAuth
 from app.adapters.schwab.schwab_auth_access_token_adapter import (
     SchwabAuthAccessTokenAdapter,
 )
-from app.adapters.user.app_user_adapter import AppUserAdapter
-from app.builders.app_user_builder import AppUserBuilder
-from app.services.user_service import UserService
-from app.adapters.llm.openai_adapter import OpenAIAdapter
-from app.core.llm_config import settings
-from openai import OpenAI
-import oracledb
 from app.adapters.schwab.schwab_market_adapter import SchwabMarketAdapter
-from app.builders.schwab_market_builder import SchwabMarketBuilder
-from app.services.market_service import MarketService
-from app.services.prompt_enrichment_service import PromptEnrichmentService
-from app.adapters.finnhub.finnhub_adapter import FinnhubAdapter
-from app.builders.finnhub_builder import FinnhubBuilder
-from app.services.news_service import NewsService
-from app.builders.news_analytics_builder import NewsAnalyticsBuilder
-from app.builders.prompt_builder import PromptBuilder
-from app.services.portfolio_analysis_service import PortfolioAnalysisService
-from app.adapters.chat.chat_messages_adapter import ChatMessagesAdapter
-from app.adapters.chat.chat_sessions_adapter import ChatSessionsAdapter
+from app.adapters.schwab.schwab_redis_token_manager import SchwabRedisTokenManager
+from app.adapters.schwab.schwab_trader_adapter import SchwabTraderAdapter
+from app.adapters.user.app_user_adapter import AppUserAdapter
+from app.adapters.market.yfinance_adapter import YFinanceAdapter
+
+from app.builders.app_user_builder import AppUserBuilder
 from app.builders.chat_messages_builder import ChatMessagesBuilder
 from app.builders.chat_sessions_builder import ChatSessionsBuilder
+from app.builders.finnhub_builder import FinnhubBuilder
+from app.builders.news_analytics_builder import NewsAnalyticsBuilder
+from app.builders.prompt_builder import PromptBuilder
+from app.builders.schwab_auth_builder import SchwabAuthBuilder
+from app.builders.schwab_market_builder import SchwabMarketBuilder
+from app.builders.schwab_trader_builder import SchwabTraderBuilder
+from app.builders.performance_builder import PerformanceBuilder
+
+from app.core.llm_config import settings
+
 from app.services.chat_service import ChatService
 from app.services.company_profile_service import CompanyProfileService
+from app.services.llm_service import LLMService
+from app.services.market_service import MarketService
+from app.services.news_service import NewsService
+from app.services.portfolio_analysis_service import PortfolioAnalysisService
+from app.services.portfolio_service import PortfolioService
+from app.services.prompt_enrichment_service import PromptEnrichmentService
+from app.services.schwab_auth_service import SchwabAuthService
+from app.services.user_service import UserService
 
 
 def get_redis_client() -> redis.Redis:
@@ -105,6 +110,7 @@ async def lifespan(app: FastAPI):
     openai_adapter = OpenAIAdapter(client=openai_client)
     chat_messages_adapter = ChatMessagesAdapter(client=powerpocketdb_client)
     chat_sessions_adapter = ChatSessionsAdapter(client=powerpocketdb_client)
+    yfinance_adapter = YFinanceAdapter()
 
     finnhub_builder = FinnhubBuilder(finnhub_adapter=finnhub_adapter)
     schwab_market_builder = SchwabMarketBuilder(
@@ -125,9 +131,13 @@ async def lifespan(app: FastAPI):
     chat_sessions_builder = ChatSessionsBuilder(
         chat_sessions_adapter=chat_sessions_adapter
     )
+    performance_builder = PerformanceBuilder(market_data_adapter=yfinance_adapter)
 
     news_service = NewsService(finnhub_builder=finnhub_builder)
-    market_service = MarketService(schwab_market_builder=schwab_market_builder)
+    market_service = MarketService(
+        schwab_market_builder=schwab_market_builder,
+        performance_builder=performance_builder,
+    )
     prompt_enrichment_service = PromptEnrichmentService()
     llm_service = LLMService(
         openai_adapter=openai_adapter,

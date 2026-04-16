@@ -3,11 +3,18 @@ from app.models.schwab_market_models import PromptQuoteSnapshot
 from typing import Dict, List, Optional
 from app.adapters.schwab.schwab_market_adapter import ContractType, StrategyType
 from app.models.schwab_option_chain_models import OptionChain
+from app.builders.performance_builder import PerformanceBuilder
+from app.models.company_research_models import PerformanceSnapshot
 
 
 class MarketService:
-    def __init__(self, schwab_market_builder: SchwabMarketBuilder):
+    def __init__(
+        self,
+        schwab_market_builder: SchwabMarketBuilder,
+        performance_builder: PerformanceBuilder,
+    ):
         self.schwab_market_builder = schwab_market_builder
+        self.performance_builder = performance_builder
 
     def get_enriched_quote_snapshot(
         self, access_token: str, symbols: List[str]
@@ -62,3 +69,6 @@ class MarketService:
             to_date=to_date,
             strategy=strategy,
         )
+
+    def get_performance(self, symbol: str) -> PerformanceSnapshot:
+        return self.performance_builder.build(symbol=symbol)

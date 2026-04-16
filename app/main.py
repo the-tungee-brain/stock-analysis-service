@@ -16,6 +16,9 @@ from app.api.auth_google_callback_route import router as auth_google_callback_ro
 from app.api.get_company_news_route import router as get_company_news_route
 from app.api.get_stock_data_route import router as get_stock_data_route
 from app.api.get_company_snapshot_route import router as get_company_snapshot_route
+from app.api.get_performance_snapshot_route import (
+    router as get_performance_snapshot_route,
+)
 
 API_PREFIX = "/api/v1"
 AUTH_SCHWAB_PREFIX = f"{API_PREFIX}/auth/schwab"
@@ -63,5 +66,6 @@ protected_api.include_router(analyze_positions_by_symbol_router)
 protected_api.include_router(get_company_news_route)
 protected_api.include_router(get_stock_data_route)
 protected_api.include_router(get_company_snapshot_route)
+protected_api.include_router(get_performance_snapshot_route)
 
 app.include_router(protected_api)
