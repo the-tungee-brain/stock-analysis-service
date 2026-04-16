@@ -8,6 +8,8 @@ from typing import List, Dict, Any
 from app.models.news_analytics_models import StockNewsView
 from app.builders.prompt_builder import PromptBuilder
 from app.core.llm_config import settings
+from app.models.company_research_models import AISummary
+import json
 
 
 class LLMService:
@@ -58,3 +60,16 @@ class LLMService:
             symbol=symbol,
             enriched_news=enriched_news,
         )
+
+    async def generate_stock_summary(self, prompts: List[str]) -> AISummary:
+        ai_response = await self.openai_adapter.generate(prompts=prompts)
+
+        if isinstance(ai_response, str):
+            try:
+                data = json.loads(ai_response)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"LLM returned invalid JSON: {e}") from e
+        else:
+            data = ai_response
+
+        return AISummary.model_validate(data)

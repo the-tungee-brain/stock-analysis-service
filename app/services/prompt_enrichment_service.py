@@ -208,3 +208,39 @@ class PromptEnrichmentService:
             raise ValueError(f"Unknown context type: {type(ctx)}")
 
         return {"role": "user", "content": user_content}
+
+    def build_stock_summary_prompt(self, symbol: str) -> List[str]:
+        system_msg = dedent(
+            f"""
+            You are helping a retail investor understand a stock in plain language.
+
+            You will receive a JSON object with fields like price, 1m/3m/1y returns, 52w range,
+            basic fundamentals, and recent news.
+
+            Based ONLY on that data:
+
+            - Write a SHORT summary: 2–3 sentences in simple, non-technical language.
+            - Write a LONG summary: 4–6 sentences expanding on performance, business quality,
+            and key things to watch. Avoid repeating exact numbers; describe them qualitatively
+            (e.g. "strong growth", "modest decline").
+            - Assign an overall sentiment label: one of "Bullish", "Neutral", or "Bearish".
+
+            Return a single JSON object with exactly this shape:
+
+            {
+            "short": "string, 2-3 sentences",
+            "long": "string, 4-6 sentences",
+            "sentiment": "Bullish | Neutral | Bearish"
+            }
+
+            Do not include any extra keys, comments, or explanations.
+            """
+        ).strip()
+
+        user_msg = dedent(
+            f"""
+            Write this generic summary for the stock symbol {symbol}.
+            Do not assume or state exact prices or returns; keep it high-level and illustrative only.
+            """
+        ).strip()
+        return [system_msg, user_msg]

@@ -22,3 +22,9 @@ class PerformanceSnapshot(BaseModel):
     oneYear: str
     trendLabel: str
     volatilityNote: str
+
+
+class AISummary(BaseModel):
+    short: str
+    long: str
+    sentiment: SentimentLabel
