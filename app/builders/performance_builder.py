@@ -1,5 +1,7 @@
 from datetime import timedelta
+
 import pandas as pd
+
 from app.adapters.market.market_data_adapter import MarketDataAdapter
 from app.models.company_research_models import PerformanceSnapshot
 
@@ -51,14 +53,20 @@ class PerformanceBuilder:
     def _compute_period_return(self, closes: pd.Series, days: int) -> float | None:
         if closes.empty:
             return None
+
         end_price = float(closes.iloc[-1])
         cutoff_date = closes.index[-1] - timedelta(days=days)
+
         past = closes[closes.index <= cutoff_date]
+
         if past.empty:
-            return None
-        start_price = float(past.iloc[-1])
+            start_price = float(closes.iloc[0])
+        else:
+            start_price = float(past.iloc[-1])
+
         if start_price == 0:
             return None
+
         return (end_price / start_price - 1.0) * 100.0
 
     def _trend_label(
