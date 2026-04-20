@@ -250,9 +250,9 @@ class PromptEnrichmentService:
             """
             You are helping a retail investor understand a stock's business in plain language.
 
-            - Write "whatTheyDo" as 2–4 short sentences in simple language.
+            - Write "whatTheyDo" as 4–6 short sentences in simple language.
             - Write "segments" as a list of 3–6 short plain-English strings.
-            - Write "revenueNotes" as 2–4 sentences explaining which parts of the business matter most,
+            - Write "revenueNotes" as 4–6 sentences explaining which parts of the business matter most,
             what drives revenue, and what investors should pay attention to.
             - Keep the language easy to understand for non-experts.
             - Do not repeat exact financial figures unless essential.
