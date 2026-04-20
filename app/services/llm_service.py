@@ -1,16 +1,19 @@
 from typing import AsyncGenerator
 from app.adapters.llm.openai_adapter import OpenAIAdapter
-from typing import Optional
+from typing import Optional, TypeVar
 from openai.types.shared import ResponsesModel
 from app.builders.news_analytics_builder import NewsAnalyticsBuilder
 from app.models.finnhub_news_models import NewsResponse
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Type
 from app.models.news_analytics_models import StockNewsView
 from app.builders.prompt_builder import PromptBuilder
 from app.core.llm_config import settings
 from app.models.company_research_models import AISummary
 from app.core.llm_config import Settings
+from pydantic import BaseModel
 import json
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class LLMService:
@@ -62,17 +65,17 @@ class LLMService:
             enriched_news=enriched_news,
         )
 
-    async def generate_stock_summary(self, prompts: List[str]) -> AISummary:
+    async def generate_from_prompts(
+        self,
+        prompts: List[str],
+        response_model: Type[T],
+    ) -> T:
         ai_response = await self.openai_adapter.generate(
-            model=Settings.OPENAI_MODEL, prompts=prompts
+            model=Settings.OPENAI_MODEL,
+            prompts=prompts,
         )
 
         if isinstance(ai_response, str):
-            try:
-                data = json.loads(ai_response)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"LLM returned invalid JSON: {e}") from e
-        else:
-            data = ai_response
+            return response_model.model_validate_json(ai_response)
 
-        return AISummary.model_validate(data)
+        return response_model.model_validate(ai_response)

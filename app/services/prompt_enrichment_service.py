@@ -246,4 +246,32 @@ class PromptEnrichmentService:
         return [system_msg, user_msg]
 
     def build_business_details_prompt(self, symbol: str) -> List[str]:
-        return []
+        system_msg = dedent(
+            """
+            You are helping a retail investor understand a stock's business in plain language.
+
+            - Write "whatTheyDo" as 2–4 short sentences in simple language.
+            - Write "segments" as a list of 3–6 short plain-English strings.
+            - Write "revenueNotes" as 2–4 sentences explaining which parts of the business matter most,
+            what drives revenue, and what investors should pay attention to.
+            - Keep the language easy to understand for non-experts.
+            - Do not repeat exact financial figures unless essential.
+            - Do not add extra keys, markdown, comments, or explanations.
+
+            Return a single JSON object with exactly this shape:
+
+            {
+            "whatTheyDo": "string",
+            "segments": ["string"],
+            "revenueNotes": "string"
+            }
+            """
+        ).strip()
+
+        user_msg = dedent(
+            f"""
+            Build the business details payload for stock symbol {symbol}.
+            """
+        ).strip()
+
+        return [system_msg, user_msg]

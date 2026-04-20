@@ -19,4 +19,6 @@ async def get_stock_summary(
     llm_service: LLMService = Depends(get_llm_service),
 ):
     prompts = prompt_enrichment_service.build_stock_summary_prompt(symbol=symbol)
-    return await llm_service.generate_stock_summary(prompts=prompts)
+    return await llm_service.generate_from_prompts(
+        prompts=prompts, response_model=AISummary
+    )
