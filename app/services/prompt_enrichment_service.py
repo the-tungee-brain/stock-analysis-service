@@ -238,9 +238,12 @@ class PromptEnrichmentService:
         ).strip()
 
         user_msg = dedent(
-            """
+            f"""
             Write this generic summary for the stock symbol {symbol}.
             Do not assume or state exact prices or returns; keep it high-level and illustrative only.
             """
         ).strip()
         return [system_msg, user_msg]
+
+    def build_business_details_prompt(self, symbol: str) -> List[str]:
+        return []

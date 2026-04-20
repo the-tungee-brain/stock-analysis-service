@@ -30,3 +30,20 @@ class AISummary(BaseModel):
     short: str
     long: str
     sentiment: SentimentLabel
+
+
+class BusinessBlock(BaseModel):
+    whatTheyDo: str
+    segments: list[str]
+    revenueNotes: str
+
+
+class FundamentalMetric(BaseModel):
+    label: str
+    value: str
+    note: str | None = None
+
+
+class FundamentalsBlock(BaseModel):
+    overviewNote: str
+    metrics: list[FundamentalMetric]
