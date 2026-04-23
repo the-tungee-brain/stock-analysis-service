@@ -20,6 +20,7 @@ from app.adapters.schwab.schwab_redis_token_manager import SchwabRedisTokenManag
 from app.adapters.schwab.schwab_trader_adapter import SchwabTraderAdapter
 from app.adapters.user.app_user_adapter import AppUserAdapter
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
+from app.adapters.market.ticker_symbol_adapter import TickerSymbolAdapter
 
 from app.builders.app_user_builder import AppUserBuilder
 from app.builders.chat_messages_builder import ChatMessagesBuilder
@@ -31,6 +32,7 @@ from app.builders.schwab_auth_builder import SchwabAuthBuilder
 from app.builders.schwab_market_builder import SchwabMarketBuilder
 from app.builders.schwab_trader_builder import SchwabTraderBuilder
 from app.builders.performance_builder import PerformanceBuilder
+from app.builders.ticker_symbol_builder import TickerSymbolBuilder
 
 from app.core.llm_config import settings
 
@@ -44,6 +46,7 @@ from app.services.portfolio_service import PortfolioService
 from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.schwab_auth_service import SchwabAuthService
 from app.services.user_service import UserService
+from app.services.ticker_service import TickerService
 
 
 def get_redis_client() -> redis.Redis:
@@ -111,6 +114,7 @@ async def lifespan(app: FastAPI):
     chat_messages_adapter = ChatMessagesAdapter(client=powerpocketdb_client)
     chat_sessions_adapter = ChatSessionsAdapter(client=powerpocketdb_client)
     yfinance_adapter = YFinanceAdapter()
+    ticker_symbol_adapter = TickerSymbolAdapter(client=powerpocketdb_client)
 
     finnhub_builder = FinnhubBuilder(finnhub_adapter=finnhub_adapter)
     schwab_market_builder = SchwabMarketBuilder(
@@ -132,6 +136,9 @@ async def lifespan(app: FastAPI):
         chat_sessions_adapter=chat_sessions_adapter
     )
     performance_builder = PerformanceBuilder(market_data_adapter=yfinance_adapter)
+    ticker_symbol_builder = TickerSymbolBuilder(
+        ticker_symbol_adapter=ticker_symbol_adapter
+    )
 
     news_service = NewsService(finnhub_builder=finnhub_builder)
     market_service = MarketService(
@@ -162,6 +169,7 @@ async def lifespan(app: FastAPI):
         chat_messages_builder=chat_messages_builder,
     )
     company_profile_service = CompanyProfileService(finnhub_builder=finnhub_builder)
+    ticker_service = TickerService(ticker_symbol_builder=ticker_symbol_builder)
 
     app.state.http_session = session
     app.state.redis_client = redis_client
@@ -176,6 +184,7 @@ async def lifespan(app: FastAPI):
     app.state.portfolio_analysis_service = portfolio_analysis_service
     app.state.chat_service = chat_service
     app.state.company_profile_service = company_profile_service
+    app.state.ticker_service = ticker_service
 
     try:
         yield

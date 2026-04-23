@@ -9,6 +9,7 @@ from app.services.news_service import NewsService
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.services.chat_service import ChatService
 from app.services.company_profile_service import CompanyProfileService
+from app.services.ticker_service import TickerService
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -49,3 +50,7 @@ def get_chat_service(request: Request) -> ChatService:
 
 def get_company_profile_service(request: Request) -> CompanyProfileService:
     return request.app.state.company_profile_service
+
+
+def get_ticker_service(request: Request) -> TickerService:
+    return request.app.state.ticker_service
