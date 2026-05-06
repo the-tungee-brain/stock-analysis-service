@@ -39,108 +39,127 @@ class SymbolContext(BaseAnalysisContext):
     option_chain: Optional[str] = None
 
 
-SYSTEM_MESSAGE = dedent(
-    """
+# =========================
+# 🔥 UPGRADED SYSTEM MESSAGE
+# =========================
+
+SYSTEM_MESSAGE = dedent("""
     You are a professional portfolio manager and options strategist for a US retail trader.
 
     Your job:
-    - Give one clear, decisive plan per request (no multiple playbooks).
-    - Be specific and executable: sides (buy/sell/close/roll), quantities (shares/contracts/%), and rough timing (today / this week / before expiration).
-    - Follow the risk rules below strictly.
+    - Give ONE clear, decisive plan (no multiple strategies).
+    - Be specific and executable: sides (buy/sell/close/roll), quantities, and timing.
+    - Think like you are managing real capital.
 
-    Risk rules:
-    - Large losses:
-      - Unrealized P&L < -30%: MUST act (no pure HOLD).
-      - Unrealized P&L < -20%: prioritize reducing risk or generating income (covered calls before selling at a loss).
-    - Position sizing vs portfolio:
-      - >30%: MUST reduce or hedge.
-      - 15–30%: high concentration → reduce OR covered calls.
-      - <10%: may add if thesis intact.
-    - HOLD is only allowed if:
-      - Unrealized P&L between -10% and +15%, AND size <20%. Otherwise you MUST take action.
-
-    Covered calls (primary tool before selling at a loss):
-    - Traditional covered call:
-      - Only recommend if the user owns enough shares to fully cover the short call position (at least 100 shares per call option contract).
-    - Poor man’s / synthetic covered call:
-      - If the user does NOT own 100 shares but holds a deep-in-the-money long call (for example, high-delta, long-dated), you may recommend selling a shorter-dated out-of-the-money call against it and clearly label this as a “poor man’s covered call” (long call + short call spread), not a traditional covered call with shares.
-    - For either structure:
-      - Prefer ~7 DTE weekly expirations for the short call when practical.
-      - Down stock: sell call strikes 5–10% OTM.
-      - Flat: sell ATM to slightly OTM call strikes.
-      - Up big: sell call strikes 8–12% OTM.
-      - Clearly state the main risks:
-        - Upside is capped above the short call strike (plus premium).
-        - Assignment risk on the short call, and for poor man’s covered calls the user does NOT own shares, only a long call as protection.
-
-    Output format for symbol-level or portfolio-level requests:
-    1) "### Position summary" — 2–4 bullets about size, direction, and P&L.
-    2) "### Recommendation" — 1–2 sentences, MUST include at least one specific number.
-    3) "### Execution plan" — numbered steps with side, quantity (shares/contracts/%), and timing.
-    4) "### Why this makes sense" — 3–6 sentences on P&L, risk, size, and time horizon/decay.
-    5) "### Confidence" — High / Medium / Low with 1 short justification.
-
-    Constraints:
-    - Choose exactly one main action: Buy more / Trim / Close / Hold / Covered call / Roll.
-    - Do not give multiple alternative strategies.
-    - Do not ask questions.
-    - Avoid vague hedging like "it depends".
-    """
-).strip()
-
-SYSTEM_NATURAL_MESSAGE = dedent(
-    """
-    You are a professional portfolio manager and options strategist for a US retail trader.
-
-    Style:
-    - Clear, friendly, confident.
-    - Use Markdown headings, bullets, short paragraphs.
-    - Be decisive: choose ONE plan, no hedging.
-    - Use concrete numbers (prices, %, strikes, dates, contracts) when useful.
-
-    Role:
-    - Guide single-stock positions and the overall portfolio.
-    - Use fundamentals, price action, position size, and options.
-    - Explain in plain English, no fluff.
-
-    Risk rules (hard constraints):
-    - Unrealized P&L < -30% → must act (no pure HOLD).
-    - Unrealized P&L < -20% → prioritize reducing risk or generating income (prefer covered calls before selling at a loss).
+    ========================
+    RISK RULES (STRICT)
+    ========================
+    - Unrealized P&L < -30% → MUST act (no HOLD).
+    - Unrealized P&L < -20% → prioritize risk reduction or income (covered calls first).
     - Position size:
-      - >30% of portfolio → must reduce or hedge.
-      - 15–30% → concentrated: trim OR use covered calls for income/risk cap.
-      - <10% → may add if thesis is intact.
+      - >30% → MUST reduce or hedge.
+      - 15–30% → concentrated → trim or generate income.
+      - <10% → may add if thesis intact.
     - HOLD only if:
       - P&L between -10% and +15% AND size <20%.
-      - Otherwise take action (trim, add, covered call, close, or roll).
 
-    Covered calls (stock-backed):
-    - Only if user owns ≥100 shares per short call.
+    ========================
+    COVERED CALL RULES
+    ========================
+    - Only if ≥100 shares per contract.
     - Prefer ~7 DTE.
-    - Stock down: sell calls ~5–10% OTM.
-    - Flat: sell ATM to slightly OTM.
-    - Up big: sell ~8–12% OTM.
-    - Always note: upside capped above strike (plus premium), shares may be called away.
+    - Down stock: 5–10% OTM
+    - Flat: ATM to slightly OTM
+    - Up big: 8–12% OTM
 
-    Synthetic / “poor man’s” covered calls:
-    - If user holds a deep ITM, long-dated call (e.g., delta ≈ 0.8+) but <100 shares,
-      you may sell a shorter-dated OTM call against it.
-    - Clearly label as synthetic / poor man’s covered call (long call + short call),
-      not a traditional covered call with shares.
-    - Note: risk, margin, assignment differ; long call can expire worthless; user does NOT own shares.
+    Synthetic (poor man’s CC):
+    - Allowed if deep ITM long call exists
+    - MUST label clearly
+    - Highlight risks
 
-    Decision rules:
-    - Pick exactly ONE main action: Buy more / Trim / Close / Hold / Covered call / Roll.
-    - No alternative playbooks, no “it depends”.
-    - Do not ask the user questions; make reasonable assumptions and commit.
-    - Justify using P&L/drawdown, position size, time horizon/volatility, and income vs upside.
+    ========================
+    ADVANCED REQUIREMENTS (CRITICAL)
+    ========================
+    You MUST include:
 
-    Output:
-    - Use Markdown.
-    - Keep answers compact and scannable.
-    - Every answer should feel like a concise, actionable note from a seasoned portfolio manager.
-    """
-).strip()
+    1) Expected outcome:
+       - Flat / Down / Up scenarios
+       - Use approximate numbers (% or $)
+
+    2) Portfolio impact:
+       - How position size changes
+       - Impact on concentration and risk
+
+    3) Why this action (and NOT others):
+       - Explicitly explain rejected alternatives
+
+    4) Tradeoff thinking:
+       - Downside protection vs upside cap vs income
+
+    5) Optional but strong:
+       - Trigger levels (price-based actions)
+
+    ========================
+    OUTPUT FORMAT
+    ========================
+    ### Position summary
+    ### Recommendation
+    ### Execution plan
+    ### Expected outcome
+    ### Portfolio impact
+    ### Why this makes sense
+    ### Why this action (and not others)
+    ### Confidence
+
+    ========================
+    CONSTRAINTS
+    ========================
+    - EXACTLY ONE action: Buy / Trim / Close / Hold / Covered call / Roll
+    - No hedging language ("it depends")
+    - No multiple strategies
+    - No questions to user
+    """).strip()
+
+
+# =========================
+# 🧠 NATURAL STYLE VERSION
+# =========================
+
+SYSTEM_NATURAL_MESSAGE = dedent("""
+    You are a professional portfolio manager.
+
+    Style:
+    - Clear, confident, concise
+    - Use Markdown
+    - Use real numbers (% / $ / strikes / dates)
+    - Sound like someone managing money, not explaining theory
+
+    Behavior:
+    - Choose ONE action only
+    - Be decisive
+    - Focus on risk + return tradeoffs
+
+    MUST INCLUDE:
+    - Expected outcome (flat / down / up)
+    - Portfolio impact
+    - Why this action (and not others)
+
+    Think in:
+    - Position size
+    - Drawdown
+    - Volatility
+    - Time horizon
+
+    Avoid:
+    - Generic statements
+    - Over-explaining
+    - Multiple options
+    """).strip()
+
+
+# =========================
+# HELPERS
+# =========================
 
 
 def _format_currency(value: float) -> str:
@@ -164,6 +183,8 @@ def _enrich_positions_table(
 
     rows = []
 
+    total_value = sum(p.marketValue for p in positions_sorted)
+
     for p in positions_sorted:
         symbol = getattr(p.instrument, "symbol", "UNKNOWN")
 
@@ -173,203 +194,100 @@ def _enrich_positions_table(
         ) or p.averagePrice
 
         pnl = p.longOpenProfitLoss if p.longQuantity > 0 else p.shortOpenProfitLoss
-        pnl = pnl if pnl is not None else 0.0
+        pnl = pnl or 0.0
 
-        day_pnl = p.currentDayProfitLoss
+        weight = (p.marketValue / total_value * 100) if total_value else 0
 
         rows.append(
-            {
-                "symbol": symbol,
-                "qty": round(qty, 2),
-                "avg": round(avg_price or 0, 2),
-                "mkt_val": round(p.marketValue, 2),
-                "pnl": round(pnl, 2),
-                "day_pnl": round(day_pnl, 2),
-                "day_%": round(p.currentDayProfitLossPercentage, 2),
-            }
+            f"{symbol} | qty={round(qty,2)} | avg={round(avg_price or 0,2)} | "
+            f"mv={round(p.marketValue,2)} | pnl={round(pnl,2)} | weight={round(weight,1)}%"
         )
 
-    header = "SYMBOL | QTY | AVG | MKT_VAL | PnL | DAY_PnL | DAY_%"
-    lines = [header]
-
-    for r in rows:
-        lines.append(
-            f"{r['symbol']} | {r['qty']} | {r['avg']} | {r['mkt_val']} | {r['pnl']} | {r['day_pnl']} | {r['day_%']}%"
-        )
-
-    table = "\n".join(lines)
-
-    total_value = sum(p.marketValue for p in positions_sorted)
-    total_day_pnl = sum(p.currentDayProfitLoss for p in positions_sorted)
-
-    summary = (
-        f"\n\nTOTAL_MKT_VAL: {round(total_value,2)}"
-        f"\nTOTAL_DAY_PnL: {round(total_day_pnl,2)}"
-        f"\nNUM_POSITIONS: {len(positions_sorted)}"
-    )
-
-    return table + summary
+    return "\n".join(rows)
 
 
 def _build_account_summary(acc: SchwabAccounts) -> str:
     sa = acc.securitiesAccount
     cur = sa.currentBalances
     proj = sa.projectedBalances
-    agg = acc.aggregatedBalance
 
-    return dedent(
-        f"""
-        Account summary:
-        - Account value: ~{_format_currency(sa.initialBalances.accountValue)}, equity {cur.equityPercentage:.1f}%.
-        - Cash: ~{_format_currency(cur.cashBalance)}, margin balance: ~{_format_currency(cur.marginBalance)},
-          maintenance requirement: ~{_format_currency(cur.maintenanceRequirement)}, 
-          {'IN' if proj.isInCall else 'Not in'} margin call.
-        - Exposure: long MV ~{_format_currency(cur.longMarketValue)}, short MV ~{_format_currency(cur.shortMarketValue)},
-          long options ~{_format_currency(cur.longOptionMarketValue)}, short options ~{_format_currency(cur.shortOptionMarketValue)}.
-        - Buying power: stock ~{_format_currency(proj.stockBuyingPower)}, overall ~{_format_currency(proj.buyingPower)}.
-        - Current liquidation value: ~{_format_currency(agg.currentLiquidationValue)}.
-        """
-    ).strip()
+    return dedent(f"""
+        Account:
+        - Value: ~{_format_currency(sa.initialBalances.accountValue)}
+        - Cash: {_format_currency(cur.cashBalance)}
+        - Buying power: {_format_currency(proj.buyingPower)}
+        - Equity: {cur.equityPercentage:.1f}%
+        - Margin call: {'YES' if proj.isInCall else 'NO'}
+        """).strip()
 
 
 def _build_action_prompt(
     action: AnalysisAction, symbol: str, user_prompt: Optional[str]
 ) -> str:
     if action is AnalysisAction.FREE_FORM:
-        return user_prompt or "Give a clear, actionable plan for this position."
-
-    if action is AnalysisAction.DAILY_SUMMARY:
-        return dedent(
-            f"""
-            Provide a concise daily summary for {symbol}:
-            - Today's approximate price move and percentage if inferable.
-            - Change in unrealized P/L for today vs overall.
-            - Key news or catalysts affecting {symbol} today if you can infer them.
-            - 1–2 bullets on whether the current positioning still makes sense.
-            """
-        ).strip()
+        return user_prompt or f"Give a decisive plan for {symbol}"
 
     if action is AnalysisAction.RISK_CHECK:
-        return dedent(
-            f"""
-            Act as a risk manager reviewing the {symbol} position:
-            - Comment on position size vs a diversified single-stock allocation.
-            - Identify main risks (price, volatility, event, liquidity, leverage).
-            - Explain how this position interacts with a diversified US equity portfolio.
-            - Propose specific risk-reducing adjustments.
-            """
-        ).strip()
+        return f"Evaluate risks and propose concrete adjustments for {symbol}"
 
-    if action is AnalysisAction.TAX_ANGLE:
-        return dedent(
-            f"""
-            Analyze the {symbol} position from a US tax education perspective (not tax advice):
-            - Short-term vs long-term considerations.
-            - Realizing losses vs gains (tax loss harvesting / gain management).
-            - Common wash-sale / holding-period pitfalls for this type of position.
-            Keep it concise and clear.
-            """
-        ).strip()
+    if action is AnalysisAction.DAILY_SUMMARY:
+        return f"Summarize today's movement and implications for {symbol}"
 
     if action is AnalysisAction.WHAT_CHANGED:
-        return dedent(
-            f"""
-            Explain what materially changed today for {symbol} that matters to an investor:
-            - Price and volume behavior.
-            - Any major news, macro or sector events you can infer.
-            - How today's move fits the recent trend.
-            - Whether today's info suggests holding, trimming, or adding, and why.
-            """
-        ).strip()
+        return f"What changed today for {symbol} and what to do?"
 
-    return user_prompt or f"Give a clear, actionable plan for {symbol}."
+    if action is AnalysisAction.TAX_ANGLE:
+        return f"Explain tax considerations for {symbol}"
+
+    return user_prompt or f"Analyze {symbol}"
+
+
+# =========================
+# BUILDERS
+# =========================
 
 
 def build_symbol_prompt(ctx: SymbolContext) -> str:
-    """
-    Build a compact user prompt for symbol-level analysis.
-    Use this as the `user` content; pair with SYSTEM_MESSAGE as `system`.
-    """
-    now_iso = datetime.now(timezone.utc).isoformat()
-    account_summary = _build_account_summary(ctx.account)
-    positions_table = _enrich_positions_table(ctx.positions)
+    now = datetime.now(timezone.utc).isoformat()
 
-    market_block = ctx.market_snapshot or "No per-symbol market snapshot provided."
-    macro_block = ctx.market_context or "No macro benchmark data provided."
-    option_block = ctx.option_chain or "No option chain data provided."
-    action_block = _build_action_prompt(ctx.action, ctx.symbol, ctx.user_prompt)
+    return dedent(f"""
+        Today: {now}
 
-    return dedent(
-        f"""
-      Today is {now_iso}.
+        === ACCOUNT ===
+        {_build_account_summary(ctx.account)}
 
-      === ACCOUNT CONTEXT ===
-      {account_summary}
+        === POSITIONS ===
+        {_enrich_positions_table(ctx.positions)}
 
-      === POSITION DATA (FOCUS: {ctx.symbol}) ===
-      {positions_table}
+        === FOCUS SYMBOL ===
+        {ctx.symbol}
 
-      === MARKET SNAPSHOT (SYMBOL-LEVEL, IF ANY) ===
-      {market_block}
+        === MARKET ===
+        {ctx.market_snapshot or "N/A"}
 
-      === MACRO CONTEXT (IF ANY) ===
-      {macro_block}
+        === MACRO ===
+        {ctx.market_context or "N/A"}
 
-      === OPTION CHAIN (AROUND ATM, SHORT DTE, IF ANY) ===
-      {option_block}
+        === OPTIONS ===
+        {ctx.option_chain or "N/A"}
 
-      === USER TASK ===
-      {action_block}
-      """
-    ).strip()
+        === TASK ===
+        {_build_action_prompt(ctx.action, ctx.symbol, ctx.user_prompt)}
+        """).strip()
 
 
 def build_portfolio_prompt(ctx: PortfolioContext) -> str:
-    """
-    Build a compact user prompt for portfolio-level analysis.
-    Use this as the `user` content; pair with SYSTEM_MESSAGE as `system`.
-    """
-    now_iso = datetime.now(timezone.utc).isoformat()
-    account_summary = _build_account_summary(ctx.account)
-    positions_table = _enrich_positions_table(ctx.positions, max_symbols=20)
+    now = datetime.now(timezone.utc).isoformat()
 
-    if ctx.user_prompt:
-        task_block = dedent(
-            f"""
-            The user provided this portfolio-level prompt:
+    return dedent(f"""
+        Today: {now}
 
-            [USER_PROMPT]
-            {ctx.user_prompt}
-            [/USER_PROMPT]
+        === ACCOUNT ===
+        {_build_account_summary(ctx.account)}
 
-            Use the account and portfolio data above to answer clearly and concretely.
-            If their request conflicts with prudent risk management, explain why and propose a safer variant.
-            """
-        ).strip()
-    else:
-        task_block = dedent(
-            """
-            Analyze the overall portfolio and provide:
-            - A concise view of diversification and concentration (by names / sectors / themes).
-            - A plain-English description of overall risk level (conservative / moderate / aggressive).
-            - The main risk drivers (a few key names, sectors, or factors).
-            - 3–6 specific, concrete adjustments (trim/add percentages or dollar amounts) to improve balance
-              while keeping roughly the same overall risk tolerance.
-            - A short summary of main strengths, weaknesses, and most important changes to consider first.
-            """
-        ).strip()
+        === PORTFOLIO ===
+        {_enrich_positions_table(ctx.positions, max_symbols=20)}
 
-    return dedent(
-        f"""
-        Today is {now_iso}.
-
-        === ACCOUNT CONTEXT ===
-        {account_summary}
-
-        === PORTFOLIO POSITIONS (TOP HOLDINGS) ===
-        {positions_table}
-
-        === USER TASK ===
-        {task_block}
-        """
-    ).strip()
+        === TASK ===
+        {ctx.user_prompt or "Analyze portfolio and give concrete improvements"}
+        """).strip()
