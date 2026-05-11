@@ -47,6 +47,7 @@ from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.schwab_auth_service import SchwabAuthService
 from app.services.user_service import UserService
 from app.services.ticker_service import TickerService
+from app.services.transaction_service import TransactionService
 
 
 def get_redis_client() -> redis.Redis:
@@ -170,6 +171,9 @@ async def lifespan(app: FastAPI):
     )
     company_profile_service = CompanyProfileService(finnhub_builder=finnhub_builder)
     ticker_service = TickerService(ticker_symbol_builder=ticker_symbol_builder)
+    transaction_service = TransactionService(
+        schwab_trader_builder=schwab_trader_builder
+    )
 
     app.state.http_session = session
     app.state.redis_client = redis_client
@@ -185,6 +189,7 @@ async def lifespan(app: FastAPI):
     app.state.chat_service = chat_service
     app.state.company_profile_service = company_profile_service
     app.state.ticker_service = ticker_service
+    app.state.transaction_service = transaction_service
 
     try:
         yield

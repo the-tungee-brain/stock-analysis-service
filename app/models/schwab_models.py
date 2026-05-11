@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 
 class Instrument(BaseModel):
-    assetType: Literal["EQUITY", "OPTION"]
+    assetType: str
     cusip: str
     symbol: str
     description: Optional[str] = None

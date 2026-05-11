@@ -1,5 +1,5 @@
 from typing import List, Optional, Literal
-from pydantic import BaseModel, RootModel
+from pydantic import BaseModel
 from datetime import datetime
 
 OrderStatus = Literal[
@@ -116,7 +116,3 @@ class SchwabOrder(BaseModel):
     childOrderStrategies: Optional[List[str]]
 
     statusDescription: Optional[str]
-
-
-class SchwabOrdersResponse(RootModel[List[SchwabOrder]]):
-    pass

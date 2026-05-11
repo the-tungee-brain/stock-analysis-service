@@ -10,6 +10,7 @@ from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.services.chat_service import ChatService
 from app.services.company_profile_service import CompanyProfileService
 from app.services.ticker_service import TickerService
+from app.services.transaction_service import TransactionService
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -54,3 +55,7 @@ def get_company_profile_service(request: Request) -> CompanyProfileService:
 
 def get_ticker_service(request: Request) -> TickerService:
     return request.app.state.ticker_service
+
+
+def get_transaction_service(request: Request) -> TransactionService:
+    return request.app.state.transaction_service
