@@ -54,6 +54,9 @@ class LLMService:
                 summary="No recent news found for this symbol.",
                 insights=[],
                 risks=[],
+                dominant_driver="No recent news.",
+                market_impact_horizon="medium_term",
+                actionability_score=1,
                 items=[],
             )
         enriched_news = await self.news_analytics_builder.get_enriched_news_items(

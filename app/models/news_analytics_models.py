@@ -6,6 +6,7 @@ Sentiment = Literal["bullish", "bearish", "neutral"]
 OverallSentiment = Literal[
     "strongly_bullish", "bullish", "neutral", "bearish", "strongly_bearish"
 ]
+MarketImpactHorizon = Literal["immediate", "medium_term", "long_term"]
 
 
 class EnrichedNewsItem(BaseModel):
@@ -28,4 +29,7 @@ class StockNewsView(BaseModel):
     summary: str
     insights: List[str]
     risks: List[str]
+    dominant_driver: str
+    market_impact_horizon: MarketImpactHorizon
+    actionability_score: int = Field(ge=1, le=5)
     items: List[EnrichedNewsItem]

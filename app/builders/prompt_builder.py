@@ -69,6 +69,14 @@ class PromptBuilder:
             model=model, prompts=[system_msg, user_msg]
         )
         data = _json.loads(content)
+        horizon = data.get("market_impact_horizon", "medium_term")
+        if horizon not in {"immediate", "medium_term", "long_term"}:
+            horizon = "medium_term"
+        try:
+            actionability_score = int(data.get("actionability_score", 1))
+        except (TypeError, ValueError):
+            actionability_score = 1
+        actionability_score = max(1, min(5, actionability_score))
 
         return StockNewsView(
             symbol=symbol,
@@ -76,5 +84,8 @@ class PromptBuilder:
             summary=data["summary"],
             insights=data.get("insights", []),
             risks=data.get("risks", []),
+            dominant_driver=data.get("dominant_driver", "No dominant news driver identified."),
+            market_impact_horizon=horizon,
+            actionability_score=actionability_score,
             items=enriched_news,
         )
