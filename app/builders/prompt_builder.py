@@ -48,13 +48,19 @@ class PromptBuilder:
             2) summary: 3–5 sentences explaining what investors should know about current news flow for {symbol}.
             3) insights: 3–7 bullet-style, one-sentence insights (no markdown, just strings).
             4) risks: 1–5 one-sentence risks or red flags, if any.
+            5) dominant_driver: the single most important theme moving the current news flow.
+            6) market_impact_horizon: "immediate" | "medium_term" | "long_term".
+            7) actionability_score: integer from 1 to 5, where 1 is background noise and 5 is trade-relevant.
 
             Return strict JSON:
             {{
               "overall_sentiment": "...",
               "summary": "...",
               "insights": ["..."],
-              "risks": ["..."]
+              "risks": ["..."],
+              "dominant_driver": "...",
+              "market_impact_horizon": "...",
+              "actionability_score": 1
             }}
             """
         ).strip()

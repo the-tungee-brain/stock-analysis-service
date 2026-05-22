@@ -182,6 +182,7 @@ class PromptEnrichmentService:
             - sentiment: "bullish" (likely positive for the stock price), "bearish" (likely negative), or "neutral"
             - confidence: number between 0 and 1
             - summary: one concise sentence focused on what matters to investors in this stock
+            - horizon: "immediate", "medium_term", or "long_term" based on when this news is most likely to matter
             - topics: array of short tags like ["earnings","guidance","product","macro","regulation","management","competition","crypto","trading_activity","valuation","flows","buybacks"].
 
             Return ONLY a JSON array, one element per item, in the same order, each object:
@@ -190,6 +191,7 @@ class PromptEnrichmentService:
               "sentiment": "bullish" | "bearish" | "neutral",
               "confidence": number,
               "summary": string,
+              "horizon": "immediate" | "medium_term" | "long_term",
               "topics": string[]
             }}
             """
@@ -214,16 +216,18 @@ class PromptEnrichmentService:
             """
             You are helping a retail investor understand a stock in plain language.
 
-            You will receive a JSON object with fields like price, 1m/3m/1y returns, 52w range,
-            basic fundamentals, and recent news.
+            You may receive only a stock symbol, or you may receive data fields like price, 1m/3m/1y returns,
+            52w range, basic fundamentals, and recent news.
 
-            Based ONLY on that data:
+            Based ONLY on provided data:
 
             - Write a SHORT summary: 2–3 sentences in simple, non-technical language.
             - Write a LONG summary: 4–6 sentences expanding on performance, business quality,
             and key things to watch. Avoid repeating exact numbers; describe them qualitatively
             (e.g. "strong growth", "modest decline").
             - Assign an overall sentiment label: one of "Bullish", "Neutral", or "Bearish".
+            - If only a symbol is provided, keep the response generic and do not claim current price action,
+            recent returns, valuation, fundamentals, or news.
 
             Return a single JSON object with exactly this shape:
 
@@ -240,7 +244,8 @@ class PromptEnrichmentService:
         user_msg = dedent(
             f"""
             Write this generic summary for the stock symbol {symbol}.
-            Do not assume or state exact prices or returns; keep it high-level and illustrative only.
+            Do not assume or state exact prices, returns, valuation, fundamentals, or current news;
+            keep it high-level and illustrative only.
             """
         ).strip()
         return [system_msg, user_msg]
@@ -254,6 +259,7 @@ class PromptEnrichmentService:
             - Write "segments" as a list of 3–6 short plain-English strings.
             - Write "revenueNotes" as 4–6 sentences explaining which parts of the business matter most,
             what drives revenue, and what investors should pay attention to.
+            - Explain the monetization model and the key dependencies that could affect revenue or margins.
             - Keep the language easy to understand for non-experts.
             - Do not repeat exact financial figures unless essential.
             - Do not add extra keys, markdown, comments, or explanations.
