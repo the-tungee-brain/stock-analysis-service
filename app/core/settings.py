@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import os
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -34,4 +35,10 @@ def resolve_jwt_signing_key(raw: str | None) -> bytes:
     return hashlib.sha256(encoded).digest()
 
 
-JWT_SIGNING_KEY = resolve_jwt_signing_key(JWT_SECRET_KEY)
+@lru_cache(maxsize=1)
+def get_jwt_signing_key() -> bytes:
+    return resolve_jwt_signing_key(JWT_SECRET_KEY)
+
+
+def clear_jwt_signing_key_cache() -> None:
+    get_jwt_signing_key.cache_clear()

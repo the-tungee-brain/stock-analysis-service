@@ -1,7 +1,15 @@
 import jwt
+import pytest
 
 from app.auth.jwt_utils import create_access_token, verify_jwt
 from app.core import settings
+
+
+@pytest.fixture(autouse=True)
+def _reset_jwt_signing_key_cache():
+    settings.clear_jwt_signing_key_cache()
+    yield
+    settings.clear_jwt_signing_key_cache()
 
 
 def test_short_jwt_secret_is_derived_to_32_bytes(monkeypatch):
@@ -20,11 +28,7 @@ def test_long_jwt_secret_is_used_directly(monkeypatch):
 
 def test_create_and_verify_token_with_derived_key(monkeypatch):
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", "short-20-byte-key!!")
-    monkeypatch.setattr(
-        settings,
-        "JWT_SIGNING_KEY",
-        settings.resolve_jwt_signing_key("short-20-byte-key!!"),
-    )
+    monkeypatch.setattr(settings, "_JWT_KEY_DERIVATION_LOGGED", False)
 
     token = create_access_token("user-123")
     payload = verify_jwt(token)
@@ -32,16 +36,11 @@ def test_create_and_verify_token_with_derived_key(monkeypatch):
 
 
 def test_verify_rejects_tampered_token(monkeypatch):
-    monkeypatch.setattr(
-        settings,
-        "JWT_SIGNING_KEY",
-        settings.resolve_jwt_signing_key("short-20-byte-key!!"),
-    )
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", "short-20-byte-key!!")
+    monkeypatch.setattr(settings, "_JWT_KEY_DERIVATION_LOGGED", False)
+
     token = create_access_token("user-123")
     tampered = token[:-1] + ("a" if token[-1] != "a" else "b")
 
-    try:
+    with pytest.raises(jwt.InvalidTokenError):
         verify_jwt(tampered)
-        assert False, "Expected InvalidTokenError"
-    except jwt.InvalidTokenError:
-        pass
