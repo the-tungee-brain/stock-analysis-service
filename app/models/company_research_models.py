@@ -1,7 +1,6 @@
 from pydantic import BaseModel, Field, HttpUrl
 from typing import Literal
 
-
 SentimentLabel = Literal["Bullish", "Neutral", "Bearish"]
 
 
@@ -31,14 +30,6 @@ class NewsHeadline(BaseModel):
     summary: str | None = None
     source: str = ""
     datetime: str = ""
-
-
-class ResearchContext(BaseModel):
-    symbol: str
-    snapshot: ResearchSnapshot | None = None
-    performance: PerformanceSnapshot | None = None
-    news: list[NewsHeadline] = Field(default_factory=list)
-    fundamentals: list[FundamentalMetric] = Field(default_factory=list)
 
 
 class AISummary(BaseModel):
@@ -76,3 +67,11 @@ class FundamentalsBlock(BaseModel):
 
 class FundamentalsOverview(BaseModel):
     overviewNote: str
+
+
+class ResearchContext(BaseModel):
+    symbol: str
+    snapshot: ResearchSnapshot | None = None
+    performance: PerformanceSnapshot | None = None
+    news: list[NewsHeadline] = Field(default_factory=list)
+    fundamentals: list[FundamentalMetric] = Field(default_factory=list)
