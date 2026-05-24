@@ -23,8 +23,8 @@ def get_recent_orders(
     days_back: int = Query(
         default=DEFAULT_DAYS_BACK,
         ge=1,
-        le=365,
-        description="How many days of filled orders to include",
+        le=60,
+        description="How many days of filled orders to include (Schwab max 60)",
     ),
     refresh: bool = Query(
         default=False,
