@@ -18,6 +18,9 @@ class Settings:
         os.getenv("MAX_OUTPUT_TOKENS_FUNDAMENTALS", "1500")
     )
     MAX_OUTPUT_TOKENS_STREAM: int = int(os.getenv("MAX_OUTPUT_TOKENS_STREAM", "1800"))
+    MAX_OUTPUT_TOKENS_REASONING_STREAM: int = int(
+        os.getenv("MAX_OUTPUT_TOKENS_REASONING_STREAM", "4096")
+    )
 
     _ROUTE_TOKEN_LIMITS: dict[LLMRoute, int] = {}
 
