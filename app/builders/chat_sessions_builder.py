@@ -44,3 +44,6 @@ class ChatSessionsBuilder:
             offset=0,
         )
         return sessions[0] if sessions else None
+
+    def delete_session(self, session_id: UUID) -> bool:
+        return self.chat_sessions_adapter.delete_session(session_id=session_id)

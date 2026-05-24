@@ -47,3 +47,32 @@ def get_chat_session_messages(
         "sessionId": str(session_id),
         "messages": messages,
     }
+
+
+@router.delete("/chat/sessions/{session_id}")
+def delete_chat_session(
+    session_id: UUID,
+    user_id: str = Depends(get_current_user_id),
+    chat_service: ChatService = Depends(get_chat_service),
+):
+    deleted = chat_service.delete_session_for_user(
+        user_id=user_id,
+        session_id=session_id,
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+
+    return {"deleted": True, "sessionId": str(session_id)}
+
+
+@router.delete("/chat/sessions")
+def clear_chat_sessions_by_prefix(
+    user_id: str = Depends(get_current_user_id),
+    chat_service: ChatService = Depends(get_chat_service),
+    title_prefix: str = Query(..., min_length=1, max_length=255),
+):
+    deleted_count = chat_service.clear_sessions_for_title_prefix(
+        user_id=user_id,
+        title_prefix=title_prefix,
+    )
+    return {"deletedCount": deleted_count, "titlePrefix": title_prefix}

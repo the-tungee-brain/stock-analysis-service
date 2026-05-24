@@ -130,3 +130,69 @@ def test_get_session_messages_for_user_enforces_ownership():
         session_id=session.id,
     )
     assert denied is None
+
+
+class _DeletingSessionsBuilder(_FakeSessionsBuilder):
+    def __init__(self, sessions: list[ChatSession]):
+        super().__init__(sessions)
+        self.deleted_ids: list = []
+
+    def delete_session(self, session_id) -> bool:
+        self.deleted_ids.append(session_id)
+        self.sessions = [
+            session for session in self.sessions if session.id != session_id
+        ]
+        return True
+
+
+class _DeletingMessagesBuilder(_FakeMessagesBuilder):
+    def __init__(self, messages: dict[str, list[ChatMessage]]):
+        super().__init__(messages)
+        self.deleted_session_ids: list = []
+
+    def delete_messages_by_session(self, session_id) -> int:
+        key = str(session_id)
+        self.deleted_session_ids.append(session_id)
+        deleted = len(self.messages.get(key, []))
+        self.messages[key] = []
+        return deleted
+
+
+def test_delete_session_for_user_removes_messages_then_session():
+    user_id = "user-1"
+    session = _session(user_id=user_id, title="Portfolio: review")
+    sessions_builder = _DeletingSessionsBuilder([session])
+    messages_builder = _DeletingMessagesBuilder(
+        {str(session.id): [ChatMessage(id=1, session_id=session.id, role="user", content="hi")]}
+    )
+    service = ChatService(
+        chat_sessions_builder=sessions_builder,
+        chat_messages_builder=messages_builder,
+    )
+
+    assert service.delete_session_for_user(user_id=user_id, session_id=session.id) is True
+    assert messages_builder.deleted_session_ids == [session.id]
+    assert sessions_builder.deleted_ids == [session.id]
+
+
+def test_clear_sessions_for_title_prefix():
+    user_id = "user-1"
+    sessions = [
+        _session(user_id=user_id, title="Symbol:AAPL: old"),
+        _session(user_id=user_id, title="Symbol:AAPL: new"),
+        _session(user_id=user_id, title="Portfolio: review"),
+    ]
+    sessions_builder = _DeletingSessionsBuilder(sessions)
+    messages_builder = _DeletingMessagesBuilder({str(s.id): [] for s in sessions})
+    service = ChatService(
+        chat_sessions_builder=sessions_builder,
+        chat_messages_builder=messages_builder,
+    )
+
+    deleted = service.clear_sessions_for_title_prefix(
+        user_id=user_id,
+        title_prefix="Symbol:AAPL:",
+    )
+
+    assert deleted == 2
+    assert len(sessions_builder.deleted_ids) == 2

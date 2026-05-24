@@ -301,3 +301,33 @@ class ChatService:
             }
             for message in messages
         ]
+
+    def delete_session_for_user(self, user_id: str, session_id: UUID) -> bool:
+        session = self.get_session_for_user(user_id=user_id, session_id=session_id)
+        if session is None or session.id is None:
+            return False
+
+        self.chat_messages_builder.delete_messages_by_session(session.id)
+        return self.chat_sessions_builder.delete_session(session.id)
+
+    def clear_sessions_for_title_prefix(
+        self,
+        user_id: str,
+        title_prefix: str,
+    ) -> int:
+        sessions = self.chat_sessions_builder.get_sessions_by_user_id(
+            user_id=user_id,
+            limit=100,
+            offset=0,
+            title_prefix=title_prefix,
+        )
+
+        deleted = 0
+        for session in sessions:
+            if session.id is None or session.user_id != user_id:
+                continue
+            self.chat_messages_builder.delete_messages_by_session(session.id)
+            if self.chat_sessions_builder.delete_session(session.id):
+                deleted += 1
+
+        return deleted

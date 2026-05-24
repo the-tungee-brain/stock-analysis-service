@@ -1,4 +1,6 @@
 from typing import List, Optional
+from uuid import UUID
+
 from app.adapters.chat.chat_messages_adapter import ChatMessagesAdapter
 from app.models.chat_sessions_models import ChatMessage
 
@@ -29,3 +31,6 @@ class ChatMessagesBuilder:
             offset=offset,
             order=order,
         )
+
+    def delete_messages_by_session(self, session_id: UUID | str) -> int:
+        return self.chat_messages_adapter.delete_by_session(session_id=session_id)
