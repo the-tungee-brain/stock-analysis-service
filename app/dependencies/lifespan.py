@@ -49,7 +49,11 @@ from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.schwab_auth_service import SchwabAuthService
 from app.services.user_service import UserService
 from app.services.ticker_service import TickerService
-from app.services.transaction_service import TransactionService
+from app.adapters.sec.sec_edgar_adapter import SecEdgarAdapter
+from app.builders.sec_cik_builder import SecCikBuilder
+from app.builders.sec_financials_builder import SecFinancialsBuilder
+from app.builders.sec_ratios_builder import SecRatiosBuilder
+from app.services.sec_research_service import SecResearchService
 
 
 def get_redis_client() -> redis.Redis:
@@ -140,6 +144,17 @@ async def lifespan(app: FastAPI):
     )
     performance_builder = PerformanceBuilder(market_data_adapter=yfinance_adapter)
     fundamentals_builder = FundamentalsBuilder(market_data_adapter=yfinance_adapter)
+    sec_edgar_adapter = SecEdgarAdapter.from_env(session=session)
+    sec_cik_builder = SecCikBuilder(sec_edgar_adapter=sec_edgar_adapter)
+    sec_financials_builder = SecFinancialsBuilder()
+    sec_ratios_builder = SecRatiosBuilder()
+    sec_research_service = SecResearchService(
+        sec_edgar_adapter=sec_edgar_adapter,
+        sec_cik_builder=sec_cik_builder,
+        sec_financials_builder=sec_financials_builder,
+        sec_ratios_builder=sec_ratios_builder,
+    )
+    sec_cik_builder._load_ticker_map()
     ticker_symbol_builder = TickerSymbolBuilder(
         ticker_symbol_adapter=ticker_symbol_adapter
     )
@@ -198,6 +213,7 @@ async def lifespan(app: FastAPI):
     app.state.chat_service = chat_service
     app.state.company_profile_service = company_profile_service
     app.state.company_research_service = company_research_service
+    app.state.sec_research_service = sec_research_service
     app.state.ticker_service = ticker_service
     app.state.transaction_service = transaction_service
 

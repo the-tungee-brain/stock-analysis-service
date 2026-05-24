@@ -11,6 +11,7 @@ from app.services.chat_service import ChatService
 from app.services.company_profile_service import CompanyProfileService
 from app.services.company_research_service import CompanyResearchService
 from app.services.ticker_service import TickerService
+from app.services.sec_research_service import SecResearchService
 from app.services.transaction_service import TransactionService
 
 
@@ -60,6 +61,10 @@ def get_company_research_service(request: Request) -> CompanyResearchService:
 
 def get_ticker_service(request: Request) -> TickerService:
     return request.app.state.ticker_service
+
+
+def get_sec_research_service(request: Request) -> SecResearchService:
+    return request.app.state.sec_research_service
 
 
 def get_transaction_service(request: Request) -> TransactionService:

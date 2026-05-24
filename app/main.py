@@ -22,6 +22,7 @@ from app.api.get_performance_snapshot_route import (
 from app.api.get_stock_summary_route import router as get_stock_summary_route
 from app.api.get_business_details_route import router as get_business_details_route
 from app.api.get_fundamentals_route import router as get_fundamentals_route
+from app.api.sec_research_routes import router as sec_research_router
 from app.api.search_symbols_route import router as search_symbols_route
 
 API_PREFIX = "/api/v1"
@@ -74,6 +75,7 @@ protected_api.include_router(get_performance_snapshot_route)
 protected_api.include_router(get_stock_summary_route)
 protected_api.include_router(get_business_details_route)
 protected_api.include_router(get_fundamentals_route)
+protected_api.include_router(sec_research_router)
 protected_api.include_router(search_symbols_route)
 
 app.include_router(protected_api)
