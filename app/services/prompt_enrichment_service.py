@@ -414,20 +414,39 @@ class PromptEnrichmentService:
         user_prompt: str,
         *,
         include_context: bool = True,
+        holdings_block: str | None = None,
+        intelligence_block: str | None = None,
     ) -> dict[str, str]:
         if include_context:
             context_block = self._format_research_context_block(ctx)
-            content = dedent(
-                f"""
-                === RESEARCH DATA FOR {ctx.symbol} ===
-                {context_block}
-
-                === USER QUESTION ===
-                {user_prompt}
-
-                Answer using the research data above. Acknowledge any gaps instead of guessing.
-                """
-            ).strip()
+            sections = [
+                f"=== RESEARCH DATA FOR {ctx.symbol} ===",
+                context_block,
+            ]
+            if holdings_block:
+                sections.extend(
+                    [
+                        f"=== YOUR HOLDINGS IN {ctx.symbol} ===",
+                        holdings_block,
+                    ]
+                )
+            if intelligence_block:
+                sections.extend(
+                    [
+                        "=== PRECOMPUTED INTELLIGENCE ===",
+                        intelligence_block,
+                    ]
+                )
+            sections.extend(
+                [
+                    "=== USER QUESTION ===",
+                    user_prompt,
+                    "Answer using the research data above. When holdings or precomputed "
+                    "intelligence are present, tie recommendations to the user's actual "
+                    "positions and option legs. Acknowledge any gaps instead of guessing.",
+                ]
+            )
+            content = "\n\n".join(sections).strip()
             return {"role": "user", "content": content}
 
         content = dedent(

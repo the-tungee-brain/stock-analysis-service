@@ -15,6 +15,8 @@ from app.core.prompts import (
     SymbolContext,
     PortfolioContext,
     BaseAnalysisContext,
+    _build_account_summary,
+    _enrich_positions_table,
 )
 from app.models.intelligence_models import (
     PortfolioIntelligence,
@@ -556,6 +558,74 @@ class PortfolioAnalysisService:
             )
         except Exception:
             return SymbolIntelligence(symbol=symbol_upper)
+
+    @staticmethod
+    def _positions_for_symbol(
+        positions: list[Position], symbol: str
+    ) -> list[Position]:
+        symbol_upper = symbol.upper()
+        matched: list[Position] = []
+
+        for position in positions:
+            instrument = position.instrument
+            if instrument.assetType == "OPTION":
+                underlying = (
+                    instrument.underlyingSymbol or instrument.symbol or ""
+                ).upper()
+                if underlying == symbol_upper:
+                    matched.append(position)
+            elif instrument.symbol.upper() == symbol_upper:
+                matched.append(position)
+
+        return matched
+
+    def build_research_chat_holdings_context(
+        self,
+        *,
+        user_id: str,
+        symbol: str,
+        account: SchwabAccounts | None,
+        positions: list[Position],
+        access_token: str | None,
+    ) -> tuple[str | None, str | None]:
+        symbol_upper = symbol.upper()
+        symbol_positions = self._positions_for_symbol(positions, symbol_upper)
+        if not symbol_positions or account is None:
+            return None, None
+
+        sections: list[str] = []
+        account_summary = _build_account_summary(account)
+        if account_summary:
+            sections.append(f"## Account snapshot\n{account_summary}")
+
+        positions_table = _enrich_positions_table(
+            symbol_positions,
+            account=account,
+        )
+        sections.append(
+            f"## Your {symbol_upper} positions\n{positions_table}"
+        )
+        holdings_block = "\n\n".join(sections)
+
+        intelligence_block = None
+        try:
+            intelligence = self.build_symbol_intelligence(
+                user_id=user_id,
+                symbol=symbol_upper,
+                account=account,
+                positions=symbol_positions,
+                access_token=access_token,
+                include_options=True,
+            )
+            intelligence_block = (
+                self.prompt_enrichment_service.format_intelligence_block(
+                    intelligence
+                )
+            )
+        except Exception:
+            intelligence_block = None
+
+        return holdings_block, intelligence_block
 
     def _build_portfolio_intelligence_block(
         self,

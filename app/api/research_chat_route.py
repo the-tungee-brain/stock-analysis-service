@@ -12,11 +12,17 @@ from app.dependencies.service_dependencies import (
     get_chat_service,
     get_company_research_service,
     get_llm_service,
+    get_portfolio_analysis_service,
+    get_portfolio_service,
     get_prompt_enrichment_service,
+    get_schwab_auth_service,
 )
 from app.services.chat_service import ChatService
 from app.services.company_research_service import CompanyResearchService
 from app.services.llm_service import LLMService
+from app.services.portfolio_analysis_service import PortfolioAnalysisService
+from app.services.portfolio_service import PortfolioService
+from app.services.schwab_auth_service import SchwabAuthService, SchwabReauthRequired
 from app.services.prompt_enrichment_service import (
     RESEARCH_CHAT_SYSTEM_MESSAGE,
     PromptEnrichmentService,
@@ -43,6 +49,11 @@ async def research_chat(
     ),
     chat_service: ChatService = Depends(get_chat_service),
     llm_service: LLMService = Depends(get_llm_service),
+    portfolio_service: PortfolioService = Depends(get_portfolio_service),
+    schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
+    portfolio_analysis_service: PortfolioAnalysisService = Depends(
+        get_portfolio_analysis_service
+    ),
 ):
     symbol = request.symbol.strip().upper()
     prompt = request.prompt.strip()
@@ -57,6 +68,32 @@ async def research_chat(
         symbol=symbol,
     )
 
+    holdings_block = None
+    intelligence_block = None
+    try:
+        schwab_token = schwab_auth_service.get_valid_token_by_user_id(
+            user_id=user_id
+        )
+        account_map = portfolio_service.get_enriched_account(
+            access_token=schwab_token.access_token
+        )
+        account = account_map["account"]
+        positions = account.securitiesAccount.positions
+        holdings_block, intelligence_block = await asyncio.to_thread(
+            portfolio_analysis_service.build_research_chat_holdings_context,
+            user_id=user_id,
+            symbol=symbol,
+            account=account,
+            positions=positions,
+            access_token=schwab_token.access_token,
+        )
+    except SchwabReauthRequired:
+        holdings_block = None
+        intelligence_block = None
+    except Exception:
+        holdings_block = None
+        intelligence_block = None
+
     session_id, is_first_chat = chat_service.get_research_chat_session_id(
         user_id=user_id,
         symbol=symbol,
@@ -69,6 +106,8 @@ async def research_chat(
         ctx=ctx,
         user_prompt=prompt,
         include_context=is_first_chat,
+        holdings_block=holdings_block,
+        intelligence_block=intelligence_block,
     )
 
     if session_id:
