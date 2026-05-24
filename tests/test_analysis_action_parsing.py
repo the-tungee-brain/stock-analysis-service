@@ -60,6 +60,24 @@ def test_request_model_normalizes_action_field():
     assert request.action is AnalysisAction.TAX_ANGLE
 
 
+def test_request_model_accepts_user_display_message():
+    request = AnalyzePositionsBySymbolRequest.model_validate(
+        {
+            "account": _make_account().model_dump(),
+            "positions": [_make_position().model_dump()],
+            "action": "assignment risk",
+            "user_display_message": (
+                "Review assignment and call-away risk for my portfolio "
+                "over the next two weeks."
+            ),
+        }
+    )
+
+    assert request.action is AnalysisAction.ASSIGNMENT_RISK
+    assert request.user_display_message is not None
+    assert request.prompt is None
+
+
 def test_request_model_rejects_invalid_action():
     with pytest.raises(ValidationError):
         AnalyzePositionsBySymbolRequest.model_validate(

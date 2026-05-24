@@ -34,6 +34,7 @@ class AnalyzePositionsBySymbolRequest(BaseModel):
     session_id: Optional[str] = None
     symbol: Optional[str] = None
     prompt: Optional[str] = None
+    user_display_message: Optional[str] = None
     action: AnalysisAction = AnalysisAction.FREE_FORM
     model: Optional[ResponsesModel] = "gpt-4.1-mini"
 
@@ -63,7 +64,7 @@ async def analyze_positions_by_symbol(
     positions = PortfolioService._annotate_option_strategies(request.positions)
 
     session_prompt = chat_service.user_message_for_storage(
-        prompt=request.prompt,
+        prompt=request.user_display_message or request.prompt,
         action=request.action,
     )
     session_id, is_first_chat = chat_service.get_portfolio_analysis_session_id(
