@@ -165,9 +165,31 @@ class PromptEnrichmentService:
 
         system_msg = dedent(
             """
-            You are a professional equity research assistant.
-            Analyze news about a single stock and produce structured JSON with
-            trader-style sentiment labels: "bullish", "bearish", or "neutral".
+            # Role
+            You are a professional equity research assistant analyzing news for retail investors.
+
+            # Your job
+            Read each news item about a single stock and produce structured JSON with trader-style
+            sentiment labels.
+
+            # Sentiment definitions
+            - "bullish" — the news is likely to push the stock price UP (positive earnings, upgrades,
+              product wins, favorable regulation, etc.).
+            - "bearish" — the news is likely to push the stock price DOWN (misses, downgrades, lawsuits,
+              product failures, unfavorable regulation, etc.).
+            - "neutral" — the news is informational, mixed, or unlikely to move the price meaningfully.
+
+            # Confidence calibration
+            - 0.9–1.0: clear, direct impact on the stock (e.g., earnings beat with raised guidance).
+            - 0.6–0.8: likely impact but some ambiguity (e.g., analyst opinion, sector-wide trend).
+            - 0.3–0.5: indirect or speculative connection to the stock.
+            - Below 0.3: very weak link; use sparingly.
+
+            # Rules
+            - Analyze each item independently based on its headline and summary.
+            - Do not invent details not present in the headline or summary.
+            - Keep summaries to one concise sentence focused on what matters to investors.
+            - Return ONLY valid JSON — no markdown, no commentary, no extra keys.
             """
         ).strip()
 
@@ -175,24 +197,31 @@ class PromptEnrichmentService:
             f"""
             Stock ticker: {symbol}
 
-            News items:
+            News items (in order):
             {news_block}
 
-            For EACH item, determine:
-            - sentiment: "bullish" (likely positive for the stock price), "bearish" (likely negative), or "neutral"
-            - confidence: number between 0 and 1
-            - summary: one concise sentence focused on what matters to investors in this stock
-            - horizon: "immediate", "medium_term", or "long_term" based on when this news is most likely to matter
-            - topics: array of short tags like ["earnings","guidance","product","macro","regulation","management","competition","crypto","trading_activity","valuation","flows","buybacks"].
+            # Your task
+            For EACH news item above, return one JSON object with these fields:
 
-            Return ONLY a JSON array, one element per item, in the same order, each object:
+            - **id** (number) — must match the item's id exactly.
+            - **sentiment** — "bullish" | "bearish" | "neutral"
+            - **confidence** (number) — 0.0 to 1.0, using the calibration guide in your instructions.
+            - **summary** (string) — one sentence: what matters to investors in this specific item.
+            - **horizon** — "immediate" | "medium_term" | "long_term"
+              When this news is most likely to affect the stock price.
+            - **topics** (string array) — short tags from this list (use others only if needed):
+              ["earnings", "guidance", "product", "macro", "regulation", "management",
+               "competition", "crypto", "trading_activity", "valuation", "flows", "buybacks"]
+
+            Return ONLY a JSON array with one object per item, in the same order as the input.
+            Example shape for each element:
             {{
-              "id": number,
-              "sentiment": "bullish" | "bearish" | "neutral",
-              "confidence": number,
-              "summary": string,
-              "horizon": "immediate" | "medium_term" | "long_term",
-              "topics": string[]
+              "id": 123,
+              "sentiment": "bullish",
+              "confidence": 0.85,
+              "summary": "Company raised full-year guidance after a strong quarter.",
+              "horizon": "immediate",
+              "topics": ["earnings", "guidance"]
             }}
             """
         ).strip()
@@ -214,38 +243,42 @@ class PromptEnrichmentService:
     def build_stock_summary_prompt(self, symbol: str) -> List[str]:
         system_msg = dedent(
             """
-            You are helping a retail investor understand a stock in plain language.
+            # Role
+            You help a retail investor understand a stock in plain, non-technical language.
 
-            You may receive only a stock symbol, or you may receive data fields like price, 1m/3m/1y returns,
-            52w range, basic fundamentals, and recent news.
+            # Input you may receive
+            - Just a stock symbol, OR
+            - A symbol plus data fields such as price, 1m/3m/1y returns, 52-week range,
+              basic fundamentals, and recent news headlines.
 
-            Based ONLY on provided data:
+            # Rules
+            - Base your answer ONLY on the data provided. Do not invent numbers or events.
+            - If only a symbol is provided (no price, returns, or news data), keep the response
+              generic and high-level. Do NOT claim current price action, recent returns, valuation,
+              fundamentals, or news you were not given.
+            - Write for a smart reader who is not a professional investor.
+            - Avoid repeating the same numbers in both summaries; describe performance qualitatively
+              in the long summary (e.g., "strong growth", "modest decline").
 
-            - Write a SHORT summary: 2–3 sentences in simple, non-technical language.
-            - Write a LONG summary: 4–6 sentences expanding on performance, business quality,
-            and key things to watch. Avoid repeating exact numbers; describe them qualitatively
-            (e.g. "strong growth", "modest decline").
-            - Assign an overall sentiment label: one of "Bullish", "Neutral", or "Bearish".
-            - If only a symbol is provided, keep the response generic and do not claim current price action,
-            recent returns, valuation, fundamentals, or news.
-
-            Return a single JSON object with exactly this shape:
+            # Required output
+            Return a single JSON object with exactly these keys:
 
             {
-            "short": "string, 2-3 sentences",
-            "long": "string, 4-6 sentences",
-            "sentiment": "Bullish | Neutral | Bearish"
+              "short": "2–3 sentences. Quick overview a busy investor can read in 10 seconds.",
+              "long": "4–6 sentences. Deeper context on performance, business quality, and key things to watch.",
+              "sentiment": "Bullish | Neutral | Bearish"
             }
 
-            Do not include any extra keys, comments, or explanations.
+            Do not include any extra keys, comments, markdown, or explanations outside the JSON.
             """
         ).strip()
 
         user_msg = dedent(
             f"""
-            Write this generic summary for the stock symbol {symbol}.
-            Do not assume or state exact prices, returns, valuation, fundamentals, or current news;
-            keep it high-level and illustrative only.
+            Write a summary for the stock symbol {symbol}.
+
+            No price, return, valuation, fundamental, or news data has been provided — keep the
+            response generic and high-level. Do not assume or state exact figures or current events.
             """
         ).strip()
         return [system_msg, user_msg]
@@ -253,30 +286,36 @@ class PromptEnrichmentService:
     def build_business_details_prompt(self, symbol: str) -> List[str]:
         system_msg = dedent(
             """
-            You are helping a retail investor understand a stock's business in plain language.
+            # Role
+            You help a retail investor understand what a company does and how it makes money,
+            written in plain, non-technical language.
 
-            - Write "whatTheyDo" as 4–6 short sentences in simple language.
-            - Write "segments" as a list of 3–6 short plain-English strings.
-            - Write "revenueNotes" as 4–6 sentences explaining which parts of the business matter most,
-            what drives revenue, and what investors should pay attention to.
-            - Explain the monetization model and the key dependencies that could affect revenue or margins.
-            - Keep the language easy to understand for non-experts.
-            - Do not repeat exact financial figures unless essential.
-            - Do not add extra keys, markdown, comments, or explanations.
+            # Rules
+            - Write for a smart reader who is not a finance professional.
+            - Use simple sentences. Explain industry terms briefly when you use them.
+            - Do not repeat exact financial figures unless essential for understanding.
+            - Do not invent products, segments, or revenue sources you are not confident about.
+              If uncertain, describe the company's general business model at a high level.
+            - Do not add extra keys, markdown, comments, or explanations outside the JSON.
 
-            Return a single JSON object with exactly this shape:
+            # Required output
+            Return a single JSON object with exactly these keys:
 
             {
-            "whatTheyDo": "string",
-            "segments": ["string"],
-            "revenueNotes": "string"
+              "whatTheyDo": "4–6 short sentences explaining what the company does and who its customers are.",
+              "segments": ["3–6 short plain-English strings, one per business line or revenue source."],
+              "revenueNotes": "4–6 sentences on which parts of the business matter most, what drives revenue,
+                               key dependencies that could affect revenue or margins, and what investors should watch."
             }
             """
         ).strip()
 
         user_msg = dedent(
             f"""
-            Build the business details payload for stock symbol {symbol}.
+            Build the business details for stock symbol {symbol}.
+
+            Explain what the company does, its main business segments, and how it generates revenue.
+            Write for someone who has heard of the company but does not know the details of its business model.
             """
         ).strip()
 
