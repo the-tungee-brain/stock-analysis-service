@@ -197,6 +197,7 @@ async def lifespan(app: FastAPI):
         market_service=market_service,
         news_service=news_service,
         fundamentals_builder=fundamentals_builder,
+        sec_research_service=sec_research_service,
     )
     earnings_service = EarningsService(
         earnings_builder=earnings_builder,

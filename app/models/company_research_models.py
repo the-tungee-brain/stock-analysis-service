@@ -60,6 +60,12 @@ class FundamentalMetric(BaseModel):
     note: str | None = None
 
 
+class SecFilingHeadline(BaseModel):
+    form: str
+    filing_date: str
+    report_date: str
+
+
 class FundamentalsBlock(BaseModel):
     overviewNote: str
     metrics: list[FundamentalMetric]
@@ -75,3 +81,6 @@ class ResearchContext(BaseModel):
     performance: PerformanceSnapshot | None = None
     news: list[NewsHeadline] = Field(default_factory=list)
     fundamentals: list[FundamentalMetric] = Field(default_factory=list)
+    sec_fundamentals: list[FundamentalMetric] = Field(default_factory=list)
+    sec_recent_filings: list[SecFilingHeadline] = Field(default_factory=list)
+    sec_company_info: str | None = None

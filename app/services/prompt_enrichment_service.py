@@ -27,13 +27,25 @@ RESEARCH_SYSTEM_PREAMBLE = dedent("""
     - This is educational research, not personalized financial advice. Do not tell the user to buy or sell.
 
     # Data integrity
-    - Treat the provided market data, performance returns, and news headlines as ground truth.
+    - Treat the provided market data, performance returns, news headlines, and SEC filed financials
+      as ground truth.
+    - SEC filed figures come from official EDGAR filings and are authoritative for historical
+      revenue, income, balance sheet, and cash flow. Market-data estimates (P/E, forward P/E, beta)
+      may differ slightly from SEC figures — prefer SEC data when both are available for the same metric.
     - Do not claim current events or numbers that were not supplied.
     - If news headlines are empty, do not fabricate recent headlines.
     """).strip()
 
 
 class PromptEnrichmentService:
+    @staticmethod
+    def _format_metric_lines(metrics: list[FundamentalMetric]) -> str:
+        return "\n".join(
+            f"- {metric.label}: {metric.value}"
+            + (f" ({metric.note})" if metric.note else "")
+            for metric in metrics
+        )
+
     def _format_research_context_block(self, ctx: ResearchContext) -> str:
         sections: list[str] = [f"Symbol: {ctx.symbol}"]
 
@@ -82,16 +94,31 @@ class PromptEnrichmentService:
         else:
             sections.append("## Recent news headlines\nNo recent headlines available.")
 
+        if ctx.sec_company_info:
+            sections.append(f"## SEC company profile\n{ctx.sec_company_info}")
+
+        if ctx.sec_fundamentals:
+            sections.append(
+                "## SEC filed financials (latest annual, from EDGAR)\n"
+                + self._format_metric_lines(ctx.sec_fundamentals)
+            )
+
         if ctx.fundamentals:
-            metric_lines = [
-                f"- {m.label}: {m.value}" + (f" ({m.note})" if m.note else "")
-                for m in ctx.fundamentals
+            sections.append(
+                "## Market data fundamentals (estimates)\n"
+                + self._format_metric_lines(ctx.fundamentals)
+            )
+        elif not ctx.sec_fundamentals:
+            sections.append("## Key fundamentals\nNo fundamental metrics available.")
+
+        if ctx.sec_recent_filings:
+            filing_lines = [
+                f"- {filing.form} filed {filing.filing_date} (period end {filing.report_date})"
+                for filing in ctx.sec_recent_filings
             ]
             sections.append(
-                "## Key fundamentals\n" + "\n".join(metric_lines)
+                "## Recent SEC filings\n" + "\n".join(filing_lines)
             )
-        else:
-            sections.append("## Key fundamentals\nNo fundamental metrics available.")
 
         return "\n\n".join(sections)
 
@@ -336,7 +363,9 @@ class PromptEnrichmentService:
             - **valuationContext**: 3–5 sentences on how the stock is typically valued (P/E, growth
               premium, etc.), whether it looks expensive or cheap relative to its growth and peers,
               and what assumptions the market seems to be pricing in.
-              {"Use the provided price, returns, and market cap data." if has_market_data else "No live market data was provided — discuss valuation conceptually without citing specific multiples or prices."}
+              Prefer SEC filed revenue, margins, and growth rates when provided; use market cap and
+              price data for valuation framing.
+              {"Use the provided price, returns, market cap, and SEC financial data." if has_market_data or ctx.sec_fundamentals else "No live market data was provided — discuss valuation conceptually without citing specific multiples or prices."}
             - **sentiment**: "Bullish" | "Neutral" | "Bearish" — your overall assessment weighing
               strengths vs. risks and recent performance.
 
@@ -389,6 +418,7 @@ class PromptEnrichmentService:
             - **revenueNotes**: 6–10 sentences. Which segments drive the most revenue and profit,
               how revenue is recognized (subscriptions, transactions, licensing, etc.),
               seasonality or cyclicality, and key dependencies (suppliers, platforms, regulation).
+              When SEC filed revenue or growth rates are provided, anchor revenue discussion to those figures.
             - **customersAndMarkets**: 4–6 sentences. Who buys the product (consumers, enterprises,
               governments), geographic mix, and whether the customer base is concentrated or diversified.
             - **competitiveLandscape**: 4–6 sentences. Main competitors, market share dynamics,
@@ -455,6 +485,9 @@ class PromptEnrichmentService:
             - 8–12 sentences in plain English.
             - Explain whether the company looks cheap, fair, or expensive relative to its growth
               and quality, using the provided metrics (P/E, margins, growth rates, etc.).
+            - When SEC filed financials are provided, treat them as the authoritative source for
+              revenue, income, margins, balance sheet strength, and cash flow. Use market-data
+              estimates for valuation multiples (P/E, beta) that SEC filings do not provide.
             - Highlight the 2–3 most important fundamental strengths visible in the data.
             - Highlight the 2–3 most important fundamental concerns or red flags.
             - Compare margins, growth, and leverage to what you'd generally expect for this
