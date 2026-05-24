@@ -24,6 +24,11 @@ class RecentOrderEntry(BaseModel):
     )
     asset_type: Optional[str] = Field(default=None, serialization_alias="assetType")
     description: Optional[str] = None
+    premium_per_contract: Optional[float] = Field(
+        default=None, serialization_alias="premiumPerContract"
+    )
+    total_premium: Optional[float] = Field(default=None, serialization_alias="totalPremium")
+    total_cash: Optional[float] = Field(default=None, serialization_alias="totalCash")
 
     model_config = {"populate_by_name": True}
 

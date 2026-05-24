@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
+from app.broker.option_utils import SHARES_PER_OPTION_CONTRACT
 from app.models.schwab_order_models import OrderLeg, SchwabOrder
 
 _OCC_UNDERLYING_RE = re.compile(r"^([A-Z]{1,6})")
@@ -94,3 +95,83 @@ def is_order_within_days(order: SchwabOrder, *, within_days: int) -> bool:
     if fill_time.tzinfo is None:
         fill_time = fill_time.replace(tzinfo=timezone.utc)
     return fill_time >= cutoff
+
+
+def is_equity_leg(leg: Optional[OrderLeg]) -> bool:
+    if leg is None:
+        return False
+    if leg.orderLegType and leg.orderLegType.upper() == "EQUITY":
+        return True
+    instrument = leg.instrument
+    if instrument is None:
+        return False
+    if instrument.assetType and instrument.assetType.upper() == "EQUITY":
+        return True
+    if instrument.type and instrument.type.upper() == "EQUITY":
+        return True
+    return False
+
+
+def is_option_leg(leg: Optional[OrderLeg]) -> bool:
+    if leg is None or is_equity_leg(leg):
+        return False
+    if leg.orderLegType and leg.orderLegType.upper() == "OPTION":
+        return True
+    instrument = leg.instrument
+    if instrument is None:
+        return False
+    if instrument.assetType and instrument.assetType.upper() == "OPTION":
+        return True
+    return False
+
+
+def option_premium_per_contract(fill_price_per_share: float) -> float:
+    return fill_price_per_share * SHARES_PER_OPTION_CONTRACT
+
+
+def option_total_premium(fill_price_per_share: float, contracts: float) -> float:
+    return option_premium_per_contract(fill_price_per_share) * abs(contracts)
+
+
+def order_asset_type(leg: Optional[OrderLeg]) -> Optional[str]:
+    if leg is None or leg.instrument is None:
+        return None
+    instrument = leg.instrument
+    if instrument.assetType:
+        return instrument.assetType.upper()
+    if is_option_leg(leg):
+        return "OPTION"
+    if instrument.type and instrument.type.upper() == "EQUITY":
+        return "EQUITY"
+    return instrument.type
+
+
+def order_premium_fields(
+    leg: Optional[OrderLeg],
+    *,
+    fill_price_per_share: Optional[float],
+    quantity: Optional[float],
+) -> tuple[Optional[float], Optional[float]]:
+    if not is_option_leg(leg) or fill_price_per_share is None:
+        return None, None
+    per_contract = option_premium_per_contract(fill_price_per_share)
+    if quantity is None:
+        return per_contract, None
+    return per_contract, option_total_premium(fill_price_per_share, quantity)
+
+
+def order_total_cash(
+    leg: Optional[OrderLeg],
+    *,
+    fill_price_per_share: Optional[float],
+    quantity: Optional[float],
+) -> Optional[float]:
+    """Total cash for the fill: options use premium math; equity uses fill × shares."""
+    if fill_price_per_share is None or quantity is None:
+        return None
+    if is_option_leg(leg):
+        return option_total_premium(fill_price_per_share, quantity)
+    if is_equity_leg(leg):
+        return fill_price_per_share * abs(quantity)
+    return None
+

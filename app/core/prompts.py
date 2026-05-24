@@ -135,6 +135,14 @@ class SymbolContext(BaseAnalysisContext):
     recent_transactions: Optional[str] = None
 
 
+OPTION_PREMIUM_GUIDANCE = (
+    "For EQUITY rows in RECENT FILLED ORDERS: fill price is per share, Qty is share count, "
+    "and total cash = fill × shares (never multiply by 100). "
+    "For OPTION rows only: fill price is a per-share quote; premium per contract = fill × 100; "
+    "total cash = premium/contract × contracts (e.g. $12.20/sh on 1 contract = $1,220)."
+)
+
+
 def should_use_natural_response(
     user_prompt: Optional[str],
     action: AnalysisAction = AnalysisAction.FREE_FORM,
@@ -826,6 +834,7 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
       in your analysis rather than guessing. When recommending options trades, always use retail
       language: "sell covered call", "sell cash-secured put", "buy to close", "roll the option" —
       never "short call", "short put", or "long call/put".
+      {" " + OPTION_PREMIUM_GUIDANCE if transactions_block is not None else ""}
       """).strip()
 
 

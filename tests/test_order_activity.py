@@ -40,6 +40,7 @@ def _make_option_order(*, underlying: str = "NVDA") -> SchwabOrder:
                     instrumentId=1,
                     netChange=0.0,
                     type="OPTION",
+                    assetType="OPTION",
                 ),
             )
         ],
@@ -126,6 +127,18 @@ def test_suggest_analysis_actions_ignores_stale_trades():
     assert suggestions == []
 
 
+def test_to_recent_order_entry_equity_total_cash_without_multiplier():
+    service = TransactionService(schwab_trader_builder=None)  # type: ignore[arg-type]
+    entry = service.to_recent_order_entry(
+        _make_filled_order(instruction="BUY", quantity=10, price=120.0)
+    )
+
+    assert entry.asset_type == "EQUITY"
+    assert entry.premium_per_contract is None
+    assert entry.total_premium is None
+    assert entry.total_cash == 1200.0
+
+
 def test_to_recent_order_entry_uses_underlying_for_options():
     service = TransactionService(schwab_trader_builder=None)  # type: ignore[arg-type]
     entry = service.to_recent_order_entry(_make_option_order(underlying="NVDA"))
@@ -133,6 +146,41 @@ def test_to_recent_order_entry_uses_underlying_for_options():
     assert entry.symbol == "NVDA"
     assert entry.side == "SELL_TO_OPEN"
     assert entry.average_fill_price == 2.5
+    assert entry.premium_per_contract == 250.0
+    assert entry.total_premium == 250.0
+    assert entry.asset_type == "OPTION"
+
+
+def test_build_recent_transactions_markdown_equity_does_not_use_option_multiplier():
+    from app.services.prompt_enrichment_service import PromptEnrichmentService
+
+    orders = [
+        _make_filled_order(instruction="BUY", quantity=10, price=120.0),
+    ]
+    markdown = PromptEnrichmentService().build_recent_transactions_markdown(
+        orders=orders,
+        symbol="NVDA",
+    )
+
+    assert "EQUITY rows" in markdown
+    assert "10 sh" in markdown
+    assert "$1,200.00" in markdown
+    assert "Premium/contract (options only)" in markdown
+    assert "| — |" in markdown or "| — | $1,200.00 |" in markdown.replace(" ", "")
+
+
+def test_build_recent_transactions_markdown_includes_option_premium():
+    from app.services.prompt_enrichment_service import PromptEnrichmentService
+
+    markdown = PromptEnrichmentService().build_recent_transactions_markdown(
+        orders=[_make_option_order(underlying="NVDA")],
+        symbol="NVDA",
+    )
+
+    assert "OPTION rows only" in markdown
+    assert "$250.00" in markdown
+    assert "$2.50/sh" in markdown
+    assert "$1,220 total cash" in markdown or "$1,220" in markdown
 
 
 def test_build_recent_activity_summary():

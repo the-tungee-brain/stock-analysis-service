@@ -4,11 +4,14 @@ from typing import List, Optional
 from app.adapters.cache.recent_orders_cache import RecentOrdersCache
 from app.broker.order_utils import (
     is_order_within_days,
+    order_asset_type,
     order_average_fill_price,
     order_fill_time,
+    order_premium_fields,
     order_primary_leg,
     order_relates_to_symbol,
     order_symbols,
+    order_total_cash,
     order_underlying_symbol,
 )
 from app.builders.schwab_trader_builder import SchwabTraderBuilder
@@ -140,6 +143,17 @@ class TransactionService:
 
         side = (leg.instruction if leg and leg.instruction else "UNKNOWN").upper()
         qty = leg.quantity if leg and leg.quantity is not None else order.filledQuantity
+        avg_fill = order_average_fill_price(order)
+        premium_per_contract, total_premium = order_premium_fields(
+            leg,
+            fill_price_per_share=avg_fill,
+            quantity=qty,
+        )
+        total_cash = order_total_cash(
+            leg,
+            fill_price_per_share=avg_fill,
+            quantity=qty,
+        )
 
         return RecentOrderEntry(
             order_id=getattr(order, "orderId", None),
@@ -147,12 +161,15 @@ class TransactionService:
             fill_time=order_fill_time(order),
             side=side,
             quantity=qty,
-            average_fill_price=order_average_fill_price(order),
+            average_fill_price=avg_fill,
             order_type=order.orderType,
             position_effect=leg.positionEffect if leg else None,
             tax_lot_method=order.taxLotMethod,
-            asset_type=instrument.type if instrument else None,
+            asset_type=order_asset_type(leg),
             description=instrument.description if instrument else None,
+            premium_per_contract=premium_per_contract,
+            total_premium=total_premium,
+            total_cash=total_cash,
         )
 
     @staticmethod

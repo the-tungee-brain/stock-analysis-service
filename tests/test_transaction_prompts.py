@@ -101,19 +101,19 @@ def test_build_recent_transactions_markdown_empty():
     assert "No filled orders for NVDA" in markdown
 
 
-def test_build_symbol_prompt_includes_transactions_for_tax_angle():
+def test_build_symbol_prompt_includes_option_premium_guidance_for_tax_angle():
     ctx = SymbolContext(
         symbol="NVDA",
         account=_make_account(),
         positions=[_make_position(symbol="NVDA")],
-        recent_transactions="| Fill date | Side | Qty | Avg fill | Order type | Open/Close | Tax lot |",
+        recent_transactions="option premium table",
         action=AnalysisAction.TAX_ANGLE,
     )
 
     prompt = build_symbol_prompt(ctx=ctx)
 
     assert "RECENT FILLED ORDERS" in prompt
-    assert "Fill date" in prompt
+    assert "never multiply by 100" in prompt.lower()
 
 
 def test_build_symbol_prompt_includes_transactions_for_free_form_when_recent():

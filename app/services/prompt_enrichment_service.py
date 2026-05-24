@@ -1,6 +1,14 @@
 from app.models.schwab_market_models import PromptQuoteSnapshot
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
-from app.broker.order_utils import order_average_fill_price, order_fill_time, order_primary_leg
+from app.broker.order_utils import (
+    is_equity_leg,
+    is_option_leg,
+    option_premium_per_contract,
+    order_average_fill_price,
+    order_fill_time,
+    order_primary_leg,
+    order_total_cash,
+)
 from app.models.schwab_order_models import SchwabOrder
 from datetime import datetime
 from typing import List, Tuple, Dict, Any, Optional
@@ -357,19 +365,44 @@ class PromptEnrichmentService:
         )
 
         header = (
-            "| Fill date | Side | Qty | Avg fill | Order type | Open/Close | Tax lot |\n"
-            "|-----------|------|-----|----------|------------|------------|---------|"
+            "| Fill date | Side | Qty | Fill price | Premium/contract (options only) | Total cash | Order type | Open/Close | Tax lot |\n"
+            "|-----------|------|-----|------------|----------------------------------|------------|------------|------------|---------|"
         )
         rows: list[str] = []
+        has_option_rows = False
+        has_equity_rows = False
         for order in sorted_orders[:max_rows]:
             leg = order_primary_leg(order)
+            if is_option_leg(leg):
+                has_option_rows = True
+            if is_equity_leg(leg):
+                has_equity_rows = True
             fill_time = order_fill_time(order)
             fill_date = fill_time.date().isoformat() if fill_time else "N/A"
             side = (leg.instruction if leg and leg.instruction else "N/A").upper()
             qty = leg.quantity if leg and leg.quantity is not None else order.filledQuantity
-            qty_str = f"{qty:g}" if qty is not None else "N/A"
+            qty_str = f"{qty:g} ct" if is_option_leg(leg) and qty is not None else (
+                f"{qty:g} sh" if is_equity_leg(leg) and qty is not None else (
+                    f"{qty:g}" if qty is not None else "N/A"
+                )
+            )
             avg_fill = order_average_fill_price(order)
-            avg_fill_str = f"${avg_fill:.2f}" if avg_fill is not None else "N/A"
+            if avg_fill is not None:
+                fill_str = f"${avg_fill:.2f}/sh" if is_option_leg(leg) else f"${avg_fill:.2f}"
+            else:
+                fill_str = "N/A"
+            if is_option_leg(leg) and avg_fill is not None:
+                premium_contract_str = f"${option_premium_per_contract(avg_fill):,.2f}"
+            else:
+                premium_contract_str = "—"
+            total_cash = order_total_cash(
+                leg,
+                fill_price_per_share=avg_fill,
+                quantity=qty,
+            )
+            total_cash_str = (
+                f"${total_cash:,.2f}" if total_cash is not None else "N/A"
+            )
             order_type = order.orderType or "N/A"
             open_close = (
                 leg.positionEffect if leg and leg.positionEffect else "N/A"
@@ -382,7 +415,9 @@ class PromptEnrichmentService:
                         fill_date,
                         side,
                         qty_str,
-                        avg_fill_str,
+                        fill_str,
+                        premium_contract_str,
+                        total_cash_str,
                         order_type,
                         open_close,
                         tax_lot,
@@ -391,10 +426,27 @@ class PromptEnrichmentService:
                 + " |"
             )
 
-        return (
+        guidance_lines = [
             "Filled brokerage orders from the last 30 days. "
             "Use for recent activity, wash-sale context, and trade timing — "
-            "not as a complete tax lot history.\n\n"
+            "not as a complete tax lot history.",
+        ]
+        if has_equity_rows:
+            guidance_lines.append(
+                "EQUITY rows: Fill price is **per share**. Qty is **share count**. "
+                "**Total cash = fill price × shares** (no ×100 multiplier)."
+            )
+        if has_option_rows:
+            guidance_lines.append(
+                "OPTION rows only: Schwab quotes fills as a **per-share option price**. "
+                "One contract = 100 shares, so **premium/contract = fill price × 100**. "
+                "Example: $12.20/sh on 1 contract = **$1,220 total cash**. "
+                "**Do not apply ×100 to equity/share trades.**"
+            )
+        guidance_lines.append("")
+
+        return (
+            "\n".join(guidance_lines)
             + header
             + "\n"
             + "\n".join(rows)
