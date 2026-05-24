@@ -130,6 +130,7 @@ class CompanyResearchService:
                 summary=item.summary,
                 source=item.source,
                 datetime=item.datetime.isoformat(),
+                url=str(item.url),
             )
             for item in news_response.root[:10]
         ]
@@ -144,6 +145,7 @@ class CompanyResearchService:
                 summary=item.summary,
                 source=item.source or "Press release",
                 datetime=item.datetime.isoformat(),
+                url=str(item.url),
             )
             for item in releases_response.root[:5]
         ]

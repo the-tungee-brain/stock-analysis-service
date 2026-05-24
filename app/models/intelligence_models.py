@@ -60,6 +60,7 @@ class EventTimelineEntry(BaseModel):
     kind: EventKind
     title: str
     detail: str | None = None
+    url: str | None = None
 
 
 class OptionsStrikeCandidate(BaseModel):

@@ -133,6 +133,7 @@ class EventTimelineBuilder:
                         kind="news",
                         title=item.headline[:120],
                         detail=item.source or None,
+                        url=item.url,
                     ),
                 )
             )
@@ -149,6 +150,7 @@ class EventTimelineBuilder:
                         kind="press_release",
                         title=item.headline[:120],
                         detail=item.source or None,
+                        url=item.url,
                     ),
                 )
             )

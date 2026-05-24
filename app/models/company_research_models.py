@@ -30,6 +30,7 @@ class NewsHeadline(BaseModel):
     summary: str | None = None
     source: str = ""
     datetime: str = ""
+    url: str | None = None
 
 
 class EnrichedNewsSummary(BaseModel):

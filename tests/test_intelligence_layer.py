@@ -91,6 +91,26 @@ def test_event_timeline_includes_earnings_and_enriched_news_context():
     assert any(entry.kind == "news" for entry in timeline)
 
 
+def test_event_timeline_includes_news_url_for_external_link():
+    ctx = _research_context(
+        news=[
+            NewsHeadline(
+                headline="NVIDIA raises guidance",
+                summary="Strong AI demand.",
+                source="Reuters",
+                datetime=datetime.now(timezone.utc).isoformat(),
+                url="https://example.com/nvda-news",
+            )
+        ]
+    )
+
+    timeline = EventTimelineBuilder.build(research=ctx, orders=[])
+
+    news_entries = [entry for entry in timeline if entry.kind == "news"]
+    assert news_entries
+    assert news_entries[0].url == "https://example.com/nvda-news"
+
+
 def test_event_timeline_includes_trade_fill_price_from_execution_legs():
     ctx = _research_context()
     order = _make_option_order(underlying="NVDA")
