@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.broker.order_utils import order_fill_time, order_primary_leg
+from app.broker.order_utils import (
+    order_average_fill_price,
+    order_fill_time,
+    order_primary_leg,
+)
 from app.models.company_research_models import NewsHeadline, ResearchContext
 from app.models.intelligence_models import EventTimelineEntry
 from app.models.schwab_order_models import SchwabOrder
@@ -29,8 +33,8 @@ class EventTimelineBuilder:
                     continue
                 leg = order_primary_leg(order)
                 instruction = leg.instruction if leg else "TRADE"
-                qty = leg.quantity if leg else None
-                price = leg.price if leg else None
+                qty = leg.quantity if leg else order.filledQuantity
+                price = order_average_fill_price(order)
                 detail_parts = []
                 if qty is not None:
                     detail_parts.append(f"Qty {qty:g}")

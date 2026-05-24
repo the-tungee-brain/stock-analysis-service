@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock
 from app.core.prompts import AnalysisAction
 from app.models.company_research_models import (
@@ -19,6 +19,7 @@ from app.services.intelligence.event_timeline_builder import EventTimelineBuilde
 from app.services.intelligence.options_scoring_service import OptionsScoringService
 from app.services.intelligence.signal_engine import SignalEngine
 from app.services.prompt_enrichment_service import PromptEnrichmentService
+from tests.test_order_activity import _make_option_order
 from tests.test_position_prompt_metrics import _make_account, _make_position
 
 
@@ -88,6 +89,18 @@ def test_event_timeline_includes_earnings_and_enriched_news_context():
 
     assert any(entry.kind == "earnings" for entry in timeline)
     assert any(entry.kind == "news" for entry in timeline)
+
+
+def test_event_timeline_includes_trade_fill_price_from_execution_legs():
+    ctx = _research_context()
+    order = _make_option_order(underlying="NVDA")
+
+    timeline = EventTimelineBuilder.build(research=ctx, orders=[order])
+
+    trade_entries = [entry for entry in timeline if entry.kind == "trade"]
+    assert trade_entries
+    assert trade_entries[0].detail is not None
+    assert "@ $2.50" in trade_entries[0].detail
 
 
 def test_options_scoring_ranks_liquid_strikes():
