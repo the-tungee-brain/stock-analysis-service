@@ -80,12 +80,21 @@ def get_account_positions(
         portfolio_brief = None
         proactive_alerts = []
 
+    portfolio_brief_payload = (
+        portfolio_brief.model_dump(mode="json", by_alias=True)
+        if portfolio_brief is not None
+        else None
+    )
+    proactive_alerts_payload = [
+        alert.model_dump(mode="json", by_alias=True) for alert in proactive_alerts
+    ]
+
     return {
         "schwab_positions": account_map["positions"],
         "account": account_map["account"],
         "cashSecuredPutSummary": account_map["cashSecuredPutSummary"],
         "assignmentRiskSummary": account_map["assignmentRiskSummary"],
         "recentActivity": recent_activity,
-        "proactiveAlerts": proactive_alerts,
-        "portfolioBrief": portfolio_brief,
+        "proactiveAlerts": proactive_alerts_payload,
+        "portfolioBrief": portfolio_brief_payload,
     }
