@@ -159,7 +159,8 @@ _FOLLOW_UP_AFFIRMATION_RE = re.compile(
     r"^(?:"
     r"yes(?: please)?|yeah|yep|yup|sure|ok(?:ay)?|"
     r"let['']s do (?:that|it)|go ahead|please do|sounds good|do it|"
-    r"that works|go for it|please|why not"
+    r"that works|go for it|please|why not|"
+    r"let['']s do that — give me the specific next step\.?"
     r")[\s.!?]*$",
     re.IGNORECASE,
 )
@@ -348,12 +349,22 @@ SYSTEM_NATURAL_MESSAGE = dedent(f"""
     - When the user accepts a follow-up you offered (e.g., "let's do that", "yes", "sure"),
       deliver that follow-up immediately — do not restart the original analysis.
 
-    # Optional follow-ups after trim or sell recommendations
-    - After recommending **Trim**, **Close**, or a partial exit, you may close with ONE brief offer:
-      (a) where to redeploy proceeds — hold cash, buy a diversified ETF (e.g., VTI/VOO), or rotate into
-      another holding; OR (b) order mechanics — limit vs market, and a suggested limit price if relevant.
-    - Offer only one follow-up path at a time. Keep the offer to one short sentence.
-    - If the user accepts, pick a concrete recommendation (with rationale) instead of re-listing options.
+    # Optional follow-ups (close with ONE short offer when it fits — never stack multiple offers)
+    Match the offer to what you just recommended:
+    - **Trim / Close / partial exit** → offer (a) where to redeploy proceeds — hold cash, VTI/VOO, or a
+      specific existing underweight name; OR (b) order mechanics — limit vs market with a suggested limit.
+    - **Sell covered call / cash-secured put** → offer to walk through execution (contracts, strike, expiration)
+      OR assignment/call-away risk if expiration is near.
+    - **Roll the option** → offer to compare rolling vs closing now with estimated credit/debit.
+    - **Assignment risk (ITM/ATM, near expiry)** → offer a concrete roll vs close vs accept-assignment plan.
+    - **Concentration / overweight** → offer which single position to trim first OR target weights for top holdings.
+    - **Hold / no action** → offer what would change your mind (price level, date, or news that invalidates thesis).
+    - **Earnings soon on a held name** → offer a pre-earnings plan (hold, trim, hedge, or adjust options).
+    - **Tax / wash sale** → offer to map tax impact if they act now, or timing to avoid wash-sale issues.
+    Phrase the offer as one short sentence, e.g. "Want me to suggest where to redeploy those proceeds?" or
+    "I can walk you through the covered call step by step if helpful."
+    If the user accepts (yes / sure / let's do that / taps a follow-up chip), deliver that follow-up immediately
+    with ONE concrete recommendation — do not re-run the full analysis or re-list options.
 
     # What you help with
     - Single-stock positions, portfolio questions, and options strategies.
@@ -605,13 +616,19 @@ def _build_action_prompt(
 
                 Instructions:
                 - Read your immediately prior assistant message to infer what they accepted
-                  (e.g., redeploying trim proceeds, order mechanics, or a deeper dive you offered).
+                  (redeploying trim proceeds, order mechanics, rolling vs closing, assignment plan,
+                  covered call / CSP execution, concentration trim order, pre-earnings plan, tax impact,
+                  or a deeper dive you offered).
                 - Deliver that follow-up now — do not restart the original {symbol} analysis.
-                - If you offered redeploy options, recommend ONE specific path (cash, diversified ETF,
-                  or another stock) with a brief rationale and dollar amount if known from context.
-                - If you offered order mechanics, recommend limit vs market with a concrete price level
-                  or timing using the data from this conversation.
-                - Stay concise and actionable.
+                - If redeploy: recommend ONE specific path (cash, VTI/VOO, or another stock) with rationale
+                  and approximate dollar amount from context.
+                - If order mechanics: recommend limit vs market with a concrete price or timing.
+                - If options execution: give numbered steps — contracts, strike, expiration, and what to watch.
+                - If roll vs close: compare both with estimated credit/debit and pick one.
+                - If assignment: state roll vs close vs accept shares with a clear preference.
+                - If concentration: name ONE position to trim first and by how much (% or shares).
+                - If invalidation / hold follow-up: give 2–3 concrete triggers (price, date, or event).
+                - Stay concise and actionable — no full report template.
                 """).strip()
 
         if user_prompt:
@@ -891,9 +908,12 @@ def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = Tru
             "{ctx.user_prompt}"
 
             Instructions:
-            - Read your immediately prior assistant message to infer what they accepted.
+            - Read your immediately prior assistant message to infer what they accepted
+              (redeploy proceeds, order mechanics, which position to trim, target weights, portfolio risk
+              rebalance, or another follow-up you offered).
             - Deliver that follow-up now — do not restart the full portfolio analysis.
-            - Stay concise and actionable.
+            - Give ONE concrete recommendation with numbers (amounts, weights, or order type).
+            - Stay concise and actionable — no full report template.
             """).strip()
     elif ctx.user_prompt:
         task_block = dedent(f"""
