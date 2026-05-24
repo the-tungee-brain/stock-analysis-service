@@ -49,6 +49,7 @@ from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.schwab_auth_service import SchwabAuthService
 from app.services.user_service import UserService
 from app.services.ticker_service import TickerService
+from app.services.transaction_service import TransactionService
 from app.adapters.sec.sec_edgar_adapter import SecEdgarAdapter
 from app.builders.sec_cik_builder import SecCikBuilder
 from app.builders.sec_financials_builder import SecFinancialsBuilder
