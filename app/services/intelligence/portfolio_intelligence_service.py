@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from app.adapters.cache.llm_output_cache import LLMOutputCache
 from app.core.llm_routes import LLMRoute
@@ -112,6 +112,7 @@ class PortfolioIntelligenceService:
         macro_snapshots: dict[str, PromptQuoteSnapshot] | None = None,
         top_holdings_research: list[ResearchContext] | None = None,
         suggested_actions: list | None = None,
+        assignment_risk_entries: list[dict[str, object]] | None = None,
     ) -> PortfolioIntelligence:
         sector_weights = self._sector_weights(
             positions=positions,
@@ -143,6 +144,7 @@ class PortfolioIntelligenceService:
             portfolio_signals=signals,
             suggested_actions=suggested_actions or [],
             earnings_this_week=digest.earnings_this_week,
+            assignment_risk_entries=assignment_risk_entries,
         )
 
         return PortfolioIntelligence(

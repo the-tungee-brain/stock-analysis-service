@@ -436,6 +436,7 @@ def build_proactive_alerts(
     portfolio_signals: list[IntelligenceSignal],
     suggested_actions: list,
     earnings_this_week: list[str],
+    assignment_risk_entries: list[dict[str, object]] | None = None,
 ) -> list:
     from app.models.intelligence_models import ProactiveAlert
 
@@ -465,13 +466,64 @@ def build_proactive_alerts(
                 priority=1,
                 symbol=signal.symbol,
             )
-        elif signal.kind == "earnings" and signal.severity in {"warning", "watch"}:
+        elif signal.kind == "concentration" and signal.severity == "warning":
+            add(
+                AnalysisAction.CONCENTRATION_CHECK,
+                signal.message,
+                priority=3,
+                symbol=signal.symbol,
+            )
+        elif signal.kind == "earnings" and signal.severity in {"critical", "warning", "watch"}:
             add(
                 AnalysisAction.DAILY_SUMMARY,
                 signal.message,
                 priority=2,
                 symbol=signal.symbol,
             )
+        elif signal.kind == "sector_concentration" and signal.severity in {
+            "critical",
+            "warning",
+        }:
+            add(
+                AnalysisAction.RISK_CHECK,
+                signal.message,
+                priority=2,
+                symbol=signal.symbol,
+            )
+
+    for entry in assignment_risk_entries or []:
+        risk_level = str(entry.get("riskLevel") or "low")
+        if risk_level not in {"critical", "high", "moderate"}:
+            continue
+
+        underlying = entry.get("underlyingSymbol") or entry.get("symbol")
+        if not underlying:
+            continue
+
+        symbol = str(underlying).upper()
+        dte = entry.get("daysToExpiration")
+        moneyness = entry.get("moneyness") or "unknown"
+        put_call = str(entry.get("putCall") or "option").lower()
+        strike = entry.get("strike")
+        strike_text = f" ${strike:g}" if strike is not None else ""
+
+        if risk_level == "critical":
+            priority = 1
+        elif risk_level == "high":
+            priority = 2
+        else:
+            priority = 3
+
+        reason = (
+            f"Short {put_call}{strike_text} on {symbol} expires in {dte} day(s) "
+            f"({moneyness}) — {risk_level} assignment risk."
+        )
+        add(
+            AnalysisAction.ASSIGNMENT_RISK,
+            reason,
+            priority=priority,
+            symbol=symbol,
+        )
 
     for sym in earnings_this_week[:5]:
         add(
@@ -486,7 +538,7 @@ def build_proactive_alerts(
             suggestion.action,
             suggestion.reason,
             priority=suggestion.priority,
-            symbol=None,
+            symbol=getattr(suggestion, "symbol", None),
         )
 
     alerts.sort(key=lambda alert: alert.priority)

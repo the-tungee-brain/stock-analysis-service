@@ -29,6 +29,7 @@ from app.api.research_chat_route import router as research_chat_router
 from app.api.chat_sessions_route import router as chat_sessions_router
 from app.api.get_account_positions_route import router as get_account_positions_router
 from app.api.get_portfolio_brief_route import router as get_portfolio_brief_router
+from app.api.get_symbol_intelligence_route import router as get_symbol_intelligence_router
 
 API_PREFIX = "/api/v1"
 AUTH_SCHWAB_PREFIX = f"{API_PREFIX}/auth/schwab"
@@ -73,6 +74,7 @@ protected_api = APIRouter(
 
 protected_api.include_router(get_account_positions_router)
 protected_api.include_router(get_portfolio_brief_router)
+protected_api.include_router(get_symbol_intelligence_router)
 protected_api.include_router(get_recent_orders_router)
 protected_api.include_router(analyze_positions_by_symbol_router)
 protected_api.include_router(get_company_news_route)

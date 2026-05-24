@@ -16,7 +16,11 @@ from app.core.prompts import (
     PortfolioContext,
     BaseAnalysisContext,
 )
-from app.models.intelligence_models import PortfolioIntelligence, ProactiveAlert
+from app.models.intelligence_models import (
+    PortfolioIntelligence,
+    ProactiveAlert,
+    SymbolIntelligence,
+)
 from app.models.schwab_models import Position, SchwabAccounts
 from app.services.company_research_service import CompanyResearchService
 from app.services.intelligence.portfolio_intelligence_service import (
@@ -417,6 +421,7 @@ class PortfolioAnalysisService:
         positions: List[Position],
         access_token: str,
         suggested_actions: list | None = None,
+        assignment_risk_summary: dict[str, object] | None = None,
     ) -> PortfolioIntelligence | None:
         try:
             top_symbols = self._top_position_symbols(
@@ -455,6 +460,12 @@ class PortfolioAnalysisService:
                 except Exception:
                     actions = []
 
+            assignment_entries = None
+            if assignment_risk_summary:
+                raw_entries = assignment_risk_summary.get("positions")
+                if isinstance(raw_entries, list):
+                    assignment_entries = raw_entries
+
             return self.portfolio_intelligence_service.build_portfolio_intelligence(
                 positions=positions,
                 account=account,
@@ -462,6 +473,7 @@ class PortfolioAnalysisService:
                 macro_snapshots=macro_snapshots,
                 top_holdings_research=research_contexts,
                 suggested_actions=actions,
+                assignment_risk_entries=assignment_entries,
             )
         except Exception:
             return None
@@ -474,6 +486,7 @@ class PortfolioAnalysisService:
         positions: List[Position],
         access_token: str,
         suggested_actions: list | None = None,
+        assignment_risk_summary: dict[str, object] | None = None,
     ) -> PortfolioIntelligence:
         intelligence = self._load_portfolio_intelligence(
             user_id=user_id,
@@ -481,10 +494,68 @@ class PortfolioAnalysisService:
             positions=positions,
             access_token=access_token,
             suggested_actions=suggested_actions,
+            assignment_risk_summary=assignment_risk_summary,
         )
         if intelligence is None:
             return PortfolioIntelligence()
         return intelligence
+
+    def build_symbol_intelligence(
+        self,
+        *,
+        user_id: str,
+        symbol: str,
+        account: SchwabAccounts | None = None,
+        positions: list[Position] | None = None,
+        access_token: str | None = None,
+        include_options: bool = True,
+    ) -> SymbolIntelligence:
+        symbol_upper = symbol.upper()
+        positions = positions or []
+
+        try:
+            ctx = self.company_research_service.build_context(symbol=symbol_upper)
+            ctx = self.portfolio_intelligence_service.attach_enriched_news(ctx)
+        except Exception:
+            return SymbolIntelligence(symbol=symbol_upper)
+
+        orders = None
+        option_chain = None
+
+        if access_token and account is not None:
+            account_number = account.securitiesAccount.accountNumber
+            try:
+                orders = self._load_symbol_orders(
+                    user_id=user_id,
+                    account_number=account_number,
+                    access_token=access_token,
+                    symbol=symbol_upper,
+                )
+            except Exception:
+                orders = None
+
+            if include_options:
+                try:
+                    option_chain = self.market_service.get_option_chains(
+                        access_token=access_token,
+                        symbol=symbol_upper,
+                        strike_count=10,
+                    )
+                except Exception:
+                    option_chain = None
+
+        try:
+            return self.portfolio_intelligence_service.build_symbol_intelligence(
+                research=ctx,
+                positions=positions,
+                account=account,
+                symbol=symbol_upper,
+                orders=orders,
+                option_chain=option_chain,
+                include_peers=True,
+            )
+        except Exception:
+            return SymbolIntelligence(symbol=symbol_upper)
 
     def _build_portfolio_intelligence_block(
         self,

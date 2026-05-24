@@ -14,6 +14,7 @@ from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.services.portfolio_service import PortfolioService
 from app.services.schwab_auth_service import SchwabAuthService, SchwabReauthRequired
 from app.services.transaction_service import DEFAULT_DAYS_BACK, TransactionService
+from app.broker.option_utils import summarize_assignment_risk_structural
 
 router = APIRouter()
 
@@ -51,6 +52,7 @@ async def get_portfolio_brief(
     account = account_map["account"]
     positions = account.securitiesAccount.positions
     account_number = account.securitiesAccount.accountNumber
+    assignment_risk_summary = summarize_assignment_risk_structural(positions=positions)
 
     suggested_actions = []
     try:
@@ -73,4 +75,5 @@ async def get_portfolio_brief(
         positions=positions,
         access_token=schwab_token.access_token,
         suggested_actions=suggested_actions,
+        assignment_risk_summary=assignment_risk_summary,
     )

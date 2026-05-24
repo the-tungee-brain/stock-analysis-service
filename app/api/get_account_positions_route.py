@@ -7,6 +7,7 @@ from app.dependencies.service_dependencies import (
     get_transaction_service,
     get_portfolio_analysis_service,
 )
+from app.broker.option_utils import summarize_assignment_risk_structural
 from app.models.intelligence_models import PortfolioIntelligence, ProactiveAlert
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.models.recent_order_models import RecentActivitySummary
@@ -72,6 +73,7 @@ def get_account_positions(
             suggested_actions=(
                 recent_activity.suggested_actions if recent_activity else []
             ),
+            assignment_risk_summary=account_map["assignmentRiskSummary"],
         )
         proactive_alerts = portfolio_brief.alerts
     except Exception:
