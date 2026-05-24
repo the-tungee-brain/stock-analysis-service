@@ -1,6 +1,7 @@
-from typing import List, Optional, Literal
-from pydantic import BaseModel
 from datetime import datetime
+from typing import List, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 OrderStatus = Literal[
     "AWAITING_PARENT_ORDER",
@@ -28,91 +29,104 @@ OrderStatus = Literal[
 
 
 class Instrument(BaseModel):
-    cusip: Optional[str]
-    symbol: Optional[str]
-    description: Optional[str]
-    instrumentId: Optional[int]
-    netChange: Optional[float]
-    type: Optional[str]
+    model_config = ConfigDict(extra="ignore")
+
+    cusip: Optional[str] = None
+    symbol: Optional[str] = None
+    description: Optional[str] = None
+    instrumentId: Optional[int] = None
+    netChange: Optional[float] = None
+    type: Optional[str] = None
+    assetType: Optional[str] = None
+    putCall: Optional[str] = None
+    underlyingSymbol: Optional[str] = None
 
 
 class OrderLeg(BaseModel):
-    orderLegType: Optional[str]
-    legId: Optional[int]
-    instrument: Optional[Instrument]
-    instruction: Optional[str]  # BUY / SELL
-    positionEffect: Optional[str]  # OPENING / CLOSING
-    quantity: Optional[float]
-    quantityType: Optional[str]
-    divCapGains: Optional[str]
-    toSymbol: Optional[str]
+    model_config = ConfigDict(extra="ignore")
+
+    orderLegType: Optional[str] = None
+    legId: Optional[int] = None
+    instrument: Optional[Instrument] = None
+    instruction: Optional[str] = None
+    positionEffect: Optional[str] = None
+    quantity: Optional[float] = None
+    quantityType: Optional[str] = None
+    divCapGains: Optional[str] = None
+    toSymbol: Optional[str] = None
 
 
 class ExecutionLeg(BaseModel):
-    legId: Optional[int]
-    price: Optional[float]
-    quantity: Optional[float]
-    mismarkedQuantity: Optional[float]
-    instrumentId: Optional[int]
-    time: Optional[datetime]
+    model_config = ConfigDict(extra="ignore")
+
+    legId: Optional[int] = None
+    price: Optional[float] = None
+    quantity: Optional[float] = None
+    mismarkedQuantity: Optional[float] = None
+    instrumentId: Optional[int] = None
+    time: Optional[datetime] = None
 
 
 class OrderActivity(BaseModel):
-    activityType: Optional[str]
-    executionType: Optional[str]
-    quantity: Optional[float]
-    orderRemainingQuantity: Optional[float]
-    executionLegs: Optional[List[ExecutionLeg]]
+    model_config = ConfigDict(extra="ignore")
+
+    activityType: Optional[str] = None
+    executionType: Optional[str] = None
+    quantity: Optional[float] = None
+    orderRemainingQuantity: Optional[float] = None
+    executionLegs: Optional[List[ExecutionLeg]] = None
 
 
 class SchwabOrder(BaseModel):
-    session: Optional[str]
-    duration: Optional[str]
-    orderType: Optional[str]
-    cancelTime: Optional[datetime]
-    complexOrderStrategyType: Optional[str]
+    model_config = ConfigDict(extra="ignore")
 
-    quantity: Optional[float]
-    filledQuantity: Optional[float]
-    remainingQuantity: Optional[float]
+    session: Optional[str] = None
+    duration: Optional[str] = None
+    orderType: Optional[str] = None
+    cancelTime: Optional[datetime] = None
+    complexOrderStrategyType: Optional[str] = None
 
-    requestedDestination: Optional[str]
-    destinationLinkName: Optional[str]
+    quantity: Optional[float] = None
+    filledQuantity: Optional[float] = None
+    remainingQuantity: Optional[float] = None
 
-    releaseTime: Optional[datetime]
+    requestedDestination: Optional[str] = None
+    destinationLinkName: Optional[str] = None
 
-    stopPrice: Optional[float]
-    stopPriceLinkBasis: Optional[str]
-    stopPriceLinkType: Optional[str]
-    stopPriceOffset: Optional[float]
-    stopType: Optional[str]
+    releaseTime: Optional[datetime] = None
 
-    priceLinkBasis: Optional[str]
-    priceLinkType: Optional[str]
-    price: Optional[float]
+    stopPrice: Optional[float] = None
+    stopPriceLinkBasis: Optional[str] = None
+    stopPriceLinkType: Optional[str] = None
+    stopPriceOffset: Optional[float] = None
+    stopType: Optional[str] = None
 
-    taxLotMethod: Optional[str]
+    priceLinkBasis: Optional[str] = None
+    priceLinkType: Optional[str] = None
+    price: Optional[float] = None
 
-    orderLegCollection: Optional[List[OrderLeg]]
+    taxLotMethod: Optional[str] = None
 
-    activationPrice: Optional[float]
-    specialInstruction: Optional[str]
-    orderStrategyType: Optional[str]
+    orderLegCollection: Optional[List[OrderLeg]] = None
 
-    orderId: Optional[int]
-    cancelable: Optional[bool]
-    editable: Optional[bool]
+    activationPrice: Optional[float] = None
+    specialInstruction: Optional[str] = None
+    orderStrategyType: Optional[str] = None
 
-    status: Optional[OrderStatus]
-    enteredTime: Optional[datetime]
-    closeTime: Optional[datetime]
+    orderId: Optional[int] = None
+    cancelable: Optional[bool] = None
+    editable: Optional[bool] = None
 
-    tag: Optional[str]
-    accountNumber: Optional[int]
+    status: Optional[OrderStatus] = None
+    enteredTime: Optional[datetime] = None
+    closeTime: Optional[datetime] = None
 
-    orderActivityCollection: Optional[List[OrderActivity]]
+    tag: Optional[str] = None
+    accountNumber: Optional[int] = None
 
-    replacingOrderCollection: Optional[List[str]]
-    childOrderStrategies: Optional[List[str]]
+    orderActivityCollection: Optional[List[OrderActivity]] = None
 
-    statusDescription: Optional[str]
+    replacingOrderCollection: Optional[List[str]] = Field(default=None)
+    childOrderStrategies: Optional[List[str]] = Field(default=None)
+
+    statusDescription: Optional[str] = None
