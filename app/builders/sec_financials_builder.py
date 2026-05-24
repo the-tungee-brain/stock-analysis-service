@@ -94,8 +94,10 @@ class SecFinancialsBuilder:
     ) -> list[FinancialLineItem]:
         items: list[FinancialLineItem] = []
         for _key, tag_candidates in specs:
-            fact = self._pick_fact(usgaap=usgaap, tag_candidates=tag_candidates)
-            if not fact:
+            matched_tag, fact = self._pick_fact_with_tag(
+                usgaap=usgaap, tag_candidates=tag_candidates
+            )
+            if not fact or not matched_tag:
                 continue
 
             unit, observations = self._extract_observations(
@@ -108,8 +110,8 @@ class SecFinancialsBuilder:
 
             items.append(
                 FinancialLineItem(
-                    tag=tag_candidates[0],
-                    label=fact.get("label") or tag_candidates[0],
+                    tag=matched_tag,
+                    label=fact.get("label") or matched_tag,
                     unit=unit,
                     observations=observations,
                 )
@@ -117,13 +119,39 @@ class SecFinancialsBuilder:
         return items
 
     @staticmethod
+    def _pick_fact_with_tag(
+        usgaap: dict[str, Any], tag_candidates: list[str]
+    ) -> tuple[str | None, dict[str, Any] | None]:
+        for tag in tag_candidates:
+            if tag in usgaap:
+                return tag, usgaap[tag]
+        return None, None
+
+    @staticmethod
+    def value_at_period(
+        line_items: list[FinancialLineItem],
+        tag_candidates: list[str],
+        *,
+        end: str,
+        fiscal_period: str,
+    ) -> float | None:
+        tags = set(tag_candidates)
+        for item in line_items:
+            if item.tag not in tags:
+                continue
+            for obs in item.observations:
+                if obs.end == end and obs.fiscal_period == fiscal_period:
+                    return obs.value
+        return None
+
+    @staticmethod
     def _pick_fact(
         usgaap: dict[str, Any], tag_candidates: list[str]
     ) -> dict[str, Any] | None:
-        for tag in tag_candidates:
-            if tag in usgaap:
-                return usgaap[tag]
-        return None
+        _, fact = SecFinancialsBuilder._pick_fact_with_tag(
+            usgaap=usgaap, tag_candidates=tag_candidates
+        )
+        return fact
 
     def _extract_observations(
         self,

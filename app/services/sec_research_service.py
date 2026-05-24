@@ -3,6 +3,7 @@ from typing import Literal
 from app.adapters.sec.sec_edgar_adapter import SecEdgarAdapter
 from app.builders.sec_cik_builder import SecCikBuilder
 from app.builders.sec_financials_builder import SecFinancialsBuilder
+from app.builders.sec_ratios_builder import REVENUE_TAGS
 from app.builders.sec_ratios_builder import SecRatiosBuilder
 from app.models.company_research_models import FundamentalMetric
 from app.models.sec_research_models import (
@@ -78,61 +79,130 @@ class SecResearchService:
         ]
 
     def latest_snapshot_metrics(self, symbol: str) -> list[dict[str, str | None]]:
-        """Compact latest annual metrics for merging into fundamentals UI."""
-        financials = self.financials(symbol=symbol, period="annual", limit=2)
-        ratios = self.ratios(symbol=symbol, period="annual", limit=2)
+        """Compact latest annual metrics aligned to a single fiscal period."""
+        financials = self.financials(symbol=symbol, period="annual", limit=3)
+        ratios = self.ratios(symbol=symbol, period="annual", limit=3)
 
         if not ratios.snapshots:
             return []
 
-        latest = ratios.snapshots[0]
-        revenue = self._latest_value(financials.income_statement, [
-            "RevenueFromContractWithCustomerExcludingAssessedTax",
-            "Revenues",
-            "SalesRevenueNet",
-        ])
-        net_income = self._latest_value(financials.income_statement, ["NetIncomeLoss"])
-        ocf = self._latest_value(
-            financials.cash_flow, ["NetCashProvidedByUsedInOperatingActivities"]
+        snapshot = None
+        revenue = None
+        net_income = None
+        period_end = ""
+        fiscal_period = ""
+        period_note = "Latest annual figures from SEC filings."
+
+        for candidate in ratios.snapshots:
+            end = candidate.end
+            fp = candidate.fiscal_period
+            candidate_revenue = SecFinancialsBuilder.value_at_period(
+                financials.income_statement,
+                REVENUE_TAGS,
+                end=end,
+                fiscal_period=fp,
+            )
+            candidate_net_income = SecFinancialsBuilder.value_at_period(
+                financials.income_statement,
+                ["NetIncomeLoss"],
+                end=end,
+                fiscal_period=fp,
+            )
+            if not self._snapshot_metrics_are_consistent(
+                revenue=candidate_revenue,
+                net_income=candidate_net_income,
+            ):
+                continue
+
+            snapshot = candidate
+            revenue = candidate_revenue
+            net_income = candidate_net_income
+            period_end = end
+            fiscal_period = fp
+            period_note = (
+                f"SEC filed figures for period ending {end} ({fp}). "
+                "All metrics below use the same fiscal period."
+            )
+            break
+
+        if snapshot is None:
+            return []
+
+        income = financials.income_statement
+        balance = financials.balance_sheet
+        cash_flow = financials.cash_flow
+
+        ocf = SecFinancialsBuilder.value_at_period(
+            cash_flow,
+            ["NetCashProvidedByUsedInOperatingActivities"],
+            end=period_end,
+            fiscal_period=fiscal_period,
         )
-        capex = self._latest_value(
-            financials.cash_flow, ["PaymentsToAcquirePropertyPlantAndEquipment"]
+        capex = SecFinancialsBuilder.value_at_period(
+            cash_flow,
+            ["PaymentsToAcquirePropertyPlantAndEquipment"],
+            end=period_end,
+            fiscal_period=fiscal_period,
         )
-        equity = self._latest_value(financials.balance_sheet, ["StockholdersEquity"])
-        assets = self._latest_value(financials.balance_sheet, ["Assets"])
-        liabilities = self._latest_value(financials.balance_sheet, ["Liabilities"])
-        eps = self._latest_value(financials.income_statement, ["EarningsPerShareDiluted"])
+        equity = SecFinancialsBuilder.value_at_period(
+            balance,
+            ["StockholdersEquity"],
+            end=period_end,
+            fiscal_period=fiscal_period,
+        )
+        assets = SecFinancialsBuilder.value_at_period(
+            balance,
+            ["Assets"],
+            end=period_end,
+            fiscal_period=fiscal_period,
+        )
+        liabilities = SecFinancialsBuilder.value_at_period(
+            balance,
+            ["Liabilities"],
+            end=period_end,
+            fiscal_period=fiscal_period,
+        )
+        eps = SecFinancialsBuilder.value_at_period(
+            income,
+            ["EarningsPerShareDiluted"],
+            end=period_end,
+            fiscal_period=fiscal_period,
+        )
 
         fcf = None
         if ocf is not None and capex is not None:
             fcf = ocf - abs(capex)
 
         return [
-            self._metric("Revenue (SEC filed)", revenue, self._fmt_large_usd(revenue), "Latest annual revenue from SEC filings."),
-            self._metric("Net income (SEC filed)", net_income, self._fmt_large_usd(net_income), "Latest annual net income from SEC filings."),
-            self._metric("Gross margin", latest.gross_margin, self._fmt_pct(latest.gross_margin), "Gross profit divided by revenue."),
-            self._metric("Operating margin", latest.operating_margin, self._fmt_pct(latest.operating_margin), "Operating income divided by revenue."),
-            self._metric("Net margin", latest.net_margin, self._fmt_pct(latest.net_margin), "Net income divided by revenue."),
-            self._metric("Return on equity", latest.roe, self._fmt_pct(latest.roe), "Net income divided by shareholder equity."),
-            self._metric("Return on assets", latest.roa, self._fmt_pct(latest.roa), "Net income divided by total assets."),
-            self._metric("Debt / equity", latest.debt_to_equity, self._fmt_ratio(latest.debt_to_equity), "Total liabilities divided by shareholder equity."),
-            self._metric("Free cash flow", fcf, self._fmt_large_usd(fcf), "Operating cash flow minus capital expenditures."),
-            self._metric("FCF margin", latest.fcf_margin, self._fmt_pct(latest.fcf_margin), "Free cash flow divided by revenue."),
-            self._metric("Revenue growth (YoY)", latest.revenue_growth_yoy, self._fmt_pct(latest.revenue_growth_yoy), "Year-over-year revenue change from SEC filings."),
-            self._metric("Net income growth (YoY)", latest.net_income_growth_yoy, self._fmt_pct(latest.net_income_growth_yoy), "Year-over-year net income change from SEC filings."),
-            self._metric("EPS (diluted, SEC filed)", eps, self._fmt_dollar(eps), "Diluted earnings per share from SEC filings."),
-            self._metric("Total assets", assets, self._fmt_large_usd(assets), "Total assets from the latest annual balance sheet."),
-            self._metric("Total liabilities", liabilities, self._fmt_large_usd(liabilities), "Total liabilities from the latest annual balance sheet."),
-            self._metric("Shareholders' equity", equity, self._fmt_large_usd(equity), "Shareholders' equity from the latest annual balance sheet."),
+            self._metric("Revenue (SEC filed)", revenue, self._fmt_large_usd(revenue), period_note),
+            self._metric("Net income (SEC filed)", net_income, self._fmt_large_usd(net_income), period_note),
+            self._metric("Gross margin", snapshot.gross_margin, self._fmt_pct(snapshot.gross_margin), "Gross profit divided by revenue."),
+            self._metric("Operating margin", snapshot.operating_margin, self._fmt_pct(snapshot.operating_margin), "Operating income divided by revenue."),
+            self._metric("Net margin", snapshot.net_margin, self._fmt_pct(snapshot.net_margin), "Net income divided by revenue."),
+            self._metric("Return on equity", snapshot.roe, self._fmt_pct(snapshot.roe), "Net income divided by shareholder equity."),
+            self._metric("Return on assets", snapshot.roa, self._fmt_pct(snapshot.roa), "Net income divided by total assets."),
+            self._metric("Debt / equity", snapshot.debt_to_equity, self._fmt_ratio(snapshot.debt_to_equity), "Total liabilities divided by shareholder equity."),
+            self._metric("Free cash flow", fcf, self._fmt_large_usd(fcf), period_note),
+            self._metric("FCF margin", snapshot.fcf_margin, self._fmt_pct(snapshot.fcf_margin), "Free cash flow divided by revenue."),
+            self._metric("Revenue growth (YoY)", snapshot.revenue_growth_yoy, self._fmt_pct(snapshot.revenue_growth_yoy), period_note),
+            self._metric("Net income growth (YoY)", snapshot.net_income_growth_yoy, self._fmt_pct(snapshot.net_income_growth_yoy), period_note),
+            self._metric("EPS (diluted, SEC filed)", eps, self._fmt_dollar(eps), period_note),
+            self._metric("Total assets", assets, self._fmt_large_usd(assets), period_note),
+            self._metric("Total liabilities", liabilities, self._fmt_large_usd(liabilities), period_note),
+            self._metric("Shareholders' equity", equity, self._fmt_large_usd(equity), period_note),
         ]
 
     @staticmethod
-    def _latest_value(line_items, tags: list[str]) -> float | None:
-        tag_set = set(tags)
-        for item in line_items:
-            if item.tag in tag_set and item.observations:
-                return item.observations[0].value
-        return None
+    def _snapshot_metrics_are_consistent(
+        *,
+        revenue: float | None,
+        net_income: float | None,
+    ) -> bool:
+        if revenue is None or net_income is None:
+            return revenue is not None or net_income is not None
+        if revenue <= 0:
+            return True
+        return net_income <= revenue * 1.05
 
     @staticmethod
     def _metric(label: str, raw: float | None, value: str | None, note: str) -> dict:
