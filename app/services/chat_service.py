@@ -5,9 +5,7 @@ from app.builders.chat_sessions_builder import ChatSessionsBuilder
 from app.builders.chat_messages_builder import ChatMessagesBuilder
 from app.models.chat_sessions_models import ChatSession, ChatMessage
 from app.core.prompts import SYSTEM_NATURAL_MESSAGE
-from app.core.prompts import (
-    SYSTEM_NATURAL_MESSAGE,
-)
+from app.services.prompt_enrichment_service import RESEARCH_CHAT_SYSTEM_MESSAGE
 from openai.types.shared import ResponsesModel
 
 
@@ -40,6 +38,43 @@ class ChatService:
                 title=prompt,
                 model=model,
                 system_prompt=SYSTEM_NATURAL_MESSAGE,
+            )
+            created_session = self.chat_sessions_builder.create_session(
+                session=new_session
+            )
+            return created_session.id, is_first_chat
+
+        return session.id, is_first_chat
+
+    @staticmethod
+    def _research_session_title_prefix(symbol: str) -> str:
+        return f"Research:{symbol.strip().upper()}:"
+
+    def get_research_chat_session_id(
+        self,
+        user_id: str,
+        symbol: str,
+        prompt: Optional[str],
+        model: ResponsesModel,
+    ) -> tuple[Optional[UUID], bool]:
+        if not prompt:
+            return None, True
+
+        prefix = self._research_session_title_prefix(symbol=symbol)
+        session = (
+            self.chat_sessions_builder.get_latest_session_by_user_id_and_title_prefix(
+                user_id=user_id,
+                title_prefix=prefix,
+            )
+        )
+        is_first_chat = not session
+
+        if is_first_chat:
+            new_session = ChatSession(
+                user_id=user_id,
+                title=f"{prefix} {prompt[:200]}",
+                model=model,
+                system_prompt=RESEARCH_CHAT_SYSTEM_MESSAGE,
             )
             created_session = self.chat_sessions_builder.create_session(
                 session=new_session

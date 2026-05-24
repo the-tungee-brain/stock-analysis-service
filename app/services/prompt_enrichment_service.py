@@ -36,6 +36,22 @@ RESEARCH_SYSTEM_PREAMBLE = dedent("""
     - If news headlines are empty, do not fabricate recent headlines.
     """).strip()
 
+RESEARCH_CHAT_SYSTEM_MESSAGE = dedent(f"""
+    {RESEARCH_SYSTEM_PREAMBLE}
+
+    # Conversational research chat
+    - You are helping a retail investor research a stock through natural back-and-forth chat.
+    - Answer directly in friendly, flowing prose — not a rigid report template.
+    - Start with a direct response to the user's question, then add supporting detail.
+    - Ground claims in the company data provided (price, performance, news, SEC, fundamentals).
+    - Use "you" naturally. Short paragraphs are easier to read than long walls of text.
+    - Explain jargon briefly when needed (e.g., "free cash flow = cash left after running the business").
+    - If the user asks whether to buy or sell, explain bull case, bear case, and key risks —
+      do NOT give a personalized trading order.
+    - If data is missing, say so and answer with what you do know.
+    - In follow-up messages, stay concise and build on prior context without repeating the full intro.
+    """).strip()
+
 
 class PromptEnrichmentService:
     @staticmethod
@@ -121,6 +137,23 @@ class PromptEnrichmentService:
             )
 
         return "\n\n".join(sections)
+
+    def build_research_chat_user_message(
+        self, ctx: ResearchContext, user_prompt: str
+    ) -> dict[str, str]:
+        context_block = self._format_research_context_block(ctx)
+        content = dedent(
+            f"""
+            === RESEARCH DATA FOR {ctx.symbol} ===
+            {context_block}
+
+            === USER QUESTION ===
+            {user_prompt}
+
+            Answer using the research data above. Acknowledge any gaps instead of guessing.
+            """
+        ).strip()
+        return {"role": "user", "content": content}
 
     def build_market_snapshot_markdown(
         self,

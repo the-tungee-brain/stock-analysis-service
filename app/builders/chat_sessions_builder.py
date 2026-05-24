@@ -13,6 +13,14 @@ class ChatSessionsBuilder:
     def get_session_by_id(self, session_id: str) -> ChatSession:
         return self.chat_sessions_adapter.get_session_by_id(session_id=session_id)
 
+    def get_latest_session_by_user_id_and_title_prefix(
+        self, user_id: str, title_prefix: str
+    ) -> Optional[ChatSession]:
+        return self.chat_sessions_adapter.get_latest_session_by_user_id_and_title_prefix(
+            user_id=user_id,
+            title_prefix=title_prefix,
+        )
+
     def get_latest_session_by_user_id(self, user_id: str) -> Optional[ChatSession]:
         sessions = self.chat_sessions_adapter.get_sessions_by_user_id(
             user_id=user_id,

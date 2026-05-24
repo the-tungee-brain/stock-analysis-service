@@ -112,6 +112,38 @@ class ChatSessionsAdapter:
         finally:
             con.close()
 
+    def get_latest_session_by_user_id_and_title_prefix(
+        self,
+        user_id: str,
+        title_prefix: str,
+    ) -> Optional[ChatSession]:
+        sql = f"""
+            SELECT id, user_id, title, model, system_prompt, metadata,
+                   created_at, updated_at
+            FROM {self.table_name}
+            WHERE user_id = :user_id
+              AND title LIKE :title_prefix
+            ORDER BY updated_at DESC
+            FETCH FIRST 1 ROWS ONLY
+        """
+
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            cur.execute(
+                sql,
+                {
+                    "user_id": user_id,
+                    "title_prefix": f"{title_prefix}%",
+                },
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return self._row_to_session(row)
+        finally:
+            con.close()
+
     def get_sessions_by_user_id(
         self,
         user_id: str,

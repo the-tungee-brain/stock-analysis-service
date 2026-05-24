@@ -25,6 +25,7 @@ from app.api.get_fundamentals_route import router as get_fundamentals_route
 from app.api.sec_research_routes import router as sec_research_router
 from app.api.get_earnings_route import router as get_earnings_route
 from app.api.search_symbols_route import router as search_symbols_route
+from app.api.research_chat_route import router as research_chat_router
 
 API_PREFIX = "/api/v1"
 AUTH_SCHWAB_PREFIX = f"{API_PREFIX}/auth/schwab"
@@ -79,5 +80,6 @@ protected_api.include_router(get_fundamentals_route)
 protected_api.include_router(sec_research_router)
 protected_api.include_router(get_earnings_route)
 protected_api.include_router(search_symbols_route)
+protected_api.include_router(research_chat_router)
 
 app.include_router(protected_api)
