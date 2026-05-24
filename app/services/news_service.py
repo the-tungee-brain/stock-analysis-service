@@ -7,13 +7,13 @@ class NewsService:
     def __init__(self, finnhub_builder: FinnhubBuilder):
         self.finnhub_builder = finnhub_builder
 
-    def get_company_news(self, symbol: str) -> NewsResponse:
+    def get_company_news(self, symbol: str, lookback_days: int = 1) -> NewsResponse:
         today = date.today()
-        yesterday = today - timedelta(days=1)
+        start = today - timedelta(days=lookback_days)
 
         news_response = self.finnhub_builder.get_company_news(
             symbol=symbol,
-            _from=yesterday,
+            _from=start,
             to=today,
         )
 

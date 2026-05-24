@@ -3,6 +3,7 @@ from app.models.schwab_option_chain_models import OptionChain, OptionContract
 from datetime import datetime
 from typing import List, Tuple, Dict, Any
 from app.models.finnhub_news_models import NewsResponse
+from app.models.company_research_models import ResearchContext, FundamentalMetric
 from textwrap import dedent
 from app.core.prompts import (
     BaseAnalysisContext,
@@ -12,8 +13,88 @@ from app.core.prompts import (
     SymbolContext,
 )
 
+RESEARCH_SYSTEM_PREAMBLE = dedent("""
+    # Role
+    You are an equity research educator helping a retail investor learn deeply about a stock
+    before deciding whether to invest. Your audience is smart and curious but not a finance professional.
+
+    # Writing style
+    - Use plain English. Define jargon briefly when you use it (e.g., "moat = durable competitive advantage").
+    - Be thorough and educational — help the reader understand WHY things matter, not just WHAT they are.
+    - Be specific when data is provided. Do not invent prices, returns, news, or financial figures.
+    - When data is missing, say so and give a thoughtful general analysis anchored to what you do know
+      (company name, sector, business model).
+    - This is educational research, not personalized financial advice. Do not tell the user to buy or sell.
+
+    # Data integrity
+    - Treat the provided market data, performance returns, and news headlines as ground truth.
+    - Do not claim current events or numbers that were not supplied.
+    - If news headlines are empty, do not fabricate recent headlines.
+    """).strip()
+
 
 class PromptEnrichmentService:
+    def _format_research_context_block(self, ctx: ResearchContext) -> str:
+        sections: list[str] = [f"Symbol: {ctx.symbol}"]
+
+        if ctx.snapshot:
+            s = ctx.snapshot
+            sections.append(
+                dedent(f"""
+                ## Company profile
+                - Name: {s.name}
+                - Sector / industry: {s.sector}
+                - Country: {s.country}
+                - Current price: ${s.price:.2f}
+                - Today's change: {s.changePct:+.2f}%
+                - Market cap: {s.marketCap}
+                - 52-week range: {s.range52w or "N/A"}
+                """).strip()
+            )
+        else:
+            sections.append("## Company profile\nNo live profile data available.")
+
+        if ctx.performance:
+            p = ctx.performance
+            sections.append(
+                dedent(f"""
+                ## Price performance
+                - 1-month return: {p.oneMonth}
+                - 3-month return: {p.threeMonth}
+                - 1-year return: {p.oneYear}
+                - Trend: {p.trendLabel}
+                - Volatility note: {p.volatilityNote}
+                """).strip()
+            )
+        else:
+            sections.append("## Price performance\nNo performance data available.")
+
+        if ctx.news:
+            news_lines = []
+            for idx, item in enumerate(ctx.news, start=1):
+                summary = item.summary or "(no summary)"
+                news_lines.append(
+                    f"{idx}. [{item.source}] {item.headline}\n   Summary: {summary}"
+                )
+            sections.append(
+                "## Recent news headlines (past 7 days)\n" + "\n".join(news_lines)
+            )
+        else:
+            sections.append("## Recent news headlines\nNo recent headlines available.")
+
+        if ctx.fundamentals:
+            metric_lines = [
+                f"- {m.label}: {m.value}" + (f" ({m.note})" if m.note else "")
+                for m in ctx.fundamentals
+            ]
+            sections.append(
+                "## Key fundamentals\n" + "\n".join(metric_lines)
+            )
+        else:
+            sections.append("## Key fundamentals\nNo fundamental metrics available.")
+
+        return "\n\n".join(sections)
+
     def build_market_snapshot_markdown(
         self,
         snapshots: Dict[str, PromptQuoteSnapshot],
@@ -166,30 +247,25 @@ class PromptEnrichmentService:
         system_msg = dedent(
             """
             # Role
-            You are a professional equity research assistant analyzing news for retail investors.
-
-            # Your job
-            Read each news item about a single stock and produce structured JSON with trader-style
-            sentiment labels.
+            You are a professional equity research assistant helping retail investors understand
+            how individual news items may affect a stock.
 
             # Sentiment definitions
-            - "bullish" — the news is likely to push the stock price UP (positive earnings, upgrades,
-              product wins, favorable regulation, etc.).
-            - "bearish" — the news is likely to push the stock price DOWN (misses, downgrades, lawsuits,
-              product failures, unfavorable regulation, etc.).
-            - "neutral" — the news is informational, mixed, or unlikely to move the price meaningfully.
+            - "bullish" — likely to push the stock price UP (positive earnings, upgrades, product wins, etc.).
+            - "bearish" — likely to push the stock price DOWN (misses, downgrades, lawsuits, etc.).
+            - "neutral" — informational, mixed, or unlikely to move the price meaningfully.
 
             # Confidence calibration
-            - 0.9–1.0: clear, direct impact on the stock (e.g., earnings beat with raised guidance).
-            - 0.6–0.8: likely impact but some ambiguity (e.g., analyst opinion, sector-wide trend).
-            - 0.3–0.5: indirect or speculative connection to the stock.
+            - 0.9–1.0: clear, direct impact (e.g., earnings beat with raised guidance).
+            - 0.6–0.8: likely impact but some ambiguity (analyst opinion, sector trend).
+            - 0.3–0.5: indirect or speculative connection.
             - Below 0.3: very weak link; use sparingly.
 
             # Rules
-            - Analyze each item independently based on its headline and summary.
-            - Do not invent details not present in the headline or summary.
-            - Keep summaries to one concise sentence focused on what matters to investors.
-            - Return ONLY valid JSON — no markdown, no commentary, no extra keys.
+            - Analyze each item based on its headline and summary only.
+            - Write summaries that teach the investor WHY the news matters, not just what happened.
+            - Do not invent details absent from the headline or summary.
+            - Return ONLY valid JSON — no markdown, commentary, or extra keys.
             """
         ).strip()
 
@@ -201,28 +277,19 @@ class PromptEnrichmentService:
             {news_block}
 
             # Your task
-            For EACH news item above, return one JSON object with these fields:
+            For EACH news item, return one JSON object:
 
             - **id** (number) — must match the item's id exactly.
             - **sentiment** — "bullish" | "bearish" | "neutral"
-            - **confidence** (number) — 0.0 to 1.0, using the calibration guide in your instructions.
-            - **summary** (string) — one sentence: what matters to investors in this specific item.
+            - **confidence** (number) — 0.0 to 1.0.
+            - **summary** (string) — 1–2 sentences explaining what happened AND why it matters
+              to an investor in {symbol}. Be educational, not just descriptive.
             - **horizon** — "immediate" | "medium_term" | "long_term"
-              When this news is most likely to affect the stock price.
-            - **topics** (string array) — short tags from this list (use others only if needed):
+            - **topics** (string array) — tags from:
               ["earnings", "guidance", "product", "macro", "regulation", "management",
                "competition", "crypto", "trading_activity", "valuation", "flows", "buybacks"]
 
-            Return ONLY a JSON array with one object per item, in the same order as the input.
-            Example shape for each element:
-            {{
-              "id": 123,
-              "sentiment": "bullish",
-              "confidence": 0.85,
-              "summary": "Company raised full-year guidance after a strong quarter.",
-              "horizon": "immediate",
-              "topics": ["earnings", "guidance"]
-            }}
+            Return ONLY a JSON array, one object per item, in the same order as the input.
             """
         ).strip()
 
@@ -240,82 +307,183 @@ class PromptEnrichmentService:
 
         return {"role": "user", "content": user_content}
 
-    def build_stock_summary_prompt(self, symbol: str) -> List[str]:
+    def build_stock_summary_prompt(self, ctx: ResearchContext) -> List[str]:
+        context_block = self._format_research_context_block(ctx)
+        has_market_data = ctx.snapshot is not None or ctx.performance is not None
+
         system_msg = dedent(
-            """
-            # Role
-            You help a retail investor understand a stock in plain, non-technical language.
+            f"""
+            {RESEARCH_SYSTEM_PREAMBLE}
 
-            # Input you may receive
-            - Just a stock symbol, OR
-            - A symbol plus data fields such as price, 1m/3m/1y returns, 52-week range,
-              basic fundamentals, and recent news headlines.
+            # Your task
+            Produce a comprehensive investment research summary that helps a retail investor
+            understand this stock in depth.
 
-            # Rules
-            - Base your answer ONLY on the data provided. Do not invent numbers or events.
-            - If only a symbol is provided (no price, returns, or news data), keep the response
-              generic and high-level. Do NOT claim current price action, recent returns, valuation,
-              fundamentals, or news you were not given.
-            - Write for a smart reader who is not a professional investor.
-            - Avoid repeating the same numbers in both summaries; describe performance qualitatively
-              in the long summary (e.g., "strong growth", "modest decline").
+            # Depth requirements
+            - **short**: 2–3 sentences. Executive summary — what the company is, how it has performed
+              recently (if data provided), and your overall sentiment.
+            - **long**: 8–12 sentences. A thorough narrative covering:
+              business overview, recent price performance, sector context, competitive positioning,
+              recent news impact (if any), and what kind of investor this stock might suit.
+            - **investmentThesis**: 3–5 sentences explaining the core bull case — why an investor
+              might want to own this stock. Be balanced, not promotional.
+            - **keyStrengths**: 4–6 bullet strings. Concrete competitive advantages, financial strengths,
+              or strategic positives. Explain why each matters.
+            - **keyRisks**: 4–6 bullet strings. Material risks (competition, regulation, valuation,
+              balance sheet, macro sensitivity, execution). Explain why each matters.
+            - **whatToWatch**: 3–5 bullet strings. Upcoming catalysts, earnings dates, product launches,
+              regulatory decisions, or macro factors to monitor.
+            - **valuationContext**: 3–5 sentences on how the stock is typically valued (P/E, growth
+              premium, etc.), whether it looks expensive or cheap relative to its growth and peers,
+              and what assumptions the market seems to be pricing in.
+              {"Use the provided price, returns, and market cap data." if has_market_data else "No live market data was provided — discuss valuation conceptually without citing specific multiples or prices."}
+            - **sentiment**: "Bullish" | "Neutral" | "Bearish" — your overall assessment weighing
+              strengths vs. risks and recent performance.
 
-            # Required output
             Return a single JSON object with exactly these keys:
+            {{
+              "short": "...",
+              "long": "...",
+              "sentiment": "Bullish | Neutral | Bearish",
+              "investmentThesis": "...",
+              "keyStrengths": ["..."],
+              "keyRisks": ["..."],
+              "whatToWatch": ["..."],
+              "valuationContext": "..."
+            }}
 
-            {
-              "short": "2–3 sentences. Quick overview a busy investor can read in 10 seconds.",
-              "long": "4–6 sentences. Deeper context on performance, business quality, and key things to watch.",
-              "sentiment": "Bullish | Neutral | Bearish"
-            }
-
-            Do not include any extra keys, comments, markdown, or explanations outside the JSON.
+            Do not include extra keys, markdown, or commentary outside the JSON.
             """
         ).strip()
 
         user_msg = dedent(
             f"""
-            Write a summary for the stock symbol {symbol}.
+            Write an in-depth investment research summary for:
 
-            No price, return, valuation, fundamental, or news data has been provided — keep the
-            response generic and high-level. Do not assume or state exact figures or current events.
+            {context_block}
+
+            Be as detailed and educational as possible. Help the reader understand this company
+            well enough to decide whether it deserves further research or a place in their portfolio.
             """
         ).strip()
         return [system_msg, user_msg]
 
-    def build_business_details_prompt(self, symbol: str) -> List[str]:
+    def build_business_details_prompt(self, ctx: ResearchContext) -> List[str]:
+        context_block = self._format_research_context_block(ctx)
+
         system_msg = dedent(
-            """
-            # Role
-            You help a retail investor understand what a company does and how it makes money,
-            written in plain, non-technical language.
+            f"""
+            {RESEARCH_SYSTEM_PREAMBLE}
 
-            # Rules
-            - Write for a smart reader who is not a finance professional.
-            - Use simple sentences. Explain industry terms briefly when you use them.
-            - Do not repeat exact financial figures unless essential for understanding.
-            - Do not invent products, segments, or revenue sources you are not confident about.
-              If uncertain, describe the company's general business model at a high level.
-            - Do not add extra keys, markdown, comments, or explanations outside the JSON.
+            # Your task
+            Explain this company's business model in depth so a retail investor can understand
+            exactly how the company makes money and what drives its success or failure.
 
-            # Required output
+            # Depth requirements
+            - **whatTheyDo**: 6–10 sentences. What the company sells, who its customers are,
+              how it delivers value, and its role in its industry. Write as if explaining to
+              someone who has heard the brand name but knows nothing else.
+            - **segments**: 4–8 strings. Each string names a business segment or revenue line
+              and briefly explains what it includes and why it matters (e.g.,
+              "Cloud services (~40% of revenue) — subscription-based infrastructure and platform tools for enterprises").
+            - **revenueNotes**: 6–10 sentences. Which segments drive the most revenue and profit,
+              how revenue is recognized (subscriptions, transactions, licensing, etc.),
+              seasonality or cyclicality, and key dependencies (suppliers, platforms, regulation).
+            - **customersAndMarkets**: 4–6 sentences. Who buys the product (consumers, enterprises,
+              governments), geographic mix, and whether the customer base is concentrated or diversified.
+            - **competitiveLandscape**: 4–6 sentences. Main competitors, market share dynamics,
+              and whether the industry is consolidating, fragmenting, or stable.
+            - **moatAndDifferentiators**: 4–6 sentences. What protects this company from competition
+              (brand, network effects, switching costs, scale, IP, regulation) and where it is vulnerable.
+            - **growthDrivers**: 4–6 bullet strings. Specific factors that could drive future revenue
+              and earnings growth (new products, market expansion, pricing power, M&A, etc.).
+            - **keyRisks**: 4–6 bullet strings. Business-model-level risks unrelated to short-term
+              stock price (disruption, customer concentration, regulatory change, technology shifts).
+
             Return a single JSON object with exactly these keys:
+            {{
+              "whatTheyDo": "...",
+              "segments": ["..."],
+              "revenueNotes": "...",
+              "customersAndMarkets": "...",
+              "competitiveLandscape": "...",
+              "moatAndDifferentiators": "...",
+              "growthDrivers": ["..."],
+              "keyRisks": ["..."]
+            }}
 
-            {
-              "whatTheyDo": "4–6 short sentences explaining what the company does and who its customers are.",
-              "segments": ["3–6 short plain-English strings, one per business line or revenue source."],
-              "revenueNotes": "4–6 sentences on which parts of the business matter most, what drives revenue,
-                               key dependencies that could affect revenue or margins, and what investors should watch."
-            }
+            Do not include extra keys, markdown, or commentary outside the JSON.
             """
         ).strip()
 
         user_msg = dedent(
             f"""
-            Build the business details for stock symbol {symbol}.
+            Write an in-depth business breakdown for:
 
-            Explain what the company does, its main business segments, and how it generates revenue.
-            Write for someone who has heard of the company but does not know the details of its business model.
+            {context_block}
+
+            Help the reader truly understand how this company operates, competes, and grows.
+            Anchor your analysis to the company name and sector from the data above.
+            """
+        ).strip()
+
+        return [system_msg, user_msg]
+
+    def build_fundamentals_prompt(
+        self, ctx: ResearchContext, metrics: list[FundamentalMetric]
+    ) -> List[str]:
+        context_block = self._format_research_context_block(ctx)
+
+        if metrics:
+            metrics_block = "\n".join(
+                f"- {m.label}: {m.value}" for m in metrics
+            )
+        else:
+            metrics_block = "No fundamental metrics available."
+
+        system_msg = dedent(
+            f"""
+            {RESEARCH_SYSTEM_PREAMBLE}
+
+            # Your task
+            Write an in-depth fundamental analysis overview for a retail investor.
+            The structured metrics are provided separately — your job is ONLY to write the
+            **overviewNote**: a thorough narrative that helps the reader understand what the
+            numbers mean in context.
+
+            # Depth requirements for overviewNote
+            - 8–12 sentences in plain English.
+            - Explain whether the company looks cheap, fair, or expensive relative to its growth
+              and quality, using the provided metrics (P/E, margins, growth rates, etc.).
+            - Highlight the 2–3 most important fundamental strengths visible in the data.
+            - Highlight the 2–3 most important fundamental concerns or red flags.
+            - Compare margins, growth, and leverage to what you'd generally expect for this
+              sector (qualitatively — do not invent peer company numbers).
+            - Explain what assumptions an investor would need to believe for the current valuation
+              to make sense.
+            - Do NOT repeat the raw metric values verbatim in a list — weave them into the narrative.
+            - If metrics are missing or sparse, say so and discuss fundamentals conceptually.
+
+            Return a single JSON object:
+            {{
+              "overviewNote": "..."
+            }}
+
+            Do not include extra keys, markdown, or commentary outside the JSON.
+            """
+        ).strip()
+
+        user_msg = dedent(
+            f"""
+            Write a fundamental analysis overview for:
+
+            {context_block}
+
+            ## Metrics to interpret (already shown to the user — explain what they mean)
+            {metrics_block}
+
+            Help the reader understand whether this company's fundamentals support a long-term
+            investment, and what the key numbers are really telling them.
             """
         ).strip()
 

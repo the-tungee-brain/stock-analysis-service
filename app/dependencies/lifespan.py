@@ -32,12 +32,14 @@ from app.builders.schwab_auth_builder import SchwabAuthBuilder
 from app.builders.schwab_market_builder import SchwabMarketBuilder
 from app.builders.schwab_trader_builder import SchwabTraderBuilder
 from app.builders.performance_builder import PerformanceBuilder
+from app.builders.fundamentals_builder import FundamentalsBuilder
 from app.builders.ticker_symbol_builder import TickerSymbolBuilder
 
 from app.core.llm_config import settings
 
 from app.services.chat_service import ChatService
 from app.services.company_profile_service import CompanyProfileService
+from app.services.company_research_service import CompanyResearchService
 from app.services.llm_service import LLMService
 from app.services.market_service import MarketService
 from app.services.news_service import NewsService
@@ -137,6 +139,7 @@ async def lifespan(app: FastAPI):
         chat_sessions_adapter=chat_sessions_adapter
     )
     performance_builder = PerformanceBuilder(market_data_adapter=yfinance_adapter)
+    fundamentals_builder = FundamentalsBuilder(market_data_adapter=yfinance_adapter)
     ticker_symbol_builder = TickerSymbolBuilder(
         ticker_symbol_adapter=ticker_symbol_adapter
     )
@@ -170,6 +173,12 @@ async def lifespan(app: FastAPI):
         chat_messages_builder=chat_messages_builder,
     )
     company_profile_service = CompanyProfileService(finnhub_builder=finnhub_builder)
+    company_research_service = CompanyResearchService(
+        company_profile_service=company_profile_service,
+        market_service=market_service,
+        news_service=news_service,
+        fundamentals_builder=fundamentals_builder,
+    )
     ticker_service = TickerService(ticker_symbol_builder=ticker_symbol_builder)
     transaction_service = TransactionService(
         schwab_trader_builder=schwab_trader_builder
@@ -188,6 +197,7 @@ async def lifespan(app: FastAPI):
     app.state.portfolio_analysis_service = portfolio_analysis_service
     app.state.chat_service = chat_service
     app.state.company_profile_service = company_profile_service
+    app.state.company_research_service = company_research_service
     app.state.ticker_service = ticker_service
     app.state.transaction_service = transaction_service
 

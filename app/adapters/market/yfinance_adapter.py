@@ -7,3 +7,7 @@ class YFinanceAdapter:
         ticker = yf.Ticker(symbol)
         hist = ticker.history(period="1y", interval="1d")
         return hist["Close"] if "Close" in hist.columns else pd.Series(dtype=float)
+
+    def get_ticker_info(self, symbol: str) -> dict:
+        ticker = yf.Ticker(symbol)
+        return ticker.info or {}

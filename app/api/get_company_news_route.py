@@ -21,7 +21,7 @@ async def get_company_news(
     ),
     llm_service: LLMService = Depends(get_llm_service),
 ) -> StockNewsView:
-    news = news_service.get_company_news(symbol=symbol)
+    news = news_service.get_company_news(symbol=symbol, lookback_days=7)
     prompts = prompt_enrichment_service.enrich_news_prompt(symbol=symbol, news=news)
     stock_news_view = await llm_service.analyze_news(
         symbol=symbol, prompts=prompts, news=news

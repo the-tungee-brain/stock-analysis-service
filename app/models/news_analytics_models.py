@@ -32,4 +32,6 @@ class StockNewsView(BaseModel):
     dominant_driver: str
     market_impact_horizon: MarketImpactHorizon
     actionability_score: int = Field(ge=1, le=5)
+    investorTakeaway: str
+    deepAnalysis: str
     items: List[EnrichedNewsItem]

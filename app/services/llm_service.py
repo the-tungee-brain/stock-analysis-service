@@ -57,6 +57,8 @@ class LLMService:
                 dominant_driver="No recent news.",
                 market_impact_horizon="medium_term",
                 actionability_score=1,
+                investorTakeaway="No recent news to analyze. Check back later or review the company's business profile.",
+                deepAnalysis="No recent news articles were found for this symbol in the past day. Without news flow, focus on fundamentals, business model, and price performance for your research.",
                 items=[],
             )
         enriched_news = await self.news_analytics_builder.get_enriched_news_items(
