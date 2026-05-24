@@ -7,6 +7,8 @@ import requests
 from fastapi import FastAPI
 from openai import OpenAI
 
+from app.adapters.cache.research_context_cache import ResearchContextCache
+
 from app.adapters.chat.chat_messages_adapter import ChatMessagesAdapter
 from app.adapters.chat.chat_sessions_adapter import ChatSessionsAdapter
 from app.adapters.finnhub.finnhub_adapter import FinnhubAdapter
