@@ -47,6 +47,8 @@ class PortfolioAnalysisService:
         symbol: Optional[str],
         user_prompt: Optional[str],
         action: AnalysisAction,
+        *,
+        include_market_data: bool = True,
     ) -> BaseAnalysisContext:
         if not symbol:
             return PortfolioContext(
@@ -54,6 +56,16 @@ class PortfolioAnalysisService:
                 positions=positions,
                 session_id=session_id,
                 user_prompt=user_prompt,
+            )
+
+        if not include_market_data:
+            return SymbolContext(
+                symbol=symbol,
+                account=account,
+                positions=positions,
+                session_id=session_id,
+                user_prompt=user_prompt,
+                action=action,
             )
 
         schwab_token = self.schwab_auth_service.get_valid_token_by_user_id(

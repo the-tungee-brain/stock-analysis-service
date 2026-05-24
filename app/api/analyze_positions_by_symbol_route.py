@@ -59,16 +59,6 @@ async def analyze_positions_by_symbol(
     ),
     chat_service: ChatService = Depends(get_chat_service),
 ):
-    ctx = await portfolio_analysis_service.build_analysis_context(
-        user_id=user_id,
-        account=request.account,
-        positions=request.positions,
-        session_id=request.session_id,
-        symbol=request.symbol,
-        user_prompt=request.prompt,
-        action=request.action,
-    )
-
     session_prompt = chat_service.user_message_for_storage(
         prompt=request.prompt,
         action=request.action,
@@ -85,6 +75,18 @@ async def analyze_positions_by_symbol(
         action=request.action,
         recent_messages=recent_messages,
     )
+
+    ctx = await portfolio_analysis_service.build_analysis_context(
+        user_id=user_id,
+        account=request.account,
+        positions=request.positions,
+        session_id=request.session_id,
+        symbol=request.symbol,
+        user_prompt=request.prompt,
+        action=request.action,
+        include_market_data=include_context,
+    )
+
     user_prompt = prompt_enrichment_service.build_portfolio_strategy_prompt(
         ctx=ctx,
         include_context=include_context,
