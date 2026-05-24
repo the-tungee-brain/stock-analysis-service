@@ -1,7 +1,12 @@
+from datetime import date, timedelta
 from unittest.mock import MagicMock
 
 from app.models.intelligence_models import SymbolIntelligence
-from app.services.portfolio_analysis_service import PortfolioAnalysisService
+from app.services.portfolio_analysis_service import (
+    INTELLIGENCE_OPTION_LOOKAHEAD_DAYS,
+    INTELLIGENCE_OPTION_STRIKE_COUNT,
+    PortfolioAnalysisService,
+)
 from tests.test_position_prompt_metrics import _make_account, _make_position
 
 
@@ -66,3 +71,10 @@ def test_build_symbol_intelligence_delegates_to_intelligence_service():
     assert result == expected
     portfolio_intelligence_service.build_symbol_intelligence.assert_called_once()
     market_service.get_option_chains.assert_called_once()
+    _, kwargs = market_service.get_option_chains.call_args
+    assert kwargs["strike_count"] == INTELLIGENCE_OPTION_STRIKE_COUNT
+    today = date.today()
+    assert kwargs["from_date"] == today.isoformat()
+    assert kwargs["to_date"] == (
+        today + timedelta(days=INTELLIGENCE_OPTION_LOOKAHEAD_DAYS)
+    ).isoformat()

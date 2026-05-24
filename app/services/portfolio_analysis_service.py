@@ -1,5 +1,6 @@
 import asyncio
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional, Set
 
 from app.broker.option_utils import (
@@ -18,6 +19,7 @@ from app.core.prompts import (
     _build_account_summary,
     _enrich_positions_table,
 )
+from app.models.company_research_models import ResearchContext
 from app.models.intelligence_models import (
     PortfolioIntelligence,
     ProactiveAlert,
@@ -50,6 +52,8 @@ NEWS_ENRICH_ACTIONS = frozenset(
 )
 ASSIGNMENT_RISK_WINDOW_DAYS = 14
 PORTFOLIO_RESEARCH_LIMIT = 8
+INTELLIGENCE_OPTION_STRIKE_COUNT = 5
+INTELLIGENCE_OPTION_LOOKAHEAD_DAYS = 45
 
 
 class PortfolioAnalysisService:
@@ -514,37 +518,68 @@ class PortfolioAnalysisService:
     ) -> SymbolIntelligence:
         symbol_upper = symbol.upper()
         positions = positions or []
+        has_schwab = access_token is not None and account is not None
+        account_number = (
+            account.securitiesAccount.accountNumber if account is not None else None
+        )
 
-        try:
-            ctx = self.company_research_service.build_context(symbol=symbol_upper)
-            ctx = self.portfolio_intelligence_service.attach_enriched_news(ctx)
-        except Exception:
-            return SymbolIntelligence(symbol=symbol_upper)
-
-        orders = None
-        option_chain = None
-
-        if access_token and account is not None:
-            account_number = account.securitiesAccount.accountNumber
+        def load_context() -> ResearchContext | None:
             try:
-                orders = self._load_symbol_orders(
+                ctx = self.company_research_service.build_context(symbol=symbol_upper)
+                return self.portfolio_intelligence_service.attach_enriched_news(ctx)
+            except Exception:
+                return None
+
+        def load_orders():
+            if not has_schwab or account_number is None:
+                return None
+            try:
+                return self._load_symbol_orders(
                     user_id=user_id,
                     account_number=account_number,
                     access_token=access_token,
                     symbol=symbol_upper,
                 )
             except Exception:
-                orders = None
+                return None
 
-            if include_options:
-                try:
-                    option_chain = self.market_service.get_option_chains(
-                        access_token=access_token,
-                        symbol=symbol_upper,
-                        strike_count=10,
-                    )
-                except Exception:
-                    option_chain = None
+        def load_option_chain():
+            if not include_options or not has_schwab:
+                return None
+            try:
+                today = date.today()
+                end = today + timedelta(days=INTELLIGENCE_OPTION_LOOKAHEAD_DAYS)
+                return self.market_service.get_option_chains(
+                    access_token=access_token,
+                    symbol=symbol_upper,
+                    strike_count=INTELLIGENCE_OPTION_STRIKE_COUNT,
+                    from_date=today.isoformat(),
+                    to_date=end.isoformat(),
+                )
+            except Exception:
+                return None
+
+        worker_count = 1
+        if has_schwab:
+            worker_count += 1
+        if include_options and has_schwab:
+            worker_count += 1
+
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            ctx_future = executor.submit(load_context)
+            orders_future = executor.submit(load_orders) if has_schwab else None
+            chain_future = (
+                executor.submit(load_option_chain)
+                if include_options and has_schwab
+                else None
+            )
+
+            ctx = ctx_future.result()
+            orders = orders_future.result() if orders_future is not None else None
+            option_chain = chain_future.result() if chain_future is not None else None
+
+        if ctx is None:
+            return SymbolIntelligence(symbol=symbol_upper)
 
         try:
             return self.portfolio_intelligence_service.build_symbol_intelligence(

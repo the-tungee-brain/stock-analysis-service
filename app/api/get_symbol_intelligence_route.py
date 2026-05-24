@@ -1,4 +1,5 @@
 import asyncio
+from typing import Callable, TypeVar
 
 from fastapi import APIRouter, Depends, Query
 
@@ -15,6 +16,8 @@ from app.services.portfolio_service import PortfolioService
 from app.services.schwab_auth_service import SchwabAuthService, SchwabReauthRequired
 
 router = APIRouter()
+
+T = TypeVar("T")
 
 
 def _positions_for_symbol(positions: list[Position], symbol: str) -> list[Position]:
@@ -33,21 +36,15 @@ def _positions_for_symbol(positions: list[Position], symbol: str) -> list[Positi
     return matched
 
 
-@router.get("/research/intelligence", response_model=SymbolIntelligence)
-async def get_symbol_intelligence(
-    symbol: str = Query(..., min_length=1, max_length=12),
-    include_options: bool = Query(
-        default=True,
-        description="Include Schwab option chain scoring when linked",
-    ),
-    user_id: str = Depends(get_current_user_id),
-    portfolio_service: PortfolioService = Depends(get_portfolio_service),
-    schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
-    portfolio_analysis_service: PortfolioAnalysisService = Depends(
-        get_portfolio_analysis_service
-    ),
+def _fetch_symbol_intelligence(
+    *,
+    user_id: str,
+    symbol_upper: str,
+    include_options: bool,
+    portfolio_service: PortfolioService,
+    schwab_auth_service: SchwabAuthService,
+    portfolio_analysis_service: PortfolioAnalysisService,
 ) -> SymbolIntelligence:
-    symbol_upper = symbol.strip().upper()
     account: SchwabAccounts | None = None
     positions: list[Position] = []
     access_token: str | None = None
@@ -64,20 +61,47 @@ async def get_symbol_intelligence(
             symbol_upper,
         )
     except SchwabReauthRequired:
-        account = None
-        positions = []
-        access_token = None
+        pass
     except Exception:
-        account = None
-        positions = []
-        access_token = None
+        pass
 
-    return await asyncio.to_thread(
-        portfolio_analysis_service.build_symbol_intelligence,
+    return portfolio_analysis_service.build_symbol_intelligence(
         user_id=user_id,
         symbol=symbol_upper,
         account=account,
         positions=positions,
         access_token=access_token,
         include_options=include_options and access_token is not None,
+    )
+
+
+async def _run_sync(work: Callable[[], T]) -> T:
+    return await asyncio.to_thread(work)
+
+
+@router.get("/research/intelligence", response_model=SymbolIntelligence)
+async def get_symbol_intelligence(
+    symbol: str = Query(..., min_length=1, max_length=12),
+    include_options: bool = Query(
+        default=True,
+        description="Include Schwab option chain scoring when linked",
+    ),
+    user_id: str = Depends(get_current_user_id),
+    portfolio_service: PortfolioService = Depends(get_portfolio_service),
+    schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
+    portfolio_analysis_service: PortfolioAnalysisService = Depends(
+        get_portfolio_analysis_service
+    ),
+) -> SymbolIntelligence:
+    symbol_upper = symbol.strip().upper()
+
+    return await _run_sync(
+        lambda: _fetch_symbol_intelligence(
+            user_id=user_id,
+            symbol_upper=symbol_upper,
+            include_options=include_options,
+            portfolio_service=portfolio_service,
+            schwab_auth_service=schwab_auth_service,
+            portfolio_analysis_service=portfolio_analysis_service,
+        )
     )

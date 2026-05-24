@@ -34,7 +34,9 @@ class PeerComparisonService:
 
         with ThreadPoolExecutor(max_workers=min(len(peer_symbols), 4)) as executor:
             futures = {
-                executor.submit(self._load_peer_metrics, peer): peer
+                executor.submit(
+                    self._load_peer_metrics, peer, include_performance=False
+                ): peer
                 for peer in peer_symbols
             }
             for future in as_completed(futures):
@@ -72,19 +74,25 @@ class PeerComparisonService:
             summary=summary,
         )
 
-    def _load_peer_metrics(self, symbol: str) -> PeerMetric | None:
+    def _load_peer_metrics(
+        self, symbol: str, *, include_performance: bool = True
+    ) -> PeerMetric | None:
         info = self.yfinance_adapter.get_ticker_info(symbol=symbol)
         if not info:
             return None
 
-        performance = self.performance_builder.build(symbol=symbol)
+        one_year_return = None
+        if include_performance:
+            performance = self.performance_builder.build(symbol=symbol)
+            one_year_return = performance.oneYear
+
         pe = info.get("trailingPE")
         pe_str = f"{pe:.1f}x" if isinstance(pe, (int, float)) else None
 
         return PeerMetric(
             symbol=symbol,
             name=info.get("shortName") or info.get("longName"),
-            one_year_return=performance.oneYear,
+            one_year_return=one_year_return,
             pe_trailing=pe_str,
             sector=info.get("sector"),
         )

@@ -13,5 +13,8 @@ CMD ["gunicorn", "app.main:app", \
     "--workers=2", \
     "--worker-class=uvicorn.workers.UvicornWorker", \
     "--bind=0.0.0.0:8000", \
-    "--timeout=300", \
+    "--timeout=120", \
+    "--graceful-timeout=30", \
+    "--max-requests=500", \
+    "--max-requests-jitter=50", \
     "--keep-alive=5"]
