@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
@@ -32,7 +33,8 @@ class PeerComparisonService:
         target_metrics = self._load_peer_metrics(symbol_upper)
         peer_metrics: list[PeerMetric] = []
 
-        with ThreadPoolExecutor(max_workers=min(len(peer_symbols), 4)) as executor:
+        peer_workers = int(os.getenv("PEER_FETCH_WORKERS", "2"))
+        with ThreadPoolExecutor(max_workers=min(len(peer_symbols), peer_workers)) as executor:
             futures = {
                 executor.submit(
                     self._load_peer_metrics, peer, include_performance=False

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional, Set
@@ -54,6 +55,8 @@ ASSIGNMENT_RISK_WINDOW_DAYS = 14
 PORTFOLIO_RESEARCH_LIMIT = 8
 INTELLIGENCE_OPTION_STRIKE_COUNT = 5
 INTELLIGENCE_OPTION_LOOKAHEAD_DAYS = 45
+
+logger = logging.getLogger(__name__)
 
 
 class PortfolioAnalysisService:
@@ -528,6 +531,10 @@ class PortfolioAnalysisService:
                 ctx = self.company_research_service.build_context(symbol=symbol_upper)
                 return self.portfolio_intelligence_service.attach_enriched_news(ctx)
             except Exception:
+                logger.exception(
+                    "Failed to build research context for symbol intelligence: %s",
+                    symbol_upper,
+                )
                 return None
 
         def load_orders():
@@ -541,14 +548,18 @@ class PortfolioAnalysisService:
                     symbol=symbol_upper,
                 )
             except Exception:
+                logger.exception(
+                    "Failed to load orders for symbol intelligence: %s",
+                    symbol_upper,
+                )
                 return None
 
         def load_option_chain():
             if not include_options or not has_schwab:
                 return None
+            today = date.today()
+            end = today + timedelta(days=INTELLIGENCE_OPTION_LOOKAHEAD_DAYS)
             try:
-                today = date.today()
-                end = today + timedelta(days=INTELLIGENCE_OPTION_LOOKAHEAD_DAYS)
                 return self.market_service.get_option_chains(
                     access_token=access_token,
                     symbol=symbol_upper,
@@ -557,6 +568,22 @@ class PortfolioAnalysisService:
                     to_date=end.isoformat(),
                 )
             except Exception:
+                logger.warning(
+                    "Narrow option chain fetch failed for %s; retrying without dates",
+                    symbol_upper,
+                    exc_info=True,
+                )
+            try:
+                return self.market_service.get_option_chains(
+                    access_token=access_token,
+                    symbol=symbol_upper,
+                    strike_count=INTELLIGENCE_OPTION_STRIKE_COUNT,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to load option chain for symbol intelligence: %s",
+                    symbol_upper,
+                )
                 return None
 
         worker_count = 1
@@ -579,7 +606,7 @@ class PortfolioAnalysisService:
             option_chain = chain_future.result() if chain_future is not None else None
 
         if ctx is None:
-            return SymbolIntelligence(symbol=symbol_upper)
+            return SymbolIntelligence(symbol=symbol_upper, partial=True)
 
         try:
             return self.portfolio_intelligence_service.build_symbol_intelligence(
@@ -592,7 +619,11 @@ class PortfolioAnalysisService:
                 include_peers=True,
             )
         except Exception:
-            return SymbolIntelligence(symbol=symbol_upper)
+            logger.exception(
+                "Failed to assemble symbol intelligence for %s",
+                symbol_upper,
+            )
+            return SymbolIntelligence(symbol=symbol_upper, partial=True)
 
     @staticmethod
     def _positions_for_symbol(

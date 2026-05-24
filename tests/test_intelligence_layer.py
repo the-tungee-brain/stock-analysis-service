@@ -8,7 +8,12 @@ from app.models.company_research_models import (
     ResearchContext,
     ResearchSnapshot,
 )
-from app.models.intelligence_models import PeerComparison, PeerMetric, SymbolIntelligence
+from app.models.intelligence_models import (
+    IntelligenceSignal,
+    PeerComparison,
+    PeerMetric,
+    SymbolIntelligence,
+)
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
 from app.services.intelligence.event_timeline_builder import EventTimelineBuilder
 from app.services.intelligence.options_scoring_service import OptionsScoringService
@@ -133,6 +138,37 @@ def test_options_scoring_ranks_liquid_strikes():
     assert scorecard.covered_call_candidates
     assert scorecard.csp_candidates
     assert scorecard.covered_call_candidates[0].strike == 210.0
+
+
+def test_symbol_intelligence_serializes_camel_case_aliases():
+    intelligence = SymbolIntelligence(
+        symbol="AAPL",
+        signals=[
+            IntelligenceSignal(
+                kind="earnings",
+                severity="watch",
+                message="Earnings next week",
+                symbol="AAPL",
+            )
+        ],
+        peer_comparison=PeerComparison(
+            target_symbol="AAPL",
+            target_one_year_return="+12.0%",
+            peers=[],
+        ),
+        data_gaps=["news"],
+        partial=False,
+    )
+
+    payload = intelligence.model_dump(mode="json", by_alias=True)
+
+    assert "peerComparison" in payload
+    assert "eventTimeline" in payload
+    assert "optionsScorecard" in payload
+    assert "cachedResearch" in payload
+    assert "dataGaps" in payload
+    assert payload["peerComparison"]["targetSymbol"] == "AAPL"
+    assert "peer_comparison" not in payload
 
 
 def test_format_intelligence_block_renders_peer_table():

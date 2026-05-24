@@ -28,7 +28,7 @@ def test_build_symbol_intelligence_returns_symbol_on_research_failure():
         symbol="AAPL",
     )
 
-    assert result == SymbolIntelligence(symbol="AAPL")
+    assert result == SymbolIntelligence(symbol="AAPL", partial=True)
 
 
 def test_build_symbol_intelligence_delegates_to_intelligence_service():

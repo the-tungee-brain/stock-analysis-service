@@ -1,3 +1,4 @@
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 from app.adapters.cache.research_context_cache import ResearchContextCache
@@ -187,7 +188,9 @@ class CompanyResearchService:
     ) -> ResearchContext:
         data_gaps: list[str] = []
 
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(
+            max_workers=int(os.getenv("RESEARCH_FETCH_WORKERS", "4"))
+        ) as executor:
             future_snapshot = executor.submit(
                 self._run_loader,
                 "snapshot",

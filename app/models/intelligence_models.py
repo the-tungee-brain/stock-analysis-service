@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.prompts import AnalysisAction
 
@@ -15,8 +15,12 @@ EventKind = Literal[
     "macro",
 ]
 
+_INTELLIGENCE_MODEL_CONFIG = ConfigDict(populate_by_name=True)
+
 
 class IntelligenceSignal(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
     kind: str
     severity: SignalSeverity
     message: str
@@ -24,22 +28,34 @@ class IntelligenceSignal(BaseModel):
 
 
 class PeerMetric(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
     symbol: str
     name: str | None = None
-    one_year_return: str | None = None
-    pe_trailing: str | None = None
+    one_year_return: str | None = Field(
+        default=None, serialization_alias="oneYearReturn"
+    )
+    pe_trailing: str | None = Field(default=None, serialization_alias="peTrailing")
     sector: str | None = None
 
 
 class PeerComparison(BaseModel):
-    target_symbol: str
-    target_one_year_return: str | None = None
-    target_pe_trailing: str | None = None
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
+    target_symbol: str = Field(serialization_alias="targetSymbol")
+    target_one_year_return: str | None = Field(
+        default=None, serialization_alias="targetOneYearReturn"
+    )
+    target_pe_trailing: str | None = Field(
+        default=None, serialization_alias="targetPeTrailing"
+    )
     peers: list[PeerMetric] = Field(default_factory=list)
     summary: str | None = None
 
 
 class EventTimelineEntry(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
     date: str
     kind: EventKind
     title: str
@@ -47,11 +63,13 @@ class EventTimelineEntry(BaseModel):
 
 
 class OptionsStrikeCandidate(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
     side: Literal["call", "put"]
     strike: float
     expiration: str
     delta: float | None = None
-    open_interest: int | None = None
+    open_interest: int | None = Field(default=None, serialization_alias="openInterest")
     bid: float | None = None
     ask: float | None = None
     iv: float | None = None
@@ -60,42 +78,76 @@ class OptionsStrikeCandidate(BaseModel):
 
 
 class OptionsScorecard(BaseModel):
-    underlying_price: float | None = None
-    covered_call_candidates: list[OptionsStrikeCandidate] = Field(default_factory=list)
-    csp_candidates: list[OptionsStrikeCandidate] = Field(default_factory=list)
-    assignment_flags: list[str] = Field(default_factory=list)
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
+    underlying_price: float | None = Field(
+        default=None, serialization_alias="underlyingPrice"
+    )
+    covered_call_candidates: list[OptionsStrikeCandidate] = Field(
+        default_factory=list, serialization_alias="coveredCallCandidates"
+    )
+    csp_candidates: list[OptionsStrikeCandidate] = Field(
+        default_factory=list, serialization_alias="cspCandidates"
+    )
+    assignment_flags: list[str] = Field(
+        default_factory=list, serialization_alias="assignmentFlags"
+    )
 
 
 class SectorWeight(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
     sector: str
-    weight_pct: float
+    weight_pct: float = Field(serialization_alias="weightPct")
     symbols: list[str] = Field(default_factory=list)
 
 
 class PortfolioNewsItem(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
     symbol: str
     headline: str
     sentiment: str | None = None
-    weight_pct: float | None = None
+    weight_pct: float | None = Field(default=None, serialization_alias="weightPct")
 
 
 class PortfolioDigest(BaseModel):
-    sector_weights: list[SectorWeight] = Field(default_factory=list)
-    macro_regime: str | None = None
-    top_news: list[PortfolioNewsItem] = Field(default_factory=list)
-    earnings_this_week: list[str] = Field(default_factory=list)
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
+    sector_weights: list[SectorWeight] = Field(
+        default_factory=list, serialization_alias="sectorWeights"
+    )
+    macro_regime: str | None = Field(default=None, serialization_alias="macroRegime")
+    top_news: list[PortfolioNewsItem] = Field(
+        default_factory=list, serialization_alias="topNews"
+    )
+    earnings_this_week: list[str] = Field(
+        default_factory=list, serialization_alias="earningsThisWeek"
+    )
 
 
 class CachedResearchSnippet(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
     sentiment: str | None = None
-    investment_thesis: str | None = None
-    key_strengths: list[str] = Field(default_factory=list)
-    key_risks: list[str] = Field(default_factory=list)
-    what_to_watch: list[str] = Field(default_factory=list)
-    valuation_context: str | None = None
+    investment_thesis: str | None = Field(
+        default=None, serialization_alias="investmentThesis"
+    )
+    key_strengths: list[str] = Field(
+        default_factory=list, serialization_alias="keyStrengths"
+    )
+    key_risks: list[str] = Field(default_factory=list, serialization_alias="keyRisks")
+    what_to_watch: list[str] = Field(
+        default_factory=list, serialization_alias="whatToWatch"
+    )
+    valuation_context: str | None = Field(
+        default=None, serialization_alias="valuationContext"
+    )
 
 
 class ProactiveAlert(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
     action: AnalysisAction
     label: str
     reason: str
@@ -104,15 +156,29 @@ class ProactiveAlert(BaseModel):
 
 
 class SymbolIntelligence(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
     symbol: str
     signals: list[IntelligenceSignal] = Field(default_factory=list)
-    peer_comparison: PeerComparison | None = None
-    event_timeline: list[EventTimelineEntry] = Field(default_factory=list)
-    options_scorecard: OptionsScorecard | None = None
-    cached_research: CachedResearchSnippet | None = None
+    peer_comparison: PeerComparison | None = Field(
+        default=None, serialization_alias="peerComparison"
+    )
+    event_timeline: list[EventTimelineEntry] = Field(
+        default_factory=list, serialization_alias="eventTimeline"
+    )
+    options_scorecard: OptionsScorecard | None = Field(
+        default=None, serialization_alias="optionsScorecard"
+    )
+    cached_research: CachedResearchSnippet | None = Field(
+        default=None, serialization_alias="cachedResearch"
+    )
+    data_gaps: list[str] = Field(default_factory=list, serialization_alias="dataGaps")
+    partial: bool = False
 
 
 class PortfolioIntelligence(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
     signals: list[IntelligenceSignal] = Field(default_factory=list)
     digest: PortfolioDigest | None = None
     alerts: list[ProactiveAlert] = Field(default_factory=list)

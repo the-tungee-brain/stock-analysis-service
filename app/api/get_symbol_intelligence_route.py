@@ -79,12 +79,16 @@ async def _run_sync(work: Callable[[], T]) -> T:
     return await asyncio.to_thread(work)
 
 
-@router.get("/research/intelligence", response_model=SymbolIntelligence)
+@router.get(
+    "/research/intelligence",
+    response_model=SymbolIntelligence,
+    response_model_by_alias=True,
+)
 async def get_symbol_intelligence(
     symbol: str = Query(..., min_length=1, max_length=12),
     include_options: bool = Query(
-        default=True,
-        description="Include Schwab option chain scoring when linked",
+        default=False,
+        description="Include Schwab option chain scoring when linked (heavier request)",
     ),
     user_id: str = Depends(get_current_user_id),
     portfolio_service: PortfolioService = Depends(get_portfolio_service),

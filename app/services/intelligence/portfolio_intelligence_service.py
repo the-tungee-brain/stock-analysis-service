@@ -101,6 +101,7 @@ class PortfolioIntelligenceService:
             event_timeline=timeline,
             options_scorecard=options_scorecard,
             cached_research=cached_research,
+            data_gaps=list(research.data_gaps),
         )
 
     def build_portfolio_intelligence(

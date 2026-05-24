@@ -19,7 +19,11 @@ from app.broker.option_utils import summarize_assignment_risk_structural
 router = APIRouter()
 
 
-@router.get("/portfolio/brief", response_model=PortfolioIntelligence)
+@router.get(
+    "/portfolio/brief",
+    response_model=PortfolioIntelligence,
+    response_model_by_alias=True,
+)
 async def get_portfolio_brief(
     user_id: str = Depends(get_current_user_id),
     portfolio_service: PortfolioService = Depends(get_portfolio_service),
