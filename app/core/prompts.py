@@ -47,13 +47,14 @@ def should_use_natural_response(user_prompt: Optional[str]) -> bool:
 STRATEGY_RULES = dedent("""
     # How to decide (follow this order every time)
 
-    ## Step 1 — Estimate position size
-    - Position weight ≈ abs(position market value) / account liquidation value.
-      If unavailable, use position market value / total portfolio market value from the position table.
-    - Always state the estimated weight (e.g., "~18% of portfolio") in your analysis.
+    ## Step 1 — Read position size (precomputed)
+    - Use the **WEIGHT_%** column in the position table — it is already calculated for you.
+    - Do NOT recalculate portfolio weight unless WEIGHT_% is N/A.
+    - Always cite the provided weight in your analysis (e.g., "NVDA is 22.4% of the portfolio").
 
-    ## Step 2 — Estimate unrealized P&L %
-    - Long stock/options: PnL % ≈ unrealized PnL / (market value − unrealized PnL) × 100.
+    ## Step 2 — Read unrealized P&L (precomputed)
+    - Use the **PNL_%** column in the position table — it is already calculated from cost basis.
+    - Do NOT recalculate P/L % unless PNL_% is N/A.
     - Treat losses beyond −30% as urgent. Do not recommend pure Hold in that case.
 
     ## Step 3 — Check the investment thesis
@@ -242,11 +243,89 @@ def _format_currency(value: float) -> str:
     return f"${value:,.0f}"
 
 
+def _format_pct(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:+.1f}%"
+
+
+def _portfolio_liquidation_value(
+    account: SchwabAccounts | None,
+    positions: List[Position],
+) -> float | None:
+    if account is not None:
+        agg = account.aggregatedBalance
+        cur = account.securitiesAccount.currentBalances
+        for candidate in (
+            agg.currentLiquidationValue,
+            agg.liquidationValue,
+            cur.liquidationValue,
+            account.securitiesAccount.initialBalances.liquidationValue,
+            account.securitiesAccount.initialBalances.accountValue,
+        ):
+            if candidate and candidate > 0:
+                return candidate
+
+    total = sum(abs(p.marketValue) for p in positions)
+    return total if total > 0 else None
+
+
+def _position_pnl(position: Position) -> float:
+    if position.longQuantity > 0:
+        return position.longOpenProfitLoss or 0.0
+    if position.shortQuantity > 0:
+        return position.shortOpenProfitLoss or 0.0
+    return 0.0
+
+
+def _position_cost_basis(position: Position) -> float | None:
+    if position.longQuantity > 0:
+        avg = position.averageLongPrice or position.averagePrice
+        basis = avg * position.longQuantity
+    elif position.shortQuantity > 0:
+        avg = position.averageShortPrice or position.averagePrice
+        basis = avg * position.shortQuantity
+    else:
+        return None
+
+    return basis if basis > 0 else None
+
+
+def _position_pnl_pct(position: Position) -> float | None:
+    basis = _position_cost_basis(position)
+    if basis is None:
+        return None
+    return (_position_pnl(position) / basis) * 100
+
+
+def _position_weight_pct(
+    position: Position, portfolio_value: float | None
+) -> float | None:
+    if not portfolio_value or portfolio_value <= 0:
+        return None
+    return (abs(position.marketValue) / portfolio_value) * 100
+
+
+def _position_type_label(position: Position) -> str:
+    instrument = position.instrument
+    if instrument.assetType == "OPTION":
+        if instrument.putCall == "CALL":
+            return "CALL"
+        if instrument.putCall == "PUT":
+            return "PUT"
+        return "OPT"
+    return instrument.assetType or "OTHER"
+
+
 def _enrich_positions_table(
-    positions: List[Position], max_symbols: int | None = None
+    positions: List[Position],
+    max_symbols: int | None = None,
+    account: SchwabAccounts | None = None,
 ) -> str:
     if not positions:
         return "No open positions."
+
+    portfolio_value = _portfolio_liquidation_value(account=account, positions=positions)
 
     positions_sorted = sorted(
         positions,
@@ -261,46 +340,57 @@ def _enrich_positions_table(
 
     for p in positions_sorted:
         symbol = getattr(p.instrument, "symbol", "UNKNOWN")
+        pnl = _position_pnl(p)
+        pnl_pct = _position_pnl_pct(p)
+        weight_pct = _position_weight_pct(p, portfolio_value)
 
         qty = p.longQuantity if p.longQuantity > 0 else -p.shortQuantity
         avg_price = (
             p.averageLongPrice if p.longQuantity > 0 else p.averageShortPrice
         ) or p.averagePrice
 
-        pnl = p.longOpenProfitLoss if p.longQuantity > 0 else p.shortOpenProfitLoss
-        pnl = pnl if pnl is not None else 0.0
-
-        day_pnl = p.currentDayProfitLoss
-
         rows.append(
             {
                 "symbol": symbol,
+                "type": _position_type_label(p),
                 "qty": round(qty, 2),
                 "avg": round(avg_price or 0, 2),
                 "mkt_val": round(p.marketValue, 2),
                 "pnl": round(pnl, 2),
-                "day_pnl": round(day_pnl, 2),
+                "pnl_pct": _format_pct(pnl_pct),
+                "weight_pct": _format_pct(weight_pct),
+                "day_pnl": round(p.currentDayProfitLoss, 2),
                 "day_%": round(p.currentDayProfitLossPercentage, 2),
             }
         )
 
-    header = "SYMBOL | QTY | AVG | MKT_VAL | PnL | DAY_PnL | DAY_%"
+    header = (
+        "SYMBOL | TYPE | QTY | AVG | MKT_VAL | PNL | PNL_% | WEIGHT_% | DAY_PNL | DAY_%"
+    )
     lines = [header]
 
     for r in rows:
         lines.append(
-            f"{r['symbol']} | {r['qty']} | {r['avg']} | {r['mkt_val']} | {r['pnl']} | {r['day_pnl']} | {r['day_%']}%"
+            f"{r['symbol']} | {r['type']} | {r['qty']} | {r['avg']} | {r['mkt_val']} | "
+            f"{r['pnl']} | {r['pnl_pct']} | {r['weight_pct']} | {r['day_pnl']} | {r['day_%']}%"
         )
 
     table = "\n".join(lines)
 
-    total_value = sum(p.marketValue for p in positions_sorted)
+    total_value = sum(abs(p.marketValue) for p in positions_sorted)
     total_day_pnl = sum(p.currentDayProfitLoss for p in positions_sorted)
+    portfolio_line = (
+        f"PORTFOLIO_LIQUIDATION_VALUE: {round(portfolio_value, 2)}"
+        if portfolio_value is not None
+        else "PORTFOLIO_LIQUIDATION_VALUE: N/A"
+    )
 
     summary = (
-        f"\n\nTOTAL_MKT_VAL: {round(total_value,2)}"
-        f"\nTOTAL_DAY_PnL: {round(total_day_pnl,2)}"
+        f"\n\n{portfolio_line}"
+        f"\nTABLE_TOTAL_ABS_MKT_VAL: {round(total_value, 2)}"
+        f"\nTOTAL_DAY_PnL: {round(total_day_pnl, 2)}"
         f"\nNUM_POSITIONS: {len(positions_sorted)}"
+        f"\nNOTE: PNL_% = unrealized P/L vs cost basis. WEIGHT_% = abs(market value) / portfolio liquidation value."
     )
 
     return table + summary
@@ -431,7 +521,7 @@ def build_symbol_prompt(ctx: SymbolContext) -> str:
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     account_summary = _build_account_summary(ctx.account)
-    positions_table = _enrich_positions_table(ctx.positions)
+    positions_table = _enrich_positions_table(ctx.positions, account=ctx.account)
 
     market_block = ctx.market_snapshot or "No per-symbol market snapshot provided."
     macro_block = ctx.market_context or "No macro benchmark data provided."
@@ -481,7 +571,9 @@ def build_portfolio_prompt(ctx: PortfolioContext) -> str:
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     account_summary = _build_account_summary(ctx.account)
-    positions_table = _enrich_positions_table(ctx.positions, max_symbols=20)
+    positions_table = _enrich_positions_table(
+        ctx.positions, max_symbols=20, account=ctx.account
+    )
 
     if ctx.user_prompt:
         task_block = dedent(f"""
