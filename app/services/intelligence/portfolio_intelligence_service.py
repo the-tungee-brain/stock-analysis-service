@@ -20,6 +20,7 @@ from app.models.schwab_order_models import SchwabOrder
 from app.services.company_research_service import CompanyResearchService
 from app.services.enriched_news_service import EnrichedNewsService
 from app.services.intelligence.event_timeline_builder import EventTimelineBuilder
+from app.services.intelligence.option_roll_planner_service import OptionRollPlannerService
 from app.services.intelligence.options_scoring_service import OptionsScoringService
 from app.services.intelligence.peer_comparison_service import PeerComparisonService
 from app.services.intelligence.signal_engine import SignalEngine, build_proactive_alerts
@@ -82,6 +83,7 @@ class PortfolioIntelligenceService:
         )
 
         options_scorecard = None
+        roll_suggestions = []
         if option_chain is not None:
             short_calls, short_puts = self._short_option_strikes(
                 positions=positions, symbol=symbol
@@ -90,6 +92,12 @@ class PortfolioIntelligenceService:
                 option_chain,
                 short_call_strikes=short_calls,
                 short_put_strikes=short_puts,
+            )
+            roll_suggestions = OptionRollPlannerService.build_roll_suggestions(
+                positions=positions,
+                symbol=symbol,
+                option_chain=option_chain,
+                scorecard=options_scorecard,
             )
 
         cached_research = self._load_cached_research(research)
@@ -100,6 +108,7 @@ class PortfolioIntelligenceService:
             peer_comparison=peer_comparison,
             event_timeline=timeline,
             options_scorecard=options_scorecard,
+            roll_suggestions=roll_suggestions,
             cached_research=cached_research,
             data_gaps=list(research.data_gaps),
         )

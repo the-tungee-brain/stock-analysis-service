@@ -26,6 +26,12 @@ from app.adapters.schwab.schwab_trader_adapter import SchwabTraderAdapter
 from app.adapters.user.app_user_adapter import AppUserAdapter
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.adapters.market.ticker_symbol_adapter import TickerSymbolAdapter
+from app.adapters.email.email_adapter import EmailAdapter
+from app.adapters.portfolio.alert_history_adapter import AlertHistoryAdapter
+from app.adapters.portfolio.morning_brief_delivery_adapter import (
+    MorningBriefDeliveryAdapter,
+)
+from app.adapters.portfolio.portfolio_snapshot_adapter import PortfolioSnapshotAdapter
 
 from app.builders.app_user_builder import AppUserBuilder
 from app.builders.chat_messages_builder import ChatMessagesBuilder
@@ -67,6 +73,8 @@ from app.services.intelligence.peer_comparison_service import PeerComparisonServ
 from app.services.intelligence.portfolio_intelligence_service import (
     PortfolioIntelligenceService,
 )
+from app.services.morning_brief_delivery_service import MorningBriefDeliveryService
+from app.services.portfolio_memory_service import PortfolioMemoryService
 
 
 def get_redis_client() -> redis.Redis:
@@ -140,6 +148,12 @@ async def lifespan(app: FastAPI):
     chat_sessions_adapter = ChatSessionsAdapter(client=powerpocketdb_client)
     yfinance_adapter = YFinanceAdapter()
     ticker_symbol_adapter = TickerSymbolAdapter(client=powerpocketdb_client)
+    portfolio_snapshot_adapter = PortfolioSnapshotAdapter(client=powerpocketdb_client)
+    alert_history_adapter = AlertHistoryAdapter(client=powerpocketdb_client)
+    morning_brief_delivery_adapter = MorningBriefDeliveryAdapter(
+        client=powerpocketdb_client
+    )
+    email_adapter = EmailAdapter(session=session)
 
     finnhub_builder = FinnhubBuilder(finnhub_adapter=finnhub_adapter)
     schwab_market_builder = SchwabMarketBuilder(
@@ -245,6 +259,20 @@ async def lifespan(app: FastAPI):
         portfolio_intelligence_service=portfolio_intelligence_service,
     )
     ticker_service = TickerService(ticker_symbol_builder=ticker_symbol_builder)
+    portfolio_memory_service = PortfolioMemoryService(
+        portfolio_snapshot_adapter=portfolio_snapshot_adapter,
+        alert_history_adapter=alert_history_adapter,
+    )
+    morning_brief_delivery_service = MorningBriefDeliveryService(
+        app_user_adapter=app_user_adapter,
+        delivery_adapter=morning_brief_delivery_adapter,
+        email_adapter=email_adapter,
+        portfolio_analysis_service=portfolio_analysis_service,
+        portfolio_service=portfolio_service,
+        transaction_service=transaction_service,
+        schwab_auth_service=schwab_auth_service,
+        portfolio_memory_service=portfolio_memory_service,
+    )
 
     app.state.http_session = session
     app.state.redis_client = redis_client
@@ -267,6 +295,8 @@ async def lifespan(app: FastAPI):
     app.state.ticker_service = ticker_service
     app.state.transaction_service = transaction_service
     app.state.recent_orders_cache = recent_orders_cache
+    app.state.portfolio_memory_service = portfolio_memory_service
+    app.state.morning_brief_delivery_service = morning_brief_delivery_service
 
     try:
         yield

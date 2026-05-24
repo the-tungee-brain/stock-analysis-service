@@ -30,6 +30,8 @@ from app.api.chat_sessions_route import router as chat_sessions_router
 from app.api.get_account_positions_route import router as get_account_positions_router
 from app.api.get_portfolio_brief_route import router as get_portfolio_brief_router
 from app.api.get_symbol_intelligence_route import router as get_symbol_intelligence_router
+from app.api.internal_morning_brief_route import router as internal_morning_brief_router
+from app.api.portfolio_memory_routes import router as portfolio_memory_router
 
 API_PREFIX = "/api/v1"
 AUTH_SCHWAB_PREFIX = f"{API_PREFIX}/auth/schwab"
@@ -53,6 +55,7 @@ app.add_middleware(
 )
 
 app.include_router(health_check_router)
+app.include_router(internal_morning_brief_router, prefix=API_PREFIX)
 app.include_router(auth_google_callback_route, prefix=AUTH_GOOGLE_PREFIX)
 app.include_router(auth_schwab_callback_router, prefix=AUTH_SCHWAB_PREFIX)
 
@@ -74,6 +77,7 @@ protected_api = APIRouter(
 
 protected_api.include_router(get_account_positions_router)
 protected_api.include_router(get_portfolio_brief_router)
+protected_api.include_router(portfolio_memory_router)
 protected_api.include_router(get_symbol_intelligence_router)
 protected_api.include_router(get_recent_orders_router)
 protected_api.include_router(analyze_positions_by_symbol_router)

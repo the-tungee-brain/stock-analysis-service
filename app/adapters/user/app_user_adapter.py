@@ -50,6 +50,26 @@ class AppUserAdapter:
         finally:
             con.close()
 
+    def list_users_with_schwab(self) -> list[AppUserItem]:
+        sql = f"""
+            SELECT u.*
+            FROM {self.table_name} u
+            INNER JOIN schwab_auth_access_token t ON t.user_id = u.id
+            ORDER BY u.last_login_at DESC NULLS LAST
+        """
+
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            cur.execute(sql)
+            cols = [col[0] for col in cur.description]
+            return [
+                self.dict_to_item(dict(zip(cols, row)))
+                for row in cur.fetchall()
+            ]
+        finally:
+            con.close()
+
     def save(self, item: AppUserItem) -> int:
         con = self.client.acquire()
         try:

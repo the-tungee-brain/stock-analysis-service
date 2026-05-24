@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from app.auth.dependencies import get_current_user_id
 from app.dependencies.service_dependencies import (
+    get_portfolio_memory_service,
     get_portfolio_service,
     get_schwab_auth_service,
     get_transaction_service,
@@ -11,6 +12,7 @@ from app.broker.option_utils import summarize_assignment_risk_structural
 from app.models.intelligence_models import PortfolioIntelligence, ProactiveAlert
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.models.recent_order_models import RecentActivitySummary
+from app.services.portfolio_memory_service import PortfolioMemoryService
 from app.services.portfolio_service import PortfolioService
 from app.services.schwab_auth_service import SchwabAuthService, SchwabReauthRequired
 from app.services.transaction_service import DEFAULT_DAYS_BACK, TransactionService
@@ -18,14 +20,40 @@ from app.services.transaction_service import DEFAULT_DAYS_BACK, TransactionServi
 router = APIRouter()
 
 
+def _persist_portfolio_memory(
+    *,
+    portfolio_memory_service: PortfolioMemoryService,
+    user_id: str,
+    account,
+    positions,
+    portfolio_brief: PortfolioIntelligence | None,
+    proactive_alerts: list[ProactiveAlert],
+) -> None:
+    if portfolio_brief is not None:
+        portfolio_memory_service.capture_snapshot(
+            user_id=user_id,
+            account=account,
+            positions=positions,
+            portfolio_brief=portfolio_brief,
+        )
+    portfolio_memory_service.record_alerts(
+        user_id=user_id,
+        alerts=proactive_alerts,
+    )
+
+
 @router.get("/get-account-positions")
 def get_account_positions(
+    background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user_id),
     portfolio_service: PortfolioService = Depends(get_portfolio_service),
     schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
     transaction_service: TransactionService = Depends(get_transaction_service),
     portfolio_analysis_service: PortfolioAnalysisService = Depends(
         get_portfolio_analysis_service
+    ),
+    portfolio_memory_service: PortfolioMemoryService = Depends(
+        get_portfolio_memory_service
     ),
     refresh: bool = Query(
         default=False,
@@ -88,6 +116,16 @@ def get_account_positions(
     proactive_alerts_payload = [
         alert.model_dump(mode="json", by_alias=True) for alert in proactive_alerts
     ]
+
+    background_tasks.add_task(
+        _persist_portfolio_memory,
+        portfolio_memory_service=portfolio_memory_service,
+        user_id=user_id,
+        account=account_map["account"],
+        positions=account_map["account"].securitiesAccount.positions,
+        portfolio_brief=portfolio_brief,
+        proactive_alerts=proactive_alerts,
+    )
 
     return {
         "schwab_positions": account_map["positions"],

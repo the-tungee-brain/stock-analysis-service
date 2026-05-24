@@ -18,6 +18,8 @@ from app.services.enriched_news_service import EnrichedNewsService
 from app.services.intelligence.portfolio_intelligence_service import (
     PortfolioIntelligenceService,
 )
+from app.services.morning_brief_delivery_service import MorningBriefDeliveryService
+from app.services.portfolio_memory_service import PortfolioMemoryService
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -86,3 +88,13 @@ def get_portfolio_intelligence_service(request: Request) -> PortfolioIntelligenc
 
 def get_enriched_news_service(request: Request) -> EnrichedNewsService:
     return request.app.state.enriched_news_service
+
+
+def get_portfolio_memory_service(request: Request) -> PortfolioMemoryService:
+    return request.app.state.portfolio_memory_service
+
+
+def get_morning_brief_delivery_service(
+    request: Request,
+) -> MorningBriefDeliveryService:
+    return request.app.state.morning_brief_delivery_service

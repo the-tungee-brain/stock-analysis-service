@@ -95,6 +95,25 @@ class OptionsScorecard(BaseModel):
     )
 
 
+class OptionRollSuggestion(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
+    side: Literal["call", "put"]
+    current_strike: float = Field(serialization_alias="currentStrike")
+    current_expiration: str = Field(serialization_alias="currentExpiration")
+    suggested_strike: float = Field(serialization_alias="suggestedStrike")
+    suggested_expiration: str = Field(serialization_alias="suggestedExpiration")
+    current_delta: float | None = Field(default=None, serialization_alias="currentDelta")
+    suggested_delta: float | None = Field(
+        default=None, serialization_alias="suggestedDelta"
+    )
+    estimated_credit: float | None = Field(
+        default=None, serialization_alias="estimatedCredit"
+    )
+    rationale: str
+    action: Literal["roll", "close", "hold"] = "roll"
+
+
 class SectorWeight(BaseModel):
     model_config = _INTELLIGENCE_MODEL_CONFIG
 
@@ -169,6 +188,9 @@ class SymbolIntelligence(BaseModel):
     )
     options_scorecard: OptionsScorecard | None = Field(
         default=None, serialization_alias="optionsScorecard"
+    )
+    roll_suggestions: list[OptionRollSuggestion] = Field(
+        default_factory=list, serialization_alias="rollSuggestions"
     )
     cached_research: CachedResearchSnippet | None = Field(
         default=None, serialization_alias="cachedResearch"
