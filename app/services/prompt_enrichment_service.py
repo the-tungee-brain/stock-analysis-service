@@ -22,6 +22,13 @@ from datetime import datetime, timezone
 from typing import List, Tuple, Dict, Any, Optional
 from app.models.finnhub_news_models import NewsResponse
 from app.models.company_research_models import ResearchContext, FundamentalMetric, SecRatioTrendPoint, NewsHeadline
+from app.models.intelligence_models import (
+    OptionsScorecard,
+    PeerComparison,
+    PortfolioDigest,
+    PortfolioIntelligence,
+    SymbolIntelligence,
+)
 from textwrap import dedent
 from app.core.prompts import (
     AnalysisAction,
@@ -228,6 +235,16 @@ class PromptEnrichmentService:
             include_filings = False
             include_earnings = False
 
+        include_enriched_news = include_news and action not in {
+            AnalysisAction.TAX_ANGLE,
+            AnalysisAction.ASSIGNMENT_RISK,
+        }
+        include_press_releases = include_news and action not in {
+            AnalysisAction.TAX_ANGLE,
+            AnalysisAction.ASSIGNMENT_RISK,
+            AnalysisAction.RISK_CHECK,
+        }
+
         sections: list[str] = [f"Symbol: {ctx.symbol}"]
 
         if ctx.data_gaps:
@@ -304,6 +321,37 @@ class PromptEnrichmentService:
                 )
             else:
                 sections.append("## Recent news headlines\nNo recent headlines available.")
+
+        if include_enriched_news and ctx.enriched_news:
+            enriched = ctx.enriched_news
+            insight_lines = "\n".join(f"- {item}" for item in enriched.insights[:4])
+            risk_lines = "\n".join(f"- {item}" for item in enriched.risks[:3])
+            sections.append(
+                dedent(f"""
+                ## AI news analysis (precomputed)
+                - Overall sentiment: {enriched.overall_sentiment}
+                - Dominant driver: {enriched.dominant_driver}
+                - Actionability: {enriched.actionability_score}/5
+                - Summary: {enriched.summary}
+                - Key insights:
+                {insight_lines or "- (none)"}
+                - Key risks:
+                {risk_lines or "- (none)"}
+                - Investor takeaway: {enriched.investor_takeaway}
+                """).strip()
+            )
+
+        if include_press_releases and ctx.press_releases:
+            release_lines = []
+            for idx, item in enumerate(ctx.press_releases[:3], start=1):
+                published = item.datetime[:10] if item.datetime else "unknown date"
+                release_lines.append(
+                    f"{idx}. [{published}] {item.headline}"
+                    + (f"\n   Summary: {item.summary}" if item.summary else "")
+                )
+            sections.append(
+                "## Recent press releases\n" + "\n".join(release_lines)
+            )
 
         if include_earnings:
             earnings_section = self._format_earnings_section(ctx)
@@ -638,8 +686,10 @@ class PromptEnrichmentService:
         rows = rows[:max_rows]
 
         header = (
-            "| Strike | Call Bid | Call Ask | Call IV | Put Bid | Put Ask | Put IV |\n"
-            "|--------|----------|----------|---------|---------|---------|--------|\n"
+            "| Strike | Call Bid | Call Ask | Call Δ | Call OI | Call IV | "
+            "Put Bid | Put Ask | Put Δ | Put OI | Put IV |\n"
+            "|--------|----------|----------|--------|---------|---------|"
+            "---------|---------|-------|---------|--------|\n"
         )
 
         def fmt_side(opt: OptionContract | None) -> tuple[str, str]:
@@ -666,13 +716,24 @@ class PromptEnrichmentService:
             iv = opt.volatility
             return f"{iv:.0f}%"
 
+        def fmt_delta(opt: OptionContract | None) -> str:
+            if not opt or opt.delta is None:
+                return ""
+            return f"{opt.delta:.2f}"
+
+        def fmt_oi(opt: OptionContract | None) -> str:
+            if not opt or opt.openInterest is None:
+                return ""
+            return f"{opt.openInterest:,}"
+
         lines: List[str] = []
         for strike, call, put in sorted(rows, key=lambda t: t[0]):
             cbid, cask = fmt_side(call)
             pbid, pask = fmt_side(put)
             lines.append(
-                f"| {strike:.2f} | {cbid} | {cask} | {fmt_iv(call)} | "
-                f"{pbid} | {pask} | {fmt_iv(put)} |"
+                f"| {strike:.2f} | {cbid} | {cask} | {fmt_delta(call)} | "
+                f"{fmt_oi(call)} | {fmt_iv(call)} | {pbid} | {pask} | "
+                f"{fmt_delta(put)} | {fmt_oi(put)} | {fmt_iv(put)} |"
             )
 
         if not lines:
@@ -684,6 +745,181 @@ class PromptEnrichmentService:
             + "\n".join(lines)
             + "\n"
         )
+
+    @staticmethod
+    def format_intelligence_block(intelligence: SymbolIntelligence | None) -> str | None:
+        if intelligence is None:
+            return None
+
+        sections: list[str] = []
+
+        if intelligence.signals:
+            signal_lines = [
+                f"- [{signal.severity.upper()}] {signal.message}"
+                for signal in intelligence.signals[:8]
+            ]
+            sections.append(
+                "## Precomputed signals\n" + "\n".join(signal_lines)
+            )
+
+        if intelligence.cached_research:
+            cached = intelligence.cached_research
+            sections.append(
+                dedent(f"""
+                ## Cached research summary
+                - Sentiment: {cached.sentiment or "N/A"}
+                - Investment thesis: {cached.investment_thesis or "N/A"}
+                - Key strengths: {"; ".join(cached.key_strengths[:3]) or "N/A"}
+                - Key risks: {"; ".join(cached.key_risks[:3]) or "N/A"}
+                - What to watch: {"; ".join(cached.what_to_watch[:3]) or "N/A"}
+                - Valuation context: {cached.valuation_context or "N/A"}
+                """).strip()
+            )
+
+        if intelligence.peer_comparison:
+            sections.append(
+                PromptEnrichmentService.format_peer_comparison_block(
+                    intelligence.peer_comparison
+                )
+            )
+
+        if intelligence.event_timeline:
+            timeline_lines = [
+                f"- [{entry.date}] ({entry.kind}) {entry.title}"
+                + (f" — {entry.detail}" if entry.detail else "")
+                for entry in intelligence.event_timeline[:8]
+            ]
+            sections.append(
+                "## Event timeline (trades, filings, earnings, news)\n"
+                + "\n".join(timeline_lines)
+            )
+
+        if intelligence.options_scorecard:
+            scorecard_block = PromptEnrichmentService.format_options_scorecard_block(
+                intelligence.options_scorecard
+            )
+            if scorecard_block:
+                sections.append(scorecard_block)
+
+        return "\n\n".join(sections) if sections else None
+
+    @staticmethod
+    def format_peer_comparison_block(comparison: PeerComparison | None) -> str:
+        if comparison is None:
+            return ""
+
+        header = (
+            "| Symbol | 1Y Return | P/E | Sector |\n"
+            "|--------|-----------|-----|--------|"
+        )
+        rows = [
+            f"| {comparison.target_symbol} (you) | "
+            f"{comparison.target_one_year_return or 'N/A'} | "
+            f"{comparison.target_pe_trailing or 'N/A'} | — |"
+        ]
+        for peer in comparison.peers:
+            rows.append(
+                f"| {peer.symbol} | {peer.one_year_return or 'N/A'} | "
+                f"{peer.pe_trailing or 'N/A'} | {peer.sector or 'N/A'} |"
+            )
+
+        summary = comparison.summary or "Use peer returns and valuation for relative context."
+        return (
+            "## Peer comparison (1Y return & trailing P/E)\n"
+            + header
+            + "\n"
+            + "\n".join(rows)
+            + f"\n\n{summary}"
+        )
+
+    @staticmethod
+    def format_options_scorecard_block(scorecard: OptionsScorecard | None) -> str | None:
+        if scorecard is None:
+            return None
+
+        sections: list[str] = ["## Options scorecard (ranked candidates)"]
+
+        if scorecard.assignment_flags:
+            sections.append(
+                "### Assignment risk flags\n"
+                + "\n".join(f"- {flag}" for flag in scorecard.assignment_flags)
+            )
+
+        if scorecard.covered_call_candidates:
+            call_lines = [
+                f"- ${c.strike:g} exp {c.expiration[:10]}: Δ={c.delta:.2f}, "
+                f"OI={c.open_interest:,}, score={c.score:.2f} — {c.rationale}"
+                for c in scorecard.covered_call_candidates
+            ]
+            sections.append(
+                "### Top covered call candidates\n" + "\n".join(call_lines)
+            )
+
+        if scorecard.csp_candidates:
+            put_lines = [
+                f"- ${c.strike:g} exp {c.expiration[:10]}: Δ={c.delta:.2f}, "
+                f"OI={c.open_interest:,}, score={c.score:.2f} — {c.rationale}"
+                for c in scorecard.csp_candidates
+            ]
+            sections.append(
+                "### Top cash-secured put candidates\n" + "\n".join(put_lines)
+            )
+
+        if len(sections) == 1:
+            return None
+        return "\n\n".join(sections)
+
+    @staticmethod
+    def format_portfolio_intelligence_block(
+        intelligence: PortfolioIntelligence | None,
+    ) -> str | None:
+        if intelligence is None:
+            return None
+
+        sections: list[str] = []
+
+        if intelligence.signals:
+            signal_lines = [
+                f"- [{signal.severity.upper()}] {signal.message}"
+                for signal in intelligence.signals[:8]
+            ]
+            sections.append(
+                "## Portfolio signals\n" + "\n".join(signal_lines)
+            )
+
+        digest = intelligence.digest
+        if digest:
+            if digest.macro_regime:
+                sections.append(f"## Macro regime\n{digest.macro_regime}")
+
+            if digest.sector_weights:
+                sector_lines = [
+                    f"- {sw.sector}: {sw.weight_pct:.1f}% ({', '.join(sw.symbols[:4])})"
+                    for sw in digest.sector_weights[:6]
+                ]
+                sections.append(
+                    "## Sector allocation\n" + "\n".join(sector_lines)
+                )
+
+            if digest.top_news:
+                news_lines = [
+                    f"- {item.symbol} ({item.weight_pct:.1f}% of portfolio): "
+                    f"{item.headline}"
+                    + (f" [{item.sentiment}]" if item.sentiment else "")
+                    for item in digest.top_news
+                    if item.weight_pct is not None
+                ]
+                sections.append(
+                    "## Top holdings news digest\n" + "\n".join(news_lines)
+                )
+
+            if digest.earnings_this_week:
+                sections.append(
+                    "## Earnings this week\n"
+                    + ", ".join(digest.earnings_this_week)
+                )
+
+        return "\n\n".join(sections) if sections else None
 
     def _format_news_block(self, news: NewsResponse) -> str:
         parts: list[str] = []

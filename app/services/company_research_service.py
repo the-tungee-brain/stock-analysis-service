@@ -12,6 +12,7 @@ from app.models.company_research_models import (
 )
 from app.services.company_profile_service import CompanyProfileService
 from app.services.earnings_service import EarningsService
+from app.services.enriched_news_service import EnrichedNewsService
 from app.services.market_service import MarketService
 from app.services.news_service import NewsService
 from app.services.sec_research_service import SecResearchService
@@ -27,6 +28,7 @@ class CompanyResearchService:
         sec_research_service: SecResearchService,
         earnings_service: EarningsService,
         research_context_cache: ResearchContextCache | None = None,
+        enriched_news_service: EnrichedNewsService | None = None,
     ):
         self.company_profile_service = company_profile_service
         self.market_service = market_service
@@ -35,6 +37,7 @@ class CompanyResearchService:
         self.sec_research_service = sec_research_service
         self.earnings_service = earnings_service
         self.research_context_cache = research_context_cache
+        self.enriched_news_service = enriched_news_service
 
     @staticmethod
     def merge_fundamentals(
@@ -130,6 +133,20 @@ class CompanyResearchService:
             for item in news_response.root[:10]
         ]
 
+    def _load_press_releases(self, symbol: str) -> list[NewsHeadline]:
+        releases_response = self.news_service.get_press_releases(
+            symbol=symbol, lookback_days=30
+        )
+        return [
+            NewsHeadline(
+                headline=item.headline,
+                summary=item.summary,
+                source=item.source or "Press release",
+                datetime=item.datetime.isoformat(),
+            )
+            for item in releases_response.root[:5]
+        ]
+
     def build_context(
         self, symbol: str, *, news_lookback_days: int = 7
     ) -> ResearchContext:
@@ -139,7 +156,7 @@ class CompanyResearchService:
             try:
                 cached = self.research_context_cache.get(symbol=symbol_upper)
                 if cached is not None:
-                    return cached
+                    return self._attach_enriched_news(cached)
             except Exception:
                 pass
 
@@ -147,6 +164,7 @@ class CompanyResearchService:
             symbol=symbol_upper,
             news_lookback_days=news_lookback_days,
         )
+        context = self._attach_enriched_news(context)
 
         if news_lookback_days == 7 and self.research_context_cache is not None:
             try:
@@ -156,12 +174,20 @@ class CompanyResearchService:
 
         return context
 
+    def _attach_enriched_news(self, context: ResearchContext) -> ResearchContext:
+        if self.enriched_news_service is None or context.enriched_news is not None:
+            return context
+        summary = self.enriched_news_service.get_cached_summary(symbol=context.symbol)
+        if summary is None:
+            return context
+        return context.model_copy(update={"enriched_news": summary})
+
     def _build_context(
         self, symbol: str, *, news_lookback_days: int = 7
     ) -> ResearchContext:
         data_gaps: list[str] = []
 
-        with ThreadPoolExecutor(max_workers=7) as executor:
+        with ThreadPoolExecutor(max_workers=8) as executor:
             future_snapshot = executor.submit(
                 self._run_loader,
                 "snapshot",
@@ -183,6 +209,11 @@ class CompanyResearchService:
                 lambda: self._load_news(
                     symbol=symbol, lookback_days=news_lookback_days
                 ),
+            )
+            future_press = executor.submit(
+                self._run_loader,
+                "press_releases",
+                lambda: self._load_press_releases(symbol=symbol),
             )
             future_fundamentals = executor.submit(
                 self._run_loader,
@@ -218,6 +249,11 @@ class CompanyResearchService:
                 data_gaps.append(gap)
             news = news or []
 
+            press_releases, gap = future_press.result()
+            if gap:
+                data_gaps.append(gap)
+            press_releases = press_releases or []
+
             fundamentals, gap = future_fundamentals.result()
             if gap:
                 data_gaps.append(gap)
@@ -247,6 +283,7 @@ class CompanyResearchService:
             snapshot=snapshot,
             performance=performance,
             news=news,
+            press_releases=press_releases,
             fundamentals=fundamentals,
             sec_fundamentals=sec_fundamentals,
             sec_ratio_trends=sec_ratio_trends,

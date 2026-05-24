@@ -7,6 +7,7 @@ import requests
 from fastapi import FastAPI
 from openai import OpenAI
 
+from app.adapters.cache.enriched_news_cache import EnrichedNewsCache
 from app.adapters.cache.research_context_cache import ResearchContextCache
 
 from app.adapters.chat.chat_messages_adapter import ChatMessagesAdapter
@@ -61,6 +62,11 @@ from app.builders.sec_financials_builder import SecFinancialsBuilder
 from app.builders.sec_ratios_builder import SecRatiosBuilder
 from app.services.sec_research_service import SecResearchService
 from app.services.earnings_service import EarningsService
+from app.services.enriched_news_service import EnrichedNewsService
+from app.services.intelligence.peer_comparison_service import PeerComparisonService
+from app.services.intelligence.portfolio_intelligence_service import (
+    PortfolioIntelligenceService,
+)
 
 
 def get_redis_client() -> redis.Redis:
@@ -126,6 +132,7 @@ async def lifespan(app: FastAPI):
     )
     schwab_redis_token_manager = SchwabRedisTokenManager(redis_client=redis_client)
     research_context_cache = ResearchContextCache(redis_client=redis_client)
+    enriched_news_cache = EnrichedNewsCache(redis_client=redis_client)
     recent_orders_cache = RecentOrdersCache(redis_client=redis_client)
     llm_output_cache = LLMOutputCache(redis_client=redis_client)
     openai_adapter = OpenAIAdapter(client=openai_client)
@@ -200,6 +207,12 @@ async def lifespan(app: FastAPI):
         chat_messages_builder=chat_messages_builder,
     )
     company_profile_service = CompanyProfileService(finnhub_builder=finnhub_builder)
+    enriched_news_service = EnrichedNewsService(
+        enriched_news_cache=enriched_news_cache,
+        news_service=news_service,
+        prompt_enrichment_service=prompt_enrichment_service,
+        llm_service=llm_service,
+    )
     company_research_service = CompanyResearchService(
         company_profile_service=company_profile_service,
         market_service=market_service,
@@ -208,6 +221,16 @@ async def lifespan(app: FastAPI):
         sec_research_service=sec_research_service,
         earnings_service=earnings_service,
         research_context_cache=research_context_cache,
+        enriched_news_service=enriched_news_service,
+    )
+    peer_comparison_service = PeerComparisonService(
+        yfinance_adapter=yfinance_adapter,
+        performance_builder=performance_builder,
+    )
+    portfolio_intelligence_service = PortfolioIntelligenceService(
+        peer_comparison_service=peer_comparison_service,
+        enriched_news_service=enriched_news_service,
+        llm_output_cache=llm_output_cache,
     )
     transaction_service = TransactionService(
         schwab_trader_builder=schwab_trader_builder,
@@ -219,6 +242,7 @@ async def lifespan(app: FastAPI):
         prompt_enrichment_service=prompt_enrichment_service,
         company_research_service=company_research_service,
         transaction_service=transaction_service,
+        portfolio_intelligence_service=portfolio_intelligence_service,
     )
     ticker_service = TickerService(ticker_symbol_builder=ticker_symbol_builder)
 
@@ -236,6 +260,8 @@ async def lifespan(app: FastAPI):
     app.state.chat_service = chat_service
     app.state.company_profile_service = company_profile_service
     app.state.company_research_service = company_research_service
+    app.state.portfolio_intelligence_service = portfolio_intelligence_service
+    app.state.enriched_news_service = enriched_news_service
     app.state.earnings_service = earnings_service
     app.state.sec_research_service = sec_research_service
     app.state.ticker_service = ticker_service

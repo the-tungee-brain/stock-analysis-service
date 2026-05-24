@@ -34,3 +34,15 @@ class FinnhubBuilder:
         if not isinstance(raw_peers, list):
             return []
         return [peer.upper() for peer in raw_peers if isinstance(peer, str) and peer.strip()]
+
+    def get_press_releases(self, symbol: str, _from: date, to: date) -> NewsResponse:
+        _from_str = _from.strftime("%Y-%m-%d")
+        to_str = to.strftime("%Y-%m-%d")
+        raw = self.finnhub_adapter.get_press_releases(
+            symbol=symbol, _from=_from_str, to=to_str
+        )
+        if not raw:
+            return NewsResponse(root=[])
+        news_response = NewsResponse.model_validate(raw)
+        news_response.root.sort(key=attrgetter("datetime"), reverse=True)
+        return news_response

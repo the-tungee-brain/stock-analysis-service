@@ -14,6 +14,10 @@ from app.services.ticker_service import TickerService
 from app.services.sec_research_service import SecResearchService
 from app.services.transaction_service import TransactionService
 from app.services.earnings_service import EarningsService
+from app.services.enriched_news_service import EnrichedNewsService
+from app.services.intelligence.portfolio_intelligence_service import (
+    PortfolioIntelligenceService,
+)
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -74,3 +78,11 @@ def get_transaction_service(request: Request) -> TransactionService:
 
 def get_earnings_service(request: Request) -> EarningsService:
     return request.app.state.earnings_service
+
+
+def get_portfolio_intelligence_service(request: Request) -> PortfolioIntelligenceService:
+    return request.app.state.portfolio_intelligence_service
+
+
+def get_enriched_news_service(request: Request) -> EnrichedNewsService:
+    return request.app.state.enriched_news_service

@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 import asyncio
 
 from app.core.prompts import AnalysisAction
@@ -20,6 +20,7 @@ def test_build_analysis_context_skips_market_fetch_on_followup():
         prompt_enrichment_service=MagicMock(),
         company_research_service=MagicMock(),
         transaction_service=MagicMock(),
+        portfolio_intelligence_service=MagicMock(),
     )
 
     ctx = asyncio.run(
@@ -73,9 +74,13 @@ def test_build_analysis_context_loads_market_data_when_requested():
         prompt_enrichment_service=prompt_enrichment_service,
         company_research_service=company_research_service,
         transaction_service=MagicMock(),
+        portfolio_intelligence_service=MagicMock(),
     )
-    service._build_research_context_block = MagicMock(return_value="research")
+    service._build_research_bundle = MagicMock(return_value=("research", "intel"))
     service._build_recent_transactions_block = MagicMock(return_value=None)
+    service.portfolio_intelligence_service.enriched_news_service.ensure_enriched = (
+        AsyncMock(return_value=None)
+    )
 
     ctx = asyncio.run(
         service.build_analysis_context(
@@ -91,6 +96,7 @@ def test_build_analysis_context_loads_market_data_when_requested():
     )
 
     assert ctx.market_snapshot == "snapshot"
+    assert ctx.intelligence_block == "intel"
     schwab_auth_service.get_valid_token_by_user_id.assert_called_once()
     assert market_service.get_enriched_quote_snapshot.call_count == 2
     market_service.get_option_chains.assert_called_once()

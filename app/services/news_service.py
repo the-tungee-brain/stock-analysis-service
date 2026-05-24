@@ -20,3 +20,16 @@ class NewsService:
         news_response.root = news_response.root[:10]
 
         return news_response
+
+    def get_press_releases(self, symbol: str, lookback_days: int = 30) -> NewsResponse:
+        today = date.today()
+        start = today - timedelta(days=lookback_days)
+
+        releases = self.finnhub_builder.get_press_releases(
+            symbol=symbol,
+            _from=start,
+            to=today,
+        )
+
+        releases.root = releases.root[:5]
+        return releases

@@ -122,7 +122,7 @@ class BaseAnalysisContext:
 
 @dataclass(kw_only=True)
 class PortfolioContext(BaseAnalysisContext):
-    pass
+    intelligence_block: Optional[str] = None
 
 
 @dataclass(kw_only=True)
@@ -132,6 +132,7 @@ class SymbolContext(BaseAnalysisContext):
     market_context: Optional[str] = None
     option_chain: Optional[str] = None
     research_context: Optional[str] = None
+    intelligence_block: Optional[str] = None
     recent_transactions: Optional[str] = None
     analysis_since: Optional[datetime] = None
 
@@ -802,6 +803,7 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
         ctx.research_context
         or "No equity research data (fundamentals, news, SEC filings) provided."
     )
+    intelligence_block = ctx.intelligence_block or ""
     transactions_block = ctx.recent_transactions
 
     transactions_section = ""
@@ -847,6 +849,9 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
 
       === EQUITY RESEARCH (FUNDAMENTALS, NEWS, SEC) ===
       {research_block}
+
+      === PRECOMPUTED INTELLIGENCE (SIGNALS, PEERS, TIMELINE) ===
+      {intelligence_block or "No precomputed intelligence signals provided."}
 
       {transactions_section}{assignment_section}=== OPTION CHAIN (NEAREST EXPIRATION, NEAR CURRENT PRICE) ===
       {option_block}
@@ -942,6 +947,14 @@ def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = Tru
         {ctx.assignment_risk_block or "No expiring short options identified within the scan window."}
         """).strip()
 
+    intelligence_section = ""
+    if ctx.intelligence_block:
+        intelligence_section = dedent(f"""
+
+        === PORTFOLIO INTELLIGENCE (SECTORS, MACRO, SIGNALS) ===
+        {ctx.intelligence_block}
+        """).strip()
+
     return dedent(f"""
         Today is {now_iso}.
 
@@ -950,7 +963,7 @@ def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = Tru
 
         === PORTFOLIO POSITIONS (TOP HOLDINGS) ===
         {positions_table}
-        {assignment_section}
+        {assignment_section}{intelligence_section}
 
         === YOUR TASK ===
         {task_block}

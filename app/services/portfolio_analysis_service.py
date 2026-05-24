@@ -10,26 +10,40 @@ from app.broker.option_utils import (
     summarize_assignment_risk,
 )
 from app.broker.order_grouping import last_fill_time_for_symbol
-from app.models.schwab_models import Position, SchwabAccounts
-from app.services.market_service import MarketService
-from app.services.schwab_auth_service import SchwabAuthService
-from app.services.prompt_enrichment_service import PromptEnrichmentService
-from app.services.company_research_service import CompanyResearchService
-from app.broker.order_utils import is_order_within_days
-from app.services.transaction_service import RECENT_ACTIVITY_DAYS, TransactionService
 from app.core.prompts import (
     AnalysisAction,
     SymbolContext,
     PortfolioContext,
     BaseAnalysisContext,
 )
+from app.models.intelligence_models import PortfolioIntelligence, ProactiveAlert
+from app.models.schwab_models import Position, SchwabAccounts
+from app.services.company_research_service import CompanyResearchService
+from app.services.intelligence.portfolio_intelligence_service import (
+    PortfolioIntelligenceService,
+)
+from app.services.market_service import MarketService
+from app.services.prompt_enrichment_service import PromptEnrichmentService
+from app.services.schwab_auth_service import SchwabAuthService
+from app.broker.order_utils import is_order_within_days
+from app.services.transaction_service import RECENT_ACTIVITY_DAYS, TransactionService
 
 BENCHMARK_SYMBOLS = ["$SPX", "$DJI", "$VIX", "TLT"]
 TRANSACTION_ACTIONS = frozenset(
     {AnalysisAction.WHAT_CHANGED, AnalysisAction.TAX_ANGLE}
 )
 RECENT_ACTIVITY_TRANSACTION_ACTIONS = frozenset({AnalysisAction.FREE_FORM})
+NEWS_ENRICH_ACTIONS = frozenset(
+    {
+        AnalysisAction.FREE_FORM,
+        AnalysisAction.DAILY_SUMMARY,
+        AnalysisAction.RISK_CHECK,
+        AnalysisAction.WHAT_CHANGED,
+        AnalysisAction.CONCENTRATION_CHECK,
+    }
+)
 ASSIGNMENT_RISK_WINDOW_DAYS = 14
+PORTFOLIO_RESEARCH_LIMIT = 8
 
 
 class PortfolioAnalysisService:
@@ -40,12 +54,14 @@ class PortfolioAnalysisService:
         prompt_enrichment_service: PromptEnrichmentService,
         company_research_service: CompanyResearchService,
         transaction_service: TransactionService,
+        portfolio_intelligence_service: PortfolioIntelligenceService,
     ):
         self.market_service = market_service
         self.schwab_auth_service = schwab_auth_service
         self.prompt_enrichment_service = prompt_enrichment_service
         self.company_research_service = company_research_service
         self.transaction_service = transaction_service
+        self.portfolio_intelligence_service = portfolio_intelligence_service
 
     @staticmethod
     def _needs_transaction_history(action: AnalysisAction) -> bool:
@@ -57,6 +73,18 @@ class PortfolioAnalysisService:
     @staticmethod
     def _needs_assignment_risk_block(action: AnalysisAction) -> bool:
         return action is AnalysisAction.ASSIGNMENT_RISK
+
+    @staticmethod
+    def _include_peer_comparison(action: AnalysisAction) -> bool:
+        return action not in {
+            AnalysisAction.TAX_ANGLE,
+            AnalysisAction.ASSIGNMENT_RISK,
+            AnalysisAction.DAILY_SUMMARY,
+        }
+
+    @staticmethod
+    def _should_auto_enrich_news(action: AnalysisAction) -> bool:
+        return action in NEWS_ENRICH_ACTIONS
 
     @staticmethod
     def _assignment_risk_underlyings(
@@ -137,15 +165,29 @@ class PortfolioAnalysisService:
     ) -> BaseAnalysisContext:
         if not symbol:
             assignment_risk_block = None
-            if include_market_data and self._needs_assignment_risk_block(action):
+            intelligence_block = None
+
+            if include_market_data:
                 schwab_token = self.schwab_auth_service.get_valid_token_by_user_id(
                     user_id=user_id
                 )
-                assignment_risk_block = await asyncio.to_thread(
-                    self._build_assignment_risk_block,
-                    access_token=schwab_token.access_token,
+                access_token = schwab_token.access_token
+
+                if self._needs_assignment_risk_block(action):
+                    assignment_risk_block = await asyncio.to_thread(
+                        self._build_assignment_risk_block,
+                        access_token=access_token,
+                        positions=positions,
+                        symbol=None,
+                    )
+
+                intelligence_block = await asyncio.to_thread(
+                    self._build_portfolio_intelligence_block,
+                    user_id=user_id,
+                    account=account,
                     positions=positions,
-                    symbol=None,
+                    access_token=access_token,
+                    action=action,
                 )
 
             return PortfolioContext(
@@ -155,6 +197,7 @@ class PortfolioAnalysisService:
                 user_prompt=user_prompt,
                 action=action,
                 assignment_risk_block=assignment_risk_block,
+                intelligence_block=intelligence_block,
             )
 
         if not include_market_data:
@@ -192,7 +235,6 @@ class PortfolioAnalysisService:
             market_snapshots,
             market_context_snapshots,
             option_chains,
-            research_context_block,
             recent_transactions_block,
         ) = await asyncio.gather(
             asyncio.to_thread(
@@ -212,12 +254,6 @@ class PortfolioAnalysisService:
                 strike_count=10,
             ),
             asyncio.to_thread(
-                self._build_research_context_block,
-                symbol=symbol,
-                action=action,
-                since=analysis_since,
-            ),
-            asyncio.to_thread(
                 self._build_recent_transactions_block,
                 user_id=user_id,
                 account_number=account_number,
@@ -227,6 +263,22 @@ class PortfolioAnalysisService:
                 orders=orders_for_analysis,
                 since=analysis_since,
             ),
+        )
+
+        if self._should_auto_enrich_news(action):
+            await self.portfolio_intelligence_service.enriched_news_service.ensure_enriched(
+                symbol=symbol
+            )
+
+        research_context_block, intelligence_block = await asyncio.to_thread(
+            self._build_research_bundle,
+            symbol=symbol,
+            action=action,
+            since=analysis_since,
+            positions=positions,
+            account=account,
+            option_chain=option_chains,
+            orders=orders_for_analysis,
         )
 
         assignment_risk_block = None
@@ -265,6 +317,7 @@ class PortfolioAnalysisService:
             market_context=market_context_snapshots_markdown,
             option_chain=option_chains_markdown,
             research_context=research_context_block,
+            intelligence_block=intelligence_block,
             recent_transactions=recent_transactions_block,
             action=action,
             assignment_risk_block=assignment_risk_block,
@@ -299,6 +352,207 @@ class PortfolioAnalysisService:
         except Exception:
             return []
 
+    def _build_research_bundle(
+        self,
+        symbol: str,
+        action: AnalysisAction,
+        *,
+        since: datetime | None = None,
+        positions: list[Position],
+        account: SchwabAccounts,
+        option_chain,
+        orders: list | None,
+        research_context_block: str | None = None,
+    ) -> tuple[str | None, str | None]:
+        try:
+            news_lookback_days = (
+                self._news_lookback_days(since)
+                if action is AnalysisAction.WHAT_CHANGED
+                else 7
+            )
+            ctx = self.company_research_service.build_context(
+                symbol=symbol,
+                news_lookback_days=news_lookback_days,
+            )
+            ctx = self.portfolio_intelligence_service.attach_enriched_news(ctx)
+        except Exception:
+            return research_context_block, None
+
+        if research_context_block is None:
+            research_context_block = (
+                self.prompt_enrichment_service.format_research_context_block(
+                    ctx=ctx,
+                    compact=True,
+                    action=action,
+                    since=since if action is AnalysisAction.WHAT_CHANGED else None,
+                )
+            )
+
+        try:
+            intelligence = self.portfolio_intelligence_service.build_symbol_intelligence(
+                research=ctx,
+                positions=positions,
+                account=account,
+                symbol=symbol,
+                orders=orders,
+                since=since if action is AnalysisAction.WHAT_CHANGED else None,
+                option_chain=option_chain,
+                include_peers=self._include_peer_comparison(action),
+            )
+            intelligence_block = (
+                self.prompt_enrichment_service.format_intelligence_block(
+                    intelligence
+                )
+            )
+        except Exception:
+            intelligence_block = None
+
+        return research_context_block, intelligence_block
+
+    def _load_portfolio_intelligence(
+        self,
+        *,
+        user_id: str,
+        account: SchwabAccounts,
+        positions: List[Position],
+        access_token: str,
+        suggested_actions: list | None = None,
+    ) -> PortfolioIntelligence | None:
+        try:
+            top_symbols = self._top_position_symbols(
+                positions=positions, account=account, limit=PORTFOLIO_RESEARCH_LIMIT
+            )
+            research_contexts = []
+            sector_by_symbol: dict[str, str] = {}
+
+            for sym in top_symbols:
+                try:
+                    ctx = self.company_research_service.build_context(symbol=sym)
+                    ctx = self.portfolio_intelligence_service.attach_enriched_news(ctx)
+                    research_contexts.append(ctx)
+                    if ctx.snapshot and ctx.snapshot.sector:
+                        sector_by_symbol[sym] = ctx.snapshot.sector
+                except Exception:
+                    continue
+
+            macro_snapshots = self.market_service.get_enriched_quote_snapshot(
+                access_token=access_token,
+                symbols=BENCHMARK_SYMBOLS,
+            )
+
+            actions = suggested_actions
+            if actions is None:
+                actions = []
+                try:
+                    account_number = account.securitiesAccount.accountNumber
+                    summary = self.transaction_service.build_recent_activity_summary(
+                        account_number=account_number,
+                        access_token=access_token,
+                        user_id=user_id,
+                    )
+                    if summary:
+                        actions = summary.suggested_actions
+                except Exception:
+                    actions = []
+
+            return self.portfolio_intelligence_service.build_portfolio_intelligence(
+                positions=positions,
+                account=account,
+                sector_by_symbol=sector_by_symbol,
+                macro_snapshots=macro_snapshots,
+                top_holdings_research=research_contexts,
+                suggested_actions=actions,
+            )
+        except Exception:
+            return None
+
+    def build_portfolio_brief(
+        self,
+        *,
+        user_id: str,
+        account: SchwabAccounts,
+        positions: List[Position],
+        access_token: str,
+        suggested_actions: list | None = None,
+    ) -> PortfolioIntelligence:
+        intelligence = self._load_portfolio_intelligence(
+            user_id=user_id,
+            account=account,
+            positions=positions,
+            access_token=access_token,
+            suggested_actions=suggested_actions,
+        )
+        if intelligence is None:
+            return PortfolioIntelligence()
+        return intelligence
+
+    def _build_portfolio_intelligence_block(
+        self,
+        *,
+        user_id: str,
+        account: SchwabAccounts,
+        positions: List[Position],
+        access_token: str,
+        action: AnalysisAction,
+    ) -> str | None:
+        _ = action
+        intelligence = self._load_portfolio_intelligence(
+            user_id=user_id,
+            account=account,
+            positions=positions,
+            access_token=access_token,
+        )
+        if intelligence is None:
+            return None
+        return self.prompt_enrichment_service.format_portfolio_intelligence_block(
+            intelligence
+        )
+
+    @staticmethod
+    def _top_position_symbols(
+        *, positions: List[Position], account: SchwabAccounts, limit: int
+    ) -> list[str]:
+        liquidation = account.securitiesAccount.currentBalances.liquidationValue
+        if liquidation <= 0:
+            return []
+
+        by_symbol: dict[str, float] = {}
+        for position in positions:
+            if position.instrument.assetType == "OPTION":
+                symbol = (
+                    position.instrument.underlyingSymbol or position.instrument.symbol
+                )
+            else:
+                symbol = position.instrument.symbol
+            if not symbol:
+                continue
+            by_symbol[symbol.upper()] = by_symbol.get(symbol.upper(), 0.0) + abs(
+                position.marketValue
+            )
+
+        ranked = sorted(by_symbol.items(), key=lambda item: item[1], reverse=True)
+        return [symbol for symbol, _ in ranked[:limit]]
+
+    def build_proactive_alerts(
+        self,
+        *,
+        user_id: str,
+        account: SchwabAccounts,
+        positions: List[Position],
+        access_token: str,
+        suggested_actions: list | None = None,
+    ) -> list[ProactiveAlert]:
+        intelligence = self._load_portfolio_intelligence(
+            user_id=user_id,
+            account=account,
+            positions=positions,
+            access_token=access_token,
+            suggested_actions=suggested_actions,
+        )
+        if intelligence is None:
+            return []
+        return intelligence.alerts
+
     def _build_research_context_block(
         self,
         symbol: str,
@@ -316,6 +570,7 @@ class PortfolioAnalysisService:
                 symbol=symbol,
                 news_lookback_days=news_lookback_days,
             )
+            ctx = self.portfolio_intelligence_service.attach_enriched_news(ctx)
         except Exception:
             return None
         return self.prompt_enrichment_service.format_research_context_block(

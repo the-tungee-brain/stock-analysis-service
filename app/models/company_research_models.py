@@ -32,6 +32,16 @@ class NewsHeadline(BaseModel):
     datetime: str = ""
 
 
+class EnrichedNewsSummary(BaseModel):
+    overall_sentiment: str
+    summary: str
+    insights: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    dominant_driver: str = ""
+    actionability_score: int = Field(default=1, ge=1, le=5)
+    investor_takeaway: str = ""
+
+
 class AISummary(BaseModel):
     short: str
     long: str
@@ -102,6 +112,8 @@ class ResearchContext(BaseModel):
     snapshot: ResearchSnapshot | None = None
     performance: PerformanceSnapshot | None = None
     news: list[NewsHeadline] = Field(default_factory=list)
+    press_releases: list[NewsHeadline] = Field(default_factory=list)
+    enriched_news: EnrichedNewsSummary | None = None
     fundamentals: list[FundamentalMetric] = Field(default_factory=list)
     sec_fundamentals: list[FundamentalMetric] = Field(default_factory=list)
     sec_ratio_trends: list[SecRatioTrendPoint] = Field(default_factory=list)

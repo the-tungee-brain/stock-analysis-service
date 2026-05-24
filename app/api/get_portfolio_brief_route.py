@@ -1,15 +1,16 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth.dependencies import get_current_user_id
 from app.dependencies.service_dependencies import (
+    get_portfolio_analysis_service,
     get_portfolio_service,
     get_schwab_auth_service,
     get_transaction_service,
-    get_portfolio_analysis_service,
 )
-from app.models.intelligence_models import ProactiveAlert
+from app.models.intelligence_models import PortfolioIntelligence
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
-from app.models.recent_order_models import RecentActivitySummary
 from app.services.portfolio_service import PortfolioService
 from app.services.schwab_auth_service import SchwabAuthService, SchwabReauthRequired
 from app.services.transaction_service import DEFAULT_DAYS_BACK, TransactionService
@@ -17,8 +18,8 @@ from app.services.transaction_service import DEFAULT_DAYS_BACK, TransactionServi
 router = APIRouter()
 
 
-@router.get("/get-account-positions")
-def get_account_positions(
+@router.get("/portfolio/brief", response_model=PortfolioIntelligence)
+async def get_portfolio_brief(
     user_id: str = Depends(get_current_user_id),
     portfolio_service: PortfolioService = Depends(get_portfolio_service),
     schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
@@ -28,9 +29,9 @@ def get_account_positions(
     ),
     refresh: bool = Query(
         default=False,
-        description="Bypass cached order history and fetch fresh data from Schwab",
+        description="Bypass cached order history when loading suggested actions",
     ),
-):
+) -> PortfolioIntelligence:
     try:
         schwab_token = schwab_auth_service.get_valid_token_by_user_id(user_id=user_id)
     except SchwabReauthRequired as exc:
@@ -47,9 +48,11 @@ def get_account_positions(
     account_map = portfolio_service.get_enriched_account(
         access_token=schwab_token.access_token
     )
-    account_number = account_map["account"].securitiesAccount.accountNumber
+    account = account_map["account"]
+    positions = account.securitiesAccount.positions
+    account_number = account.securitiesAccount.accountNumber
 
-    recent_activity: RecentActivitySummary | None = None
+    suggested_actions = []
     try:
         recent_activity = transaction_service.build_recent_activity_summary(
             account_number=account_number,
@@ -58,28 +61,16 @@ def get_account_positions(
             days_back=DEFAULT_DAYS_BACK,
             refresh=refresh,
         )
+        if recent_activity:
+            suggested_actions = recent_activity.suggested_actions
     except Exception:
-        recent_activity = None
+        suggested_actions = []
 
-    proactive_alerts: list[ProactiveAlert] = []
-    try:
-        proactive_alerts = portfolio_analysis_service.build_proactive_alerts(
-            user_id=user_id,
-            account=account_map["account"],
-            positions=account_map["account"].securitiesAccount.positions,
-            access_token=schwab_token.access_token,
-            suggested_actions=(
-                recent_activity.suggested_actions if recent_activity else []
-            ),
-        )
-    except Exception:
-        proactive_alerts = []
-
-    return {
-        "schwab_positions": account_map["positions"],
-        "account": account_map["account"],
-        "cashSecuredPutSummary": account_map["cashSecuredPutSummary"],
-        "assignmentRiskSummary": account_map["assignmentRiskSummary"],
-        "recentActivity": recent_activity,
-        "proactiveAlerts": proactive_alerts,
-    }
+    return await asyncio.to_thread(
+        portfolio_analysis_service.build_portfolio_brief,
+        user_id=user_id,
+        account=account,
+        positions=positions,
+        access_token=schwab_token.access_token,
+        suggested_actions=suggested_actions,
+    )
