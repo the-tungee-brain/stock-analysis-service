@@ -33,4 +33,5 @@ def get_account_positions(
     return {
         "schwab_positions": account_map["positions"],
         "account": account_map["account"],
+        "cashSecuredPutSummary": account_map["cashSecuredPutSummary"],
     }

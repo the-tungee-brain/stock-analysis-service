@@ -171,6 +171,7 @@ def test_enrich_positions_table_includes_precomputed_columns():
     table = _enrich_positions_table([position], account=account)
 
     assert "PNL_% | WEIGHT_%" in table
+    assert "RESERVED_CASH" in table
     assert "+17.6%" in table
     assert "+20.0%" in table
     assert "PORTFOLIO_LIQUIDATION_VALUE: 100000.0" in table

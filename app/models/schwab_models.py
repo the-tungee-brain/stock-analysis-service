@@ -12,6 +12,8 @@ class Instrument(BaseModel):
     type: Optional[str] = None
     putCall: Optional[Literal["CALL", "PUT"]] = None
     underlyingSymbol: Optional[str] = None
+    strikePrice: Optional[float] = None
+    expirationDate: Optional[str] = None
 
 
 class Position(BaseModel):

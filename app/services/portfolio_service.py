@@ -1,5 +1,6 @@
 from app.builders.schwab_trader_builder import SchwabTraderBuilder
 from app.models.schwab_models import Position, SchwabAccounts
+from app.broker.option_utils import summarize_csp_cash_reserves
 from typing import List, Dict
 
 
@@ -19,9 +20,15 @@ class PortfolioService:
             for symbol in {self._symbol_key(p) for p in positions}
         }
 
+        cash_balance = account.securitiesAccount.currentBalances.cashBalance
+
         return {
             "account": account,
             "positions": positions_by_symbol,
+            "cashSecuredPutSummary": summarize_csp_cash_reserves(
+                positions=positions,
+                cash_balance=cash_balance,
+            ),
         }
 
     def _symbol_key(self, pos: Position) -> str:

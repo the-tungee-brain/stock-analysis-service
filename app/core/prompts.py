@@ -8,6 +8,10 @@ from textwrap import dedent
 from typing import List, Optional
 
 from app.models.schwab_models import Position, SchwabAccounts
+from app.broker.option_utils import (
+    cash_secured_put_reserved_cash,
+    total_csp_reserved_cash,
+)
 
 
 class AnalysisAction(str, Enum):
@@ -232,7 +236,9 @@ OPTIONS_STRATEGY_RULES = dedent("""
     - Disclose: upside capped above the strike, assignment risk, shares may be called away.
 
     ## Sell cash-secured put
-    - Requires enough cash to buy 100 shares at the strike if assigned.
+    - Requires enough cash to buy 100 shares at the strike if assigned (strike × 100 × contracts).
+    - For open short puts, use the **RESERVED_CASH** column — cash set aside per position.
+    - Account summary shows total CSP reserved cash and cash remaining after those reserves.
     - Appropriate when: user wants income, or would be happy owning shares at the strike price.
     - Always say **"sell a cash-secured put"** — never "short put" or "write a put."
     - Disclose: obligation to buy 100 shares per contract if assigned; profit limited to premium received.
@@ -446,6 +452,7 @@ def _enrich_positions_table(
         pnl = _position_pnl(p)
         pnl_pct = _position_pnl_pct(p)
         weight_pct = _position_weight_pct(p, portfolio_value)
+        reserved_cash = cash_secured_put_reserved_cash(p)
 
         qty = p.longQuantity if p.longQuantity > 0 else -p.shortQuantity
         avg_price = (
@@ -462,26 +469,34 @@ def _enrich_positions_table(
                 "pnl": round(pnl, 2),
                 "pnl_pct": _format_pct(pnl_pct),
                 "weight_pct": _format_pct(weight_pct),
+                "reserved_cash": round(reserved_cash, 2) if reserved_cash is not None else None,
                 "day_pnl": round(p.currentDayProfitLoss, 2),
                 "day_%": round(p.currentDayProfitLossPercentage, 2),
             }
         )
 
     header = (
-        "SYMBOL | TYPE | QTY | AVG | MKT_VAL | PNL | PNL_% | WEIGHT_% | DAY_PNL | DAY_%"
+        "SYMBOL | TYPE | QTY | AVG | MKT_VAL | PNL | PNL_% | WEIGHT_% | RESERVED_CASH | DAY_PNL | DAY_%"
     )
     lines = [header]
 
     for r in rows:
+        reserved = (
+            f"{r['reserved_cash']:.2f}"
+            if r["reserved_cash"] is not None
+            else "—"
+        )
         lines.append(
             f"{r['symbol']} | {r['type']} | {r['qty']} | {r['avg']} | {r['mkt_val']} | "
-            f"{r['pnl']} | {r['pnl_pct']} | {r['weight_pct']} | {r['day_pnl']} | {r['day_%']}%"
+            f"{r['pnl']} | {r['pnl_pct']} | {r['weight_pct']} | {reserved} | "
+            f"{r['day_pnl']} | {r['day_%']}%"
         )
 
     table = "\n".join(lines)
 
     total_value = sum(abs(p.marketValue) for p in positions_sorted)
     total_day_pnl = sum(p.currentDayProfitLoss for p in positions_sorted)
+    total_csp_reserved = total_csp_reserved_cash(positions)
     portfolio_line = (
         f"PORTFOLIO_LIQUIDATION_VALUE: {round(portfolio_value, 2)}"
         if portfolio_value is not None
@@ -490,20 +505,34 @@ def _enrich_positions_table(
 
     summary = (
         f"\n\n{portfolio_line}"
+        f"\nTOTAL_CSP_RESERVED_CASH: {round(total_csp_reserved, 2)}"
         f"\nTABLE_TOTAL_ABS_MKT_VAL: {round(total_value, 2)}"
         f"\nTOTAL_DAY_PnL: {round(total_day_pnl, 2)}"
         f"\nNUM_POSITIONS: {len(positions_sorted)}"
         f"\nNOTE: PNL_% = unrealized P/L vs cost basis. WEIGHT_% = abs(market value) / portfolio liquidation value."
+        f"\nNOTE: RESERVED_CASH = strike × 100 × contracts for short cash-secured puts; — for other positions."
     )
 
     return table + summary
 
 
-def _build_account_summary(acc: SchwabAccounts) -> str:
+def _build_account_summary(
+    acc: SchwabAccounts,
+    positions: List[Position] | None = None,
+) -> str:
     sa = acc.securitiesAccount
     cur = sa.currentBalances
     proj = sa.projectedBalances
     agg = acc.aggregatedBalance
+
+    csp_reserved = total_csp_reserved_cash(positions or sa.positions)
+    csp_lines = ""
+    if csp_reserved > 0:
+        available_after = max(cur.cashBalance - csp_reserved, 0.0)
+        csp_lines = dedent(f"""
+        - Cash reserved for cash-secured puts: ~{_format_currency(csp_reserved)}.
+        - Cash available after CSP reserves: ~{_format_currency(available_after)}.
+        """).strip()
 
     return dedent(f"""
         Account summary:
@@ -511,6 +540,7 @@ def _build_account_summary(acc: SchwabAccounts) -> str:
         - Cash: ~{_format_currency(cur.cashBalance)}, margin balance: ~{_format_currency(cur.marginBalance)},
           maintenance requirement: ~{_format_currency(cur.maintenanceRequirement)}, 
           {'IN' if proj.isInCall else 'Not in'} margin call.
+        {csp_lines}
         - Exposure: stock you own ~{_format_currency(cur.longMarketValue)}, bearish/short stock ~{_format_currency(cur.shortMarketValue)},
           options you own ~{_format_currency(cur.longOptionMarketValue)}, options you've sold ~{_format_currency(cur.shortOptionMarketValue)}.
         - Buying power: stock ~{_format_currency(proj.stockBuyingPower)}, overall ~{_format_currency(proj.buyingPower)}.
@@ -656,7 +686,7 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
             """).strip()
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    account_summary = _build_account_summary(ctx.account)
+    account_summary = _build_account_summary(ctx.account, positions=ctx.positions)
     positions_table = _enrich_positions_table(ctx.positions, account=ctx.account)
 
     market_block = ctx.market_snapshot or "No per-symbol market snapshot provided."
@@ -769,7 +799,7 @@ def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = Tru
             """).strip()
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    account_summary = _build_account_summary(ctx.account)
+    account_summary = _build_account_summary(ctx.account, positions=ctx.positions)
     positions_table = _enrich_positions_table(
         ctx.positions, max_symbols=20, account=ctx.account
     )
