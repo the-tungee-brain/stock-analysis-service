@@ -42,11 +42,19 @@ class EarningsService:
 
         transcript_segments = []
         resolved_transcript_id = transcript_id or event.transcriptId
-        if include_transcript and resolved_transcript_id:
-            raw_transcript = self.earnings_builder.finnhub_adapter.get_transcript(
-                resolved_transcript_id
-            )
-            transcript_segments = self.earnings_builder.parse_transcript(raw_transcript)
+        if include_transcript:
+            if not resolved_transcript_id:
+                resolved_transcript_id = self.earnings_builder.lookup_transcript_id(
+                    symbol=symbol,
+                    report_date=report_date,
+                )
+            if resolved_transcript_id:
+                transcript_segments = self.earnings_builder.fetch_transcript(
+                    resolved_transcript_id
+                )
+                event = event.model_copy(
+                    update={"transcriptId": resolved_transcript_id},
+                )
 
         return EarningsDetailResponse(
             symbol=symbol.upper(),

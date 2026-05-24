@@ -47,7 +47,6 @@ class EarningsBuilder:
             start=min(report_dates) if report_dates else date.today() - timedelta(days=365),
             end=max(report_dates) if report_dates else date.today(),
         )
-        transcript_by_date = self._load_transcript_ids_by_date(symbol=symbol)
 
         history: list[EarningsEvent] = []
         for item in raw_surprises:
@@ -60,7 +59,7 @@ class EarningsBuilder:
                 report_date=report_date,
                 surprise_row=item,
                 calendar_row=calendar_row,
-                transcript_id=transcript_by_date.get(report_date.isoformat()),
+                transcript_id=None,
                 is_upcoming=False,
             )
             history.append(event)
@@ -68,7 +67,6 @@ class EarningsBuilder:
         upcoming = self._load_upcoming(
             symbol=symbol,
             calendar_by_date=calendar_by_date,
-            transcript_by_date=transcript_by_date,
         )
 
         return EarningsListResponse(
@@ -106,10 +104,6 @@ class EarningsBuilder:
         if not surprise_row and not calendar_row:
             return None
 
-        if transcript_id is None:
-            transcript_by_date = self._load_transcript_ids_by_date(symbol=symbol)
-            transcript_id = transcript_by_date.get(iso_date)
-
         return self._build_event(
             symbol=symbol,
             report_date=report_date,
@@ -118,6 +112,17 @@ class EarningsBuilder:
             transcript_id=transcript_id,
             is_upcoming=report_date > date.today(),
         )
+
+    def lookup_transcript_id(self, symbol: str, report_date: date) -> str | None:
+        by_date = self._load_transcript_ids_by_date(symbol=symbol)
+        return by_date.get(report_date.isoformat())
+
+    def fetch_transcript(self, transcript_id: str) -> list[TranscriptSegment]:
+        try:
+            raw = self.finnhub_adapter.get_transcript(transcript_id)
+        except Exception:
+            return []
+        return self.parse_transcript(raw)
 
     def parse_transcript(self, raw: Any) -> list[TranscriptSegment]:
         if not isinstance(raw, dict):
@@ -185,7 +190,6 @@ class EarningsBuilder:
         self,
         symbol: str,
         calendar_by_date: dict[str, dict[str, Any]],
-        transcript_by_date: dict[str, str],
     ) -> EarningsEvent | None:
         today = date.today()
         future_calendar = self._load_calendar_by_date(
@@ -208,7 +212,7 @@ class EarningsBuilder:
             report_date=report_date,
             surprise_row={},
             calendar_row=calendar_row,
-            transcript_id=transcript_by_date.get(upcoming_dates[0]),
+            transcript_id=None,
             is_upcoming=True,
         )
 
@@ -239,7 +243,10 @@ class EarningsBuilder:
         return by_date
 
     def _load_transcript_ids_by_date(self, symbol: str) -> dict[str, str]:
-        raw = self.finnhub_adapter.get_transcripts_list(symbol=symbol)
+        try:
+            raw = self.finnhub_adapter.get_transcripts_list(symbol=symbol)
+        except Exception:
+            return {}
         entries = raw.get("transcripts") if isinstance(raw, dict) else []
         by_date: dict[str, str] = {}
         for entry in self._safe_list(entries):
