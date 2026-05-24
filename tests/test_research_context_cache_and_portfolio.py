@@ -99,6 +99,29 @@ def test_symbol_followup_prompt_omits_context_block():
     assert "earlier in this conversation" in prompt
 
 
+def test_should_include_portfolio_context_without_assistant_history():
+    from app.services.chat_service import ChatService
+
+    assert ChatService.should_include_portfolio_context(
+        is_first_chat=False,
+        action=AnalysisAction.FREE_FORM,
+        recent_messages=[{"role": "user", "content": "Should I trim?"}],
+    )
+
+
+def test_should_omit_portfolio_context_on_valid_followup():
+    from app.services.chat_service import ChatService
+
+    assert not ChatService.should_include_portfolio_context(
+        is_first_chat=False,
+        action=AnalysisAction.FREE_FORM,
+        recent_messages=[
+            {"role": "user", "content": "Should I trim?"},
+            {"role": "assistant", "content": "I'd trim 30%. Want redeploy ideas?"},
+        ],
+    )
+
+
 def test_portfolio_followup_prompt_omits_context_block():
     ctx = PortfolioContext(
         account=_make_account(),

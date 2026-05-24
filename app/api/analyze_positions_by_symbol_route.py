@@ -69,26 +69,32 @@ async def analyze_positions_by_symbol(
         action=request.action,
     )
 
+    session_prompt = chat_service.user_message_for_storage(
+        prompt=request.prompt,
+        action=request.action,
+    )
     session_id, is_first_chat = chat_service.get_portfolio_analysis_session_id(
         user_id=user_id,
         symbol=request.symbol,
-        prompt=request.prompt,
+        prompt=session_prompt,
         model=request.model,
     )
-    include_context = (
-        is_first_chat or request.action is not AnalysisAction.FREE_FORM
+    recent_messages = chat_service.get_chat_messages_by_session(session_id=session_id)
+    include_context = chat_service.should_include_portfolio_context(
+        is_first_chat=is_first_chat,
+        action=request.action,
+        recent_messages=recent_messages,
     )
     user_prompt = prompt_enrichment_service.build_portfolio_strategy_prompt(
         ctx=ctx,
         include_context=include_context,
     )
-    recent_messages = chat_service.get_chat_messages_by_session(session_id=session_id)
 
     if session_id:
         chat_service.create_message(
             session_id=session_id,
-            role=user_prompt["role"],
-            content=user_prompt["content"],
+            role="user",
+            content=session_prompt,
         )
 
     assistant_content_parts: List[str] = []

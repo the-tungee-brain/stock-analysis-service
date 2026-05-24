@@ -74,8 +74,8 @@ async def research_chat(
     if session_id:
         chat_service.create_message(
             session_id=session_id,
-            role=user_message["role"],
-            content=user_message["content"],
+            role="user",
+            content=prompt,
         )
 
     assistant_content_parts: List[str] = []

@@ -4,7 +4,7 @@ from uuid import UUID
 from app.builders.chat_sessions_builder import ChatSessionsBuilder
 from app.builders.chat_messages_builder import ChatMessagesBuilder
 from app.models.chat_sessions_models import ChatSession, ChatMessage
-from app.core.prompts import SYSTEM_NATURAL_MESSAGE
+from app.core.prompts import SYSTEM_NATURAL_MESSAGE, AnalysisAction
 from app.services.prompt_enrichment_service import RESEARCH_CHAT_SYSTEM_MESSAGE
 from openai.types.shared import ResponsesModel
 
@@ -17,6 +17,32 @@ class ChatService:
     ):
         self.chat_sessions_builder = chat_sessions_builder
         self.chat_messages_builder = chat_messages_builder
+
+    @staticmethod
+    def user_message_for_storage(
+        prompt: Optional[str],
+        action: AnalysisAction,
+    ) -> str:
+        text = (prompt or "").strip()
+        if text:
+            return text
+        return action.label
+
+    @staticmethod
+    def should_include_portfolio_context(
+        *,
+        is_first_chat: bool,
+        action: AnalysisAction,
+        recent_messages: List[Dict[str, Any]],
+    ) -> bool:
+        has_assistant_history = any(
+            message["role"] == "assistant" for message in recent_messages
+        )
+        return (
+            is_first_chat
+            or action is not AnalysisAction.FREE_FORM
+            or not has_assistant_history
+        )
 
     def get_portfolio_analysis_session_id(
         self,

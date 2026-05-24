@@ -47,6 +47,14 @@ class OpenAIAdapter(BaseLLM):
                     yield str(delta)
                     await asyncio.sleep(0)
 
+            elif event_type in {"response.failed", "error"}:
+                message = getattr(event, "message", None) or getattr(
+                    event, "error", None
+                )
+                if message:
+                    yield f"\n\nSorry, the model could not finish: {message}"
+                break
+
             elif event_type == "response.output_text.done":
                 break
 
