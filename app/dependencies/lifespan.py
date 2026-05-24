@@ -32,7 +32,7 @@ from app.builders.schwab_auth_builder import SchwabAuthBuilder
 from app.builders.schwab_market_builder import SchwabMarketBuilder
 from app.builders.schwab_trader_builder import SchwabTraderBuilder
 from app.builders.performance_builder import PerformanceBuilder
-from app.builders.fundamentals_builder import FundamentalsBuilder
+from app.builders.earnings_builder import EarningsBuilder
 from app.builders.ticker_symbol_builder import TickerSymbolBuilder
 
 from app.core.llm_config import settings
@@ -55,6 +55,7 @@ from app.builders.sec_cik_builder import SecCikBuilder
 from app.builders.sec_financials_builder import SecFinancialsBuilder
 from app.builders.sec_ratios_builder import SecRatiosBuilder
 from app.services.sec_research_service import SecResearchService
+from app.services.earnings_service import EarningsService
 
 
 def get_redis_client() -> redis.Redis:
@@ -145,6 +146,7 @@ async def lifespan(app: FastAPI):
     )
     performance_builder = PerformanceBuilder(market_data_adapter=yfinance_adapter)
     fundamentals_builder = FundamentalsBuilder(market_data_adapter=yfinance_adapter)
+    earnings_builder = EarningsBuilder(finnhub_adapter=finnhub_adapter)
     sec_edgar_adapter = SecEdgarAdapter.from_env(session=session)
     sec_cik_builder = SecCikBuilder(sec_edgar_adapter=sec_edgar_adapter)
     sec_financials_builder = SecFinancialsBuilder()
@@ -195,6 +197,10 @@ async def lifespan(app: FastAPI):
         news_service=news_service,
         fundamentals_builder=fundamentals_builder,
     )
+    earnings_service = EarningsService(
+        earnings_builder=earnings_builder,
+        finnhub_builder=finnhub_builder,
+    )
     ticker_service = TickerService(ticker_symbol_builder=ticker_symbol_builder)
     transaction_service = TransactionService(
         schwab_trader_builder=schwab_trader_builder
@@ -214,6 +220,7 @@ async def lifespan(app: FastAPI):
     app.state.chat_service = chat_service
     app.state.company_profile_service = company_profile_service
     app.state.company_research_service = company_research_service
+    app.state.earnings_service = earnings_service
     app.state.sec_research_service = sec_research_service
     app.state.ticker_service = ticker_service
     app.state.transaction_service = transaction_service

@@ -488,3 +488,65 @@ class PromptEnrichmentService:
         ).strip()
 
         return [system_msg, user_msg]
+
+    def build_earnings_detail_prompt(
+        self,
+        detail_block: str,
+        transcript_excerpt: str | None,
+    ) -> list[str]:
+        transcript_section = (
+            "## Earnings call transcript excerpt\n" + transcript_excerpt
+            if transcript_excerpt
+            else "## Earnings call transcript\nNo transcript was available for this quarter."
+        )
+
+        system_msg = dedent(
+            f"""
+            {RESEARCH_SYSTEM_PREAMBLE}
+
+            # Your task
+            Analyze a specific earnings report for a retail investor. Explain what happened,
+            why it mattered, and what management signaled about the future.
+
+            # Depth requirements
+            - **headline**: One sentence capturing the main takeaway of the quarter.
+            - **summary**: 4–6 sentences on revenue, earnings, margins, and overall performance
+              versus expectations. Use only the supplied figures.
+            - **context**: 3–5 sentences on what investors were expecting going into the report,
+              recent business backdrop, and how the stock narrative was set up.
+            - **keyHighlights**: 4–6 bullet strings covering the most important business updates,
+              product metrics, segment performance, or strategic moves discussed.
+            - **guidanceAndOutlook**: 3–5 sentences on forward guidance, management tone, and
+              stated priorities. If guidance was not provided, say so clearly.
+            - **whatSurprised**: 2–4 sentences on beats/misses and any unexpected disclosures.
+            - **investorTakeaway**: 2–3 sentences on what a long-term investor should remember
+              from this earnings report.
+
+            Return a single JSON object with exactly these keys:
+            {{
+              "headline": "...",
+              "summary": "...",
+              "context": "...",
+              "keyHighlights": ["..."],
+              "guidanceAndOutlook": "...",
+              "whatSurprised": "...",
+              "investorTakeaway": "..."
+            }}
+
+            Do not include extra keys, markdown, or commentary outside the JSON.
+            """
+        ).strip()
+
+        user_msg = dedent(
+            f"""
+            Analyze this earnings report:
+
+            {detail_block}
+
+            {transcript_section}
+
+            Base your analysis only on the supplied earnings figures, news, and transcript text.
+            """
+        ).strip()
+
+        return [system_msg, user_msg]

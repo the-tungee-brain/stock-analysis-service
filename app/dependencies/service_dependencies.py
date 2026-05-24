@@ -13,6 +13,7 @@ from app.services.company_research_service import CompanyResearchService
 from app.services.ticker_service import TickerService
 from app.services.sec_research_service import SecResearchService
 from app.services.transaction_service import TransactionService
+from app.services.earnings_service import EarningsService
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -69,3 +70,7 @@ def get_sec_research_service(request: Request) -> SecResearchService:
 
 def get_transaction_service(request: Request) -> TransactionService:
     return request.app.state.transaction_service
+
+
+def get_earnings_service(request: Request) -> EarningsService:
+    return request.app.state.earnings_service
