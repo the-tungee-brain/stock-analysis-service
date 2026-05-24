@@ -7,7 +7,7 @@ from app.dependencies.service_dependencies import (
     get_transaction_service,
     get_portfolio_analysis_service,
 )
-from app.models.intelligence_models import ProactiveAlert
+from app.models.intelligence_models import PortfolioIntelligence, ProactiveAlert
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.models.recent_order_models import RecentActivitySummary
 from app.services.portfolio_service import PortfolioService
@@ -62,8 +62,9 @@ def get_account_positions(
         recent_activity = None
 
     proactive_alerts: list[ProactiveAlert] = []
+    portfolio_brief: PortfolioIntelligence | None = None
     try:
-        proactive_alerts = portfolio_analysis_service.build_proactive_alerts(
+        portfolio_brief = portfolio_analysis_service.build_portfolio_brief(
             user_id=user_id,
             account=account_map["account"],
             positions=account_map["account"].securitiesAccount.positions,
@@ -72,7 +73,9 @@ def get_account_positions(
                 recent_activity.suggested_actions if recent_activity else []
             ),
         )
+        proactive_alerts = portfolio_brief.alerts
     except Exception:
+        portfolio_brief = None
         proactive_alerts = []
 
     return {
@@ -82,4 +85,5 @@ def get_account_positions(
         "assignmentRiskSummary": account_map["assignmentRiskSummary"],
         "recentActivity": recent_activity,
         "proactiveAlerts": proactive_alerts,
+        "portfolioBrief": portfolio_brief,
     }

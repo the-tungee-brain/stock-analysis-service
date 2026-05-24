@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone
 from unittest.mock import MagicMock
+from app.core.prompts import AnalysisAction
 from app.models.company_research_models import (
     EarningsContext,
     EnrichedNewsSummary,
