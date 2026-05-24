@@ -41,3 +41,6 @@ class FinnhubAdapter:
         return self.finnhub_client.press_releases(
             symbol=symbol, _from=_from, to=to
         )
+
+    def get_stock_peers(self, symbol: str) -> list[str]:
+        return self.finnhub_client.stock_peers(symbol=symbol)

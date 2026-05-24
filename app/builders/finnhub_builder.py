@@ -28,3 +28,9 @@ class FinnhubBuilder:
     def get_quote(self, symbol: str):
         raw_quote = self.finnhub_adapter.get_quote(symbol=symbol)
         return Quote.model_validate(raw_quote)
+
+    def get_peers(self, symbol: str) -> list[str]:
+        raw_peers = self.finnhub_adapter.get_stock_peers(symbol=symbol)
+        if not isinstance(raw_peers, list):
+            return []
+        return [peer.upper() for peer in raw_peers if isinstance(peer, str) and peer.strip()]

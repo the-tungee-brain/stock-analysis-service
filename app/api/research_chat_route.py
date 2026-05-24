@@ -52,18 +52,20 @@ async def research_chat(
         )
 
     ctx = company_research_service.build_context(symbol=symbol)
-    user_message = prompt_enrichment_service.build_research_chat_user_message(
-        ctx=ctx,
-        user_prompt=prompt,
-    )
 
-    session_id, _ = chat_service.get_research_chat_session_id(
+    session_id, is_first_chat = chat_service.get_research_chat_session_id(
         user_id=user_id,
         symbol=symbol,
         prompt=prompt,
         model=request.model,
     )
     recent_messages = chat_service.get_chat_messages_by_session(session_id=session_id)
+
+    user_message = prompt_enrichment_service.build_research_chat_user_message(
+        ctx=ctx,
+        user_prompt=prompt,
+        include_context=is_first_chat,
+    )
 
     if session_id:
         chat_service.create_message(

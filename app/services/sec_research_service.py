@@ -5,8 +5,9 @@ from app.builders.sec_cik_builder import SecCikBuilder
 from app.builders.sec_financials_builder import SecFinancialsBuilder
 from app.builders.sec_ratios_builder import REVENUE_TAGS
 from app.builders.sec_ratios_builder import SecRatiosBuilder
-from app.models.company_research_models import FundamentalMetric
+from app.models.company_research_models import FundamentalMetric, SecRatioTrendPoint
 from app.models.sec_research_models import (
+    RatioSnapshot,
     SecFilingsResponse,
     SecFinancialsResponse,
     SecLookupResponse,
@@ -77,6 +78,45 @@ class SecResearchService:
             for item in self.latest_snapshot_metrics(symbol=symbol)
             if item.get("include") and item.get("value")
         ]
+
+    def annual_ratio_trends(self, symbol: str, limit: int = 5) -> list[SecRatioTrendPoint]:
+        ratios = self.ratios(symbol=symbol, period="annual", limit=limit)
+        trends: list[SecRatioTrendPoint] = []
+        for snapshot in ratios.snapshots:
+            if snapshot.fiscal_period != "FY":
+                continue
+            trend = self._ratio_snapshot_to_trend_point(snapshot)
+            if trend is not None:
+                trends.append(trend)
+        return trends[:limit]
+
+    @staticmethod
+    def _ratio_snapshot_to_trend_point(
+        snapshot: RatioSnapshot,
+    ) -> SecRatioTrendPoint | None:
+        if not any(
+            value is not None
+            for value in (
+                snapshot.gross_margin,
+                snapshot.operating_margin,
+                snapshot.net_margin,
+                snapshot.roe,
+                snapshot.fcf_margin,
+                snapshot.revenue_growth_yoy,
+            )
+        ):
+            return None
+
+        return SecRatioTrendPoint(
+            period_end=snapshot.end,
+            fiscal_year=snapshot.fiscal_year,
+            gross_margin=SecResearchService._fmt_pct(snapshot.gross_margin),
+            operating_margin=SecResearchService._fmt_pct(snapshot.operating_margin),
+            net_margin=SecResearchService._fmt_pct(snapshot.net_margin),
+            roe=SecResearchService._fmt_pct(snapshot.roe),
+            fcf_margin=SecResearchService._fmt_pct(snapshot.fcf_margin),
+            revenue_growth_yoy=SecResearchService._fmt_pct(snapshot.revenue_growth_yoy),
+        )
 
     def latest_snapshot_metrics(self, symbol: str) -> list[dict[str, str | None]]:
         """Compact latest annual metrics aligned to a single fiscal period."""

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import List, Optional
 from fastapi.responses import StreamingResponse
 
@@ -35,6 +35,15 @@ class AnalyzePositionsBySymbolRequest(BaseModel):
     prompt: Optional[str] = None
     action: AnalysisAction = AnalysisAction.FREE_FORM
     model: Optional[ResponsesModel] = "gpt-4.1-mini"
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def normalize_action(cls, value: object) -> AnalysisAction:
+        if isinstance(value, AnalysisAction):
+            return value
+        if value is None:
+            return AnalysisAction.FREE_FORM
+        return AnalysisAction.parse(str(value))
 
 
 @router.post("/analyze-positions-by-symbol")
@@ -80,7 +89,7 @@ async def analyze_positions_by_symbol(
     async def streamer():
         system_prompt = (
             SYSTEM_NATURAL_MESSAGE
-            if should_use_natural_response(request.prompt)
+            if should_use_natural_response(request.prompt, action=request.action)
             else SYSTEM_MESSAGE
         )
         async for chunk in llm_service.analyze_option_position(

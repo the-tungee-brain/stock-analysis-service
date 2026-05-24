@@ -31,6 +31,11 @@ class CompanyProfileService:
             weburl=profile.weburl,
         )
 
+    def get_peers(self, symbol: str) -> list[str]:
+        peers = self.finnhub_builder.get_peers(symbol=symbol)
+        symbol_upper = symbol.upper()
+        return [peer for peer in peers if peer != symbol_upper]
+
     def _compute_change_pct(
         self, current: float | None, prev_close: float | None
     ) -> float:

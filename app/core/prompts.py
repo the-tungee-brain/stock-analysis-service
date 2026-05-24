@@ -16,6 +16,76 @@ class AnalysisAction(str, Enum):
     TAX_ANGLE = "tax-angle"
     WHAT_CHANGED = "what-changed"
 
+    @property
+    def label(self) -> str:
+        return _ANALYSIS_ACTION_LABELS[self]
+
+    @classmethod
+    def parse(cls, value: str | "AnalysisAction") -> "AnalysisAction":
+        if isinstance(value, cls):
+            return value
+
+        normalized = cls._normalize_key(str(value))
+        if not normalized:
+            return cls.FREE_FORM
+
+        for member in cls:
+            if normalized == cls._normalize_key(member.value):
+                return member
+            if normalized == cls._normalize_key(member.name):
+                return member
+
+        alias = _ANALYSIS_ACTION_ALIASES.get(normalized)
+        if alias is not None:
+            return alias
+
+        valid = ", ".join(member.label for member in cls)
+        raise ValueError(
+            f"Unknown analysis action {value!r}. "
+            f"Try one of: {valid}, or the kebab-case values like 'tax-angle'."
+        )
+
+    @staticmethod
+    def _normalize_key(value: str) -> str:
+        key = value.strip().lower().replace("-", " ").replace("_", " ")
+        key = key.replace("'", "")
+        return " ".join(key.split())
+
+
+_ANALYSIS_ACTION_LABELS: dict[AnalysisAction, str] = {
+    AnalysisAction.FREE_FORM: "free form",
+    AnalysisAction.DAILY_SUMMARY: "daily summary",
+    AnalysisAction.RISK_CHECK: "risk check",
+    AnalysisAction.TAX_ANGLE: "tax angle",
+    AnalysisAction.WHAT_CHANGED: "what changed",
+}
+
+_ANALYSIS_ACTION_ALIASES: dict[str, AnalysisAction] = {
+    "freeform": AnalysisAction.FREE_FORM,
+    "general": AnalysisAction.FREE_FORM,
+    "custom": AnalysisAction.FREE_FORM,
+    "default": AnalysisAction.FREE_FORM,
+    "dailysummary": AnalysisAction.DAILY_SUMMARY,
+    "today summary": AnalysisAction.DAILY_SUMMARY,
+    "daily recap": AnalysisAction.DAILY_SUMMARY,
+    "market recap": AnalysisAction.DAILY_SUMMARY,
+    "riskcheck": AnalysisAction.RISK_CHECK,
+    "risk review": AnalysisAction.RISK_CHECK,
+    "risk assessment": AnalysisAction.RISK_CHECK,
+    "check risk": AnalysisAction.RISK_CHECK,
+    "taxangle": AnalysisAction.TAX_ANGLE,
+    "taxes": AnalysisAction.TAX_ANGLE,
+    "tax": AnalysisAction.TAX_ANGLE,
+    "tax implications": AnalysisAction.TAX_ANGLE,
+    "tax perspective": AnalysisAction.TAX_ANGLE,
+    "taxes angle": AnalysisAction.TAX_ANGLE,
+    "whats changed": AnalysisAction.WHAT_CHANGED,
+    "what changed today": AnalysisAction.WHAT_CHANGED,
+    "what has changed": AnalysisAction.WHAT_CHANGED,
+    "recent changes": AnalysisAction.WHAT_CHANGED,
+    "what is different": AnalysisAction.WHAT_CHANGED,
+}
+
 
 @dataclass(kw_only=True)
 class BaseAnalysisContext:
@@ -37,10 +107,17 @@ class SymbolContext(BaseAnalysisContext):
     market_snapshot: Optional[str] = None
     market_context: Optional[str] = None
     option_chain: Optional[str] = None
+    research_context: Optional[str] = None
+    recent_transactions: Optional[str] = None
 
 
-def should_use_natural_response(user_prompt: Optional[str]) -> bool:
-    """Use conversational output when the user typed a question or free-form request."""
+def should_use_natural_response(
+    user_prompt: Optional[str],
+    action: AnalysisAction = AnalysisAction.FREE_FORM,
+) -> bool:
+    """Use conversational output for preset actions and typed user questions."""
+    if action is not AnalysisAction.FREE_FORM:
+        return True
     return bool(user_prompt and user_prompt.strip())
 
 
@@ -487,10 +564,13 @@ def _build_action_prompt(
             Cover these points:
             1. **Holding period** — short-term vs. long-term capital gains considerations.
             2. **Realizing gains or losses** — tax-loss harvesting or gain-management angles, if relevant.
-            3. **Common pitfalls** — wash-sale rules, holding-period traps, and similar issues for this position type.
-            4. **Missing inputs** — flag anything you would need for a fuller answer: purchase date, cost basis,
-               holding period, realized gains/losses YTD, and planned replacement trades.
-            5. **Risk-first framing** — do not recommend a trade solely for tax reasons. Connect any tax idea
+            3. **Recent trading activity** — use the filled-order history below for wash-sale awareness,
+               recent buys/sells, and whether a sale would likely be short-term or long-term based on
+               visible fill dates (flag when purchase dates are incomplete).
+            4. **Common pitfalls** — wash-sale rules, holding-period traps, and similar issues for this position type.
+            5. **Missing inputs** — flag anything you would need for a fuller answer: full purchase history,
+               cost basis, holding period for the entire lot, realized gains/losses YTD, and planned replacement trades.
+            6. **Risk-first framing** — do not recommend a trade solely for tax reasons. Connect any tax idea
                back to portfolio risk and the investment thesis.
 
             Keep it concise and easy to understand for a non-expert.
@@ -498,14 +578,16 @@ def _build_action_prompt(
 
     if action is AnalysisAction.WHAT_CHANGED:
         return dedent(f"""
-            Explain what materially changed today for {symbol} that matters to an investor.
+            Explain what materially changed recently for {symbol} that matters to an investor.
 
             Cover these points:
             1. **Price & volume** — how the stock traded today vs. recent sessions.
             2. **News & events** — major headlines, macro moves, or sector events from the data.
-            3. **Trend context** — how today's move fits the recent price trend.
-            4. **Thesis impact** — is the thesis stronger, weaker, or unchanged? Explain why.
-            5. **Action implication** — ONE recommendation (Hold / Trim / Add / Close) with a brief reason,
+            3. **Your recent trades** — if filled orders are listed below, explain how recent buys/sells
+               change the position story (added risk, reduced exposure, new cost basis, etc.).
+            4. **Trend context** — how today's move fits the recent price trend.
+            5. **Thesis impact** — is the thesis stronger, weaker, or unchanged? Explain why.
+            6. **Action implication** — ONE recommendation (Hold / Trim / Add / Close) with a brief reason,
                applying the decision matrix if position size or P/L warrants action.
 
             Focus on what changed, not a full re-analysis of the entire position.
@@ -526,7 +608,19 @@ def build_symbol_prompt(ctx: SymbolContext) -> str:
     market_block = ctx.market_snapshot or "No per-symbol market snapshot provided."
     macro_block = ctx.market_context or "No macro benchmark data provided."
     option_block = ctx.option_chain or "No option chain data provided."
+    research_block = (
+        ctx.research_context
+        or "No equity research data (fundamentals, news, SEC filings) provided."
+    )
+    transactions_block = ctx.recent_transactions
     action_block = _build_action_prompt(ctx.action, ctx.symbol, ctx.user_prompt)
+
+    transactions_section = ""
+    if transactions_block is not None:
+        transactions_section = dedent(f"""
+      === RECENT FILLED ORDERS (LAST 30 DAYS, {ctx.symbol}) ===
+      {transactions_block}
+        """).strip() + "\n\n"
 
     return dedent(f"""
       Today is {now_iso}.
@@ -551,7 +645,10 @@ def build_symbol_prompt(ctx: SymbolContext) -> str:
       === MACRO CONTEXT (BENCHMARKS) ===
       {macro_block}
 
-      === OPTION CHAIN (NEAREST EXPIRATION, NEAR CURRENT PRICE) ===
+      === EQUITY RESEARCH (FUNDAMENTALS, NEWS, SEC) ===
+      {research_block}
+
+      {transactions_section}=== OPTION CHAIN (NEAREST EXPIRATION, NEAR CURRENT PRICE) ===
       {option_block}
 
       === YOUR TASK ===

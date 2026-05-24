@@ -1,9 +1,10 @@
 from app.models.schwab_market_models import PromptQuoteSnapshot
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
+from app.models.schwab_order_models import SchwabOrder
 from datetime import datetime
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 from app.models.finnhub_news_models import NewsResponse
-from app.models.company_research_models import ResearchContext, FundamentalMetric
+from app.models.company_research_models import ResearchContext, FundamentalMetric, SecRatioTrendPoint
 from textwrap import dedent
 from app.core.prompts import (
     BaseAnalysisContext,
@@ -62,8 +63,40 @@ class PromptEnrichmentService:
             for metric in metrics
         )
 
+    @staticmethod
+    def _format_sec_ratio_trends_table(trends: list[SecRatioTrendPoint]) -> str:
+        header = (
+            "| Period end | Net margin | Op margin | ROE | Rev growth YoY | FCF margin |\n"
+            "|------------|------------|-----------|-----|----------------|------------|"
+        )
+        rows: list[str] = []
+        for trend in trends:
+            rows.append(
+                "| "
+                + " | ".join(
+                    [
+                        trend.period_end,
+                        trend.net_margin or "N/A",
+                        trend.operating_margin or "N/A",
+                        trend.roe or "N/A",
+                        trend.revenue_growth_yoy or "N/A",
+                        trend.fcf_margin or "N/A",
+                    ]
+                )
+                + " |"
+            )
+        return header + "\n" + "\n".join(rows)
+
     def _format_research_context_block(self, ctx: ResearchContext) -> str:
         sections: list[str] = [f"Symbol: {ctx.symbol}"]
+
+        if ctx.data_gaps:
+            gap_labels = ", ".join(ctx.data_gaps)
+            sections.append(
+                "## Data availability\n"
+                f"The following data sources were unavailable: {gap_labels}. "
+                "Do not invent figures for missing sources."
+            )
 
         if ctx.snapshot:
             s = ctx.snapshot
@@ -81,6 +114,15 @@ class PromptEnrichmentService:
             )
         else:
             sections.append("## Company profile\nNo live profile data available.")
+
+        if ctx.peers:
+            peer_list = ", ".join(ctx.peers[:8])
+            sections.append(
+                "## Peer companies (similar businesses)\n"
+                f"{peer_list}\n"
+                "Use these as qualitative comparables when discussing competitive positioning "
+                "and valuation — do not invent peer-specific financial figures."
+            )
 
         if ctx.performance:
             p = ctx.performance
@@ -119,6 +161,13 @@ class PromptEnrichmentService:
                 + self._format_metric_lines(ctx.sec_fundamentals)
             )
 
+        if ctx.sec_ratio_trends:
+            sections.append(
+                "## SEC filed financial trends (annual, from EDGAR)\n"
+                "Multi-year margin, profitability, and growth trends from official filings.\n\n"
+                + self._format_sec_ratio_trends_table(ctx.sec_ratio_trends)
+            )
+
         if ctx.fundamentals:
             sections.append(
                 "## Market data fundamentals (estimates)\n"
@@ -138,22 +187,130 @@ class PromptEnrichmentService:
 
         return "\n\n".join(sections)
 
+    def format_research_context_block(self, ctx: ResearchContext) -> str:
+        return self._format_research_context_block(ctx)
+
     def build_research_chat_user_message(
-        self, ctx: ResearchContext, user_prompt: str
+        self,
+        ctx: ResearchContext,
+        user_prompt: str,
+        *,
+        include_context: bool = True,
     ) -> dict[str, str]:
-        context_block = self._format_research_context_block(ctx)
+        if include_context:
+            context_block = self._format_research_context_block(ctx)
+            content = dedent(
+                f"""
+                === RESEARCH DATA FOR {ctx.symbol} ===
+                {context_block}
+
+                === USER QUESTION ===
+                {user_prompt}
+
+                Answer using the research data above. Acknowledge any gaps instead of guessing.
+                """
+            ).strip()
+            return {"role": "user", "content": content}
+
         content = dedent(
             f"""
-            === RESEARCH DATA FOR {ctx.symbol} ===
-            {context_block}
-
             === USER QUESTION ===
             {user_prompt}
 
-            Answer using the research data above. Acknowledge any gaps instead of guessing.
+            Answer using the research data from earlier in this conversation.
+            Acknowledge any gaps instead of guessing.
             """
         ).strip()
         return {"role": "user", "content": content}
+
+    @staticmethod
+    def _order_fill_time(order: SchwabOrder) -> Optional[datetime]:
+        latest: Optional[datetime] = None
+        for activity in order.orderActivityCollection or []:
+            for execution in activity.executionLegs or []:
+                if execution.time and (latest is None or execution.time > latest):
+                    latest = execution.time
+        if latest is not None:
+            return latest
+        return order.closeTime or order.enteredTime
+
+    @staticmethod
+    def _order_average_fill_price(order: SchwabOrder) -> Optional[float]:
+        total_qty = 0.0
+        total_notional = 0.0
+        for activity in order.orderActivityCollection or []:
+            for execution in activity.executionLegs or []:
+                if execution.price is None or execution.quantity is None:
+                    continue
+                qty = abs(float(execution.quantity))
+                total_qty += qty
+                total_notional += float(execution.price) * qty
+        if total_qty > 0:
+            return total_notional / total_qty
+        if order.price is not None:
+            return float(order.price)
+        return None
+
+    def build_recent_transactions_markdown(
+        self,
+        orders: List[SchwabOrder],
+        symbol: str,
+    ) -> str:
+        if not orders:
+            return (
+                f"No filled orders for {symbol.upper()} were found in the last 30 days."
+            )
+
+        sorted_orders = sorted(
+            orders,
+            key=lambda order: self._order_fill_time(order) or datetime.min,
+            reverse=True,
+        )
+
+        header = (
+            "| Fill date | Side | Qty | Avg fill | Order type | Open/Close | Tax lot |\n"
+            "|-----------|------|-----|----------|------------|------------|---------|"
+        )
+        rows: list[str] = []
+        for order in sorted_orders[:20]:
+            leg = (order.orderLegCollection or [None])[0]
+            fill_time = self._order_fill_time(order)
+            fill_date = fill_time.date().isoformat() if fill_time else "N/A"
+            side = (leg.instruction if leg and leg.instruction else "N/A").upper()
+            qty = leg.quantity if leg and leg.quantity is not None else order.filledQuantity
+            qty_str = f"{qty:g}" if qty is not None else "N/A"
+            avg_fill = self._order_average_fill_price(order)
+            avg_fill_str = f"${avg_fill:.2f}" if avg_fill is not None else "N/A"
+            order_type = order.orderType or "N/A"
+            open_close = (
+                leg.positionEffect if leg and leg.positionEffect else "N/A"
+            )
+            tax_lot = order.taxLotMethod or "N/A"
+            rows.append(
+                "| "
+                + " | ".join(
+                    [
+                        fill_date,
+                        side,
+                        qty_str,
+                        avg_fill_str,
+                        order_type,
+                        open_close,
+                        tax_lot,
+                    ]
+                )
+                + " |"
+            )
+
+        return (
+            "Filled brokerage orders from the last 30 days. "
+            "Use for recent activity, wash-sale context, and trade timing — "
+            "not as a complete tax lot history.\n\n"
+            + header
+            + "\n"
+            + "\n".join(rows)
+            + "\n"
+        )
 
     def build_market_snapshot_markdown(
         self,
