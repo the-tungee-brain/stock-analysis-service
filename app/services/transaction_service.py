@@ -1,10 +1,12 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from app.adapters.cache.recent_orders_cache import RecentOrdersCache
 from app.broker.order_grouping import (
     ActivityGroupInfo,
     detect_roll_groups,
+    detect_wash_sale_flags,
+    last_fill_time_for_symbol,
     leg_contract_label,
     leg_expiration,
     leg_put_call,
@@ -40,6 +42,7 @@ from app.models.schwab_order_models import OrderLeg, SchwabOrder
 
 DEFAULT_DAYS_BACK = 30
 RECENT_ACTIVITY_DAYS = 7
+WASH_SALE_WINDOW_DAYS = 30
 PORTFOLIO_LATEST_ORDERS_LIMIT = 5
 PORTFOLIO_SYMBOLS_LIMIT = 8
 TAX_RELEVANT_SELL_INSTRUCTIONS = frozenset({"SELL", "SELL_TO_CLOSE"})
@@ -316,18 +319,54 @@ class TransactionService:
             elif side in RISK_RELEVANT_BUY_INSTRUCTIONS:
                 has_buy = True
 
-        if has_sell:
+        wash_flags = detect_wash_sale_flags(
+            recent,
+            symbol=symbol,
+            window_days=WASH_SALE_WINDOW_DAYS,
+        )
+        if wash_flags:
+            if symbol:
+                add(
+                    AnalysisAction.TAX_ANGLE,
+                    (
+                        f"Possible wash sale on {symbol.upper()}: you sold and bought "
+                        f"within {WASH_SALE_WINDOW_DAYS} days — review tax lots and disallowed losses."
+                    ),
+                    priority=1,
+                )
+            else:
+                flagged_symbols = sorted({flag.symbol for flag in wash_flags})
+                preview = ", ".join(flagged_symbols[:3])
+                suffix = "…" if len(flagged_symbols) > 3 else ""
+                add(
+                    AnalysisAction.TAX_ANGLE,
+                    (
+                        f"Possible wash sale on {preview}{suffix}: recent sell+buy pairs "
+                        f"within {WASH_SALE_WINDOW_DAYS} days — review tax lots."
+                    ),
+                    priority=1,
+                )
+        elif has_sell:
             add(
                 AnalysisAction.TAX_ANGLE,
                 f"You sold {scope_label} recently — review tax implications and wash-sale rules.",
                 priority=1,
             )
 
-        add(
-            AnalysisAction.WHAT_CHANGED,
-            f"Recent trade activity for {scope_label} — see what changed since your last fill.",
-            priority=2,
-        )
+        last_fill = last_fill_time_for_symbol(recent, symbol=symbol)
+        if last_fill:
+            fill_label = last_fill.astimezone(timezone.utc).strftime("%b %d")
+            add(
+                AnalysisAction.WHAT_CHANGED,
+                f"See what changed since your last {scope_label} fill on {fill_label}.",
+                priority=2,
+            )
+        else:
+            add(
+                AnalysisAction.WHAT_CHANGED,
+                f"Recent trade activity for {scope_label} — see what changed since your last fill.",
+                priority=2,
+            )
 
         if has_buy:
             add(

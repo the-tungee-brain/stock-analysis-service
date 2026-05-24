@@ -114,9 +114,11 @@ class CompanyResearchService:
         except Exception:
             return None, gap_key
 
-    def _load_news(self, symbol: str) -> list[NewsHeadline]:
+    def _load_news(
+        self, symbol: str, *, lookback_days: int = 7
+    ) -> list[NewsHeadline]:
         news_response = self.news_service.get_company_news(
-            symbol=symbol, lookback_days=7
+            symbol=symbol, lookback_days=lookback_days
         )
         return [
             NewsHeadline(
@@ -128,10 +130,12 @@ class CompanyResearchService:
             for item in news_response.root[:10]
         ]
 
-    def build_context(self, symbol: str) -> ResearchContext:
+    def build_context(
+        self, symbol: str, *, news_lookback_days: int = 7
+    ) -> ResearchContext:
         symbol_upper = symbol.strip().upper()
 
-        if self.research_context_cache is not None:
+        if news_lookback_days == 7 and self.research_context_cache is not None:
             try:
                 cached = self.research_context_cache.get(symbol=symbol_upper)
                 if cached is not None:
@@ -139,9 +143,12 @@ class CompanyResearchService:
             except Exception:
                 pass
 
-        context = self._build_context(symbol=symbol_upper)
+        context = self._build_context(
+            symbol=symbol_upper,
+            news_lookback_days=news_lookback_days,
+        )
 
-        if self.research_context_cache is not None:
+        if news_lookback_days == 7 and self.research_context_cache is not None:
             try:
                 self.research_context_cache.put(symbol=symbol_upper, context=context)
             except Exception:
@@ -149,7 +156,9 @@ class CompanyResearchService:
 
         return context
 
-    def _build_context(self, symbol: str) -> ResearchContext:
+    def _build_context(
+        self, symbol: str, *, news_lookback_days: int = 7
+    ) -> ResearchContext:
         data_gaps: list[str] = []
 
         with ThreadPoolExecutor(max_workers=7) as executor:
@@ -171,7 +180,9 @@ class CompanyResearchService:
             future_news = executor.submit(
                 self._run_loader,
                 "news",
-                lambda: self._load_news(symbol=symbol),
+                lambda: self._load_news(
+                    symbol=symbol, lookback_days=news_lookback_days
+                ),
             )
             future_fundamentals = executor.submit(
                 self._run_loader,

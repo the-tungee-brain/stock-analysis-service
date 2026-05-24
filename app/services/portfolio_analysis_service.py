@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from typing import List, Optional, Set
 
 from app.broker.option_utils import (
@@ -8,6 +9,7 @@ from app.broker.option_utils import (
     days_to_expiration,
     summarize_assignment_risk,
 )
+from app.broker.order_grouping import last_fill_time_for_symbol
 from app.models.schwab_models import Position, SchwabAccounts
 from app.services.market_service import MarketService
 from app.services.schwab_auth_service import SchwabAuthService
@@ -171,6 +173,21 @@ class PortfolioAnalysisService:
         access_token = schwab_token.access_token
         account_number = account.securitiesAccount.accountNumber
 
+        orders_for_analysis = None
+        analysis_since = None
+        if self._needs_transaction_history(action=action):
+            orders_for_analysis = self._load_symbol_orders(
+                user_id=user_id,
+                account_number=account_number,
+                access_token=access_token,
+                symbol=symbol,
+            )
+            if action is AnalysisAction.WHAT_CHANGED and orders_for_analysis:
+                analysis_since = last_fill_time_for_symbol(
+                    orders_for_analysis,
+                    symbol=symbol,
+                )
+
         (
             market_snapshots,
             market_context_snapshots,
@@ -194,7 +211,12 @@ class PortfolioAnalysisService:
                 symbol=symbol,
                 strike_count=10,
             ),
-            asyncio.to_thread(self._build_research_context_block, symbol=symbol, action=action),
+            asyncio.to_thread(
+                self._build_research_context_block,
+                symbol=symbol,
+                action=action,
+                since=analysis_since,
+            ),
             asyncio.to_thread(
                 self._build_recent_transactions_block,
                 user_id=user_id,
@@ -202,6 +224,8 @@ class PortfolioAnalysisService:
                 access_token=access_token,
                 symbol=symbol,
                 action=action,
+                orders=orders_for_analysis,
+                since=analysis_since,
             ),
         )
 
@@ -244,21 +268,61 @@ class PortfolioAnalysisService:
             recent_transactions=recent_transactions_block,
             action=action,
             assignment_risk_block=assignment_risk_block,
+            analysis_since=analysis_since,
         )
+
+    @staticmethod
+    def _news_lookback_days(since: datetime | None) -> int:
+        if since is None:
+            return 7
+        anchor = since
+        if anchor.tzinfo is None:
+            anchor = anchor.replace(tzinfo=timezone.utc)
+        days = (datetime.now(timezone.utc) - anchor).days + 1
+        return max(7, min(days, 60))
+
+    def _load_symbol_orders(
+        self,
+        *,
+        user_id: str,
+        account_number: str,
+        access_token: str,
+        symbol: str,
+    ) -> list:
+        try:
+            return self.transaction_service.get_filled_orders_by_symbol(
+                account_number=account_number,
+                access_token=access_token,
+                symbol=symbol,
+                user_id=user_id,
+            )
+        except Exception:
+            return []
 
     def _build_research_context_block(
         self,
         symbol: str,
         action: AnalysisAction,
+        *,
+        since: datetime | None = None,
     ) -> str | None:
         try:
-            ctx = self.company_research_service.build_context(symbol=symbol)
+            news_lookback_days = (
+                self._news_lookback_days(since)
+                if action is AnalysisAction.WHAT_CHANGED
+                else 7
+            )
+            ctx = self.company_research_service.build_context(
+                symbol=symbol,
+                news_lookback_days=news_lookback_days,
+            )
         except Exception:
             return None
         return self.prompt_enrichment_service.format_research_context_block(
             ctx=ctx,
             compact=True,
             action=action,
+            since=since if action is AnalysisAction.WHAT_CHANGED else None,
         )
 
     def _build_recent_transactions_block(
@@ -269,19 +333,21 @@ class PortfolioAnalysisService:
         access_token: str,
         symbol: str,
         action: AnalysisAction,
+        orders: list | None = None,
+        since: datetime | None = None,
     ) -> str | None:
         if not self._needs_transaction_history(action=action):
             return None
 
-        try:
-            orders = self.transaction_service.get_filled_orders_by_symbol(
+        if orders is None:
+            orders = self._load_symbol_orders(
+                user_id=user_id,
                 account_number=account_number,
                 access_token=access_token,
                 symbol=symbol,
-                user_id=user_id,
             )
-        except Exception:
-            return "Recent filled order history could not be loaded."
+
+        anchor_since = since if action is AnalysisAction.WHAT_CHANGED else None
 
         if action in RECENT_ACTIVITY_TRANSACTION_ACTIONS:
             orders = [
@@ -296,4 +362,5 @@ class PortfolioAnalysisService:
             orders=orders,
             symbol=symbol,
             max_rows=5 if action in RECENT_ACTIVITY_TRANSACTION_ACTIONS else 20,
+            since=anchor_since,
         )

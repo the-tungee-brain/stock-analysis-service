@@ -133,6 +133,7 @@ class SymbolContext(BaseAnalysisContext):
     option_chain: Optional[str] = None
     research_context: Optional[str] = None
     recent_transactions: Optional[str] = None
+    analysis_since: Optional[datetime] = None
 
 
 OPTION_PREMIUM_GUIDANCE = (
@@ -588,7 +589,11 @@ def _build_account_summary(
 
 
 def _build_action_prompt(
-    action: AnalysisAction, symbol: str, user_prompt: Optional[str]
+    action: AnalysisAction,
+    symbol: str,
+    user_prompt: Optional[str],
+    *,
+    analysis_since: Optional[datetime] = None,
 ) -> str:
     if action is AnalysisAction.FREE_FORM:
         if user_prompt and is_follow_up_affirmation(user_prompt):
@@ -689,20 +694,30 @@ def _build_action_prompt(
             """).strip()
 
     if action is AnalysisAction.WHAT_CHANGED:
+        anchor_line = ""
+        if analysis_since is not None:
+            anchor = analysis_since.astimezone(timezone.utc).strftime("%b %d, %Y")
+            anchor_line = dedent(f"""
+                **Anchor date:** The user's last filled trade in {symbol} was on {anchor}.
+                Focus on price moves, news, and events **since that fill** — not a generic recap.
+                News headlines below are filtered to that window when available.
+                """).strip()
         return dedent(f"""
             Explain what materially changed recently for {symbol} that matters to an investor.
 
+            {anchor_line}
+
             Cover these points:
-            1. **Price & volume** — how the stock traded today vs. recent sessions.
-            2. **News & events** — major headlines, macro moves, or sector events from the data.
+            1. **Price & volume** — how the stock traded since the anchor date (or today vs. recent sessions if no anchor).
+            2. **News & events** — major headlines, macro moves, or sector events from the data since the anchor.
             3. **Your recent trades** — if filled orders are listed below, explain how recent buys/sells
                change the position story (added risk, reduced exposure, new cost basis, etc.).
-            4. **Trend context** — how today's move fits the recent price trend.
+            4. **Trend context** — how recent moves fit the price trend since the anchor.
             5. **Thesis impact** — is the thesis stronger, weaker, or unchanged? Explain why.
             6. **Action implication** — ONE recommendation (Hold / Trim / Add / Close) with a brief reason,
                applying the decision matrix if position size or P/L warrants action.
 
-            Focus on what changed, not a full re-analysis of the entire position.
+            Focus on what changed since the last fill when an anchor date is provided.
             """).strip()
 
     if action is AnalysisAction.ASSIGNMENT_RISK:
@@ -760,7 +775,12 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
     Build a compact user prompt for symbol-level analysis.
     Use this as the `user` content; pair with SYSTEM_MESSAGE as `system`.
     """
-    action_block = _build_action_prompt(ctx.action, ctx.symbol, ctx.user_prompt)
+    action_block = _build_action_prompt(
+        ctx.action,
+        ctx.symbol,
+        ctx.user_prompt,
+        analysis_since=ctx.analysis_since,
+    )
 
     if not include_context:
         return dedent(f"""
@@ -786,10 +806,14 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
 
     transactions_section = ""
     if transactions_block is not None:
+        anchor_note = ""
+        if ctx.analysis_since is not None and ctx.action is AnalysisAction.WHAT_CHANGED:
+            anchor = ctx.analysis_since.astimezone(timezone.utc).strftime("%b %d, %Y")
+            anchor_note = f" Anchor analysis to changes since last fill on {anchor}."
         transactions_section = dedent(f"""
       === RECENT FILLED ORDERS (LAST 30 DAYS, {ctx.symbol}) ===
       {transactions_block}
-        """).strip() + "\n\n"
+        """).strip() + anchor_note + "\n\n"
 
     assignment_section = ""
     if ctx.action is AnalysisAction.ASSIGNMENT_RISK:

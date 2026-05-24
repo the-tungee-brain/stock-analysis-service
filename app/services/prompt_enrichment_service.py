@@ -1,6 +1,11 @@
 from app.models.schwab_market_models import PromptQuoteSnapshot
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
-from app.broker.order_grouping import detect_roll_groups, leg_contract_label, spread_group_for_order
+from app.broker.order_grouping import (
+    detect_roll_groups,
+    detect_wash_sale_flags,
+    leg_contract_label,
+    spread_group_for_order,
+)
 from app.broker.order_utils import (
     is_equity_leg,
     is_option_leg,
@@ -13,10 +18,10 @@ from app.broker.order_utils import (
     order_total_cash,
 )
 from app.models.schwab_order_models import SchwabOrder
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Tuple, Dict, Any, Optional
 from app.models.finnhub_news_models import NewsResponse
-from app.models.company_research_models import ResearchContext, FundamentalMetric, SecRatioTrendPoint
+from app.models.company_research_models import ResearchContext, FundamentalMetric, SecRatioTrendPoint, NewsHeadline
 from textwrap import dedent
 from app.core.prompts import (
     AnalysisAction,
@@ -68,6 +73,31 @@ RESEARCH_CHAT_SYSTEM_MESSAGE = dedent(f"""
 
 
 class PromptEnrichmentService:
+    @staticmethod
+    def _parse_news_datetime(value: str) -> datetime | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
+    @classmethod
+    def _filter_news_since(
+        cls, news: list[NewsHeadline], since: datetime
+    ) -> list[NewsHeadline]:
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+        filtered: list[NewsHeadline] = []
+        for item in news:
+            published = cls._parse_news_datetime(item.datetime)
+            if published is None or published >= since:
+                filtered.append(item)
+        return filtered
+
     @staticmethod
     def _format_metric_lines(metrics: list[FundamentalMetric]) -> str:
         return "\n".join(
@@ -133,6 +163,7 @@ class PromptEnrichmentService:
         *,
         compact: bool = False,
         action: AnalysisAction | None = None,
+        since: datetime | None = None,
     ) -> str:
         max_news = 10
         max_trends = 5
@@ -250,15 +281,26 @@ class PromptEnrichmentService:
                 sections.append("## Price performance\nNo performance data available.")
 
         if include_news:
-            if ctx.news:
+            news_items = ctx.news or []
+            news_heading = "## Recent news headlines (past 7 days)"
+            if since is not None and action is AnalysisAction.WHAT_CHANGED:
+                news_items = self._filter_news_since(news_items, since)
+                anchor = since.astimezone(timezone.utc).strftime("%b %d, %Y")
+                news_heading = f"## News since your last fill ({anchor})"
+            if news_items:
                 news_lines = []
-                for idx, item in enumerate(ctx.news[:max_news], start=1):
+                for idx, item in enumerate(news_items[:max_news], start=1):
                     summary = item.summary or "(no summary)"
+                    published = item.datetime[:10] if item.datetime else "unknown date"
                     news_lines.append(
-                        f"{idx}. [{item.source}] {item.headline}\n   Summary: {summary}"
+                        f"{idx}. [{published}] [{item.source}] {item.headline}\n   Summary: {summary}"
                     )
+                sections.append(news_heading + "\n" + "\n".join(news_lines))
+            elif since is not None and action is AnalysisAction.WHAT_CHANGED:
+                anchor = since.astimezone(timezone.utc).strftime("%b %d, %Y")
                 sections.append(
-                    "## Recent news headlines (past 7 days)\n" + "\n".join(news_lines)
+                    f"## News since your last fill ({anchor})\n"
+                    "No headlines matched this window in the fetched news feed."
                 )
             else:
                 sections.append("## Recent news headlines\nNo recent headlines available.")
@@ -309,11 +351,13 @@ class PromptEnrichmentService:
         *,
         compact: bool = False,
         action: AnalysisAction | None = None,
+        since: datetime | None = None,
     ) -> str:
         return self._format_research_context_block(
             ctx,
             compact=compact,
             action=action,
+            since=since,
         )
 
     def build_research_chat_user_message(
@@ -355,6 +399,7 @@ class PromptEnrichmentService:
         symbol: str,
         *,
         max_rows: int = 20,
+        since: datetime | None = None,
     ) -> str:
         if not orders:
             return (
@@ -368,6 +413,7 @@ class PromptEnrichmentService:
         )
 
         roll_groups = detect_roll_groups(sorted_orders)
+        wash_flags = detect_wash_sale_flags(sorted_orders, symbol=symbol)
 
         header = (
             "| Fill date | Contract / strategy | Side | Qty | Fill price | Premium/contract | Total cash | Type | Open/Close | Tax lot |\n"
@@ -476,6 +522,19 @@ class PromptEnrichmentService:
             "Use for recent activity, wash-sale context, and trade timing — "
             "not as a complete tax lot history.",
         ]
+        if since is not None:
+            anchor = since.astimezone(timezone.utc).strftime("%b %d, %Y")
+            guidance_lines.append(
+                f"Analysis anchor: focus on changes **since the last fill on {anchor}**."
+            )
+        if wash_flags:
+            for flag in wash_flags[:3]:
+                sell_date = flag.sell_fill_time.astimezone(timezone.utc).strftime("%b %d")
+                buy_date = flag.buy_fill_time.astimezone(timezone.utc).strftime("%b %d")
+                guidance_lines.append(
+                    f"**Possible wash sale on {flag.symbol}**: sell on {sell_date} and buy on "
+                    f"{buy_date} within 30 days — flag disallowed loss and tax-lot replacement rules."
+                )
         if has_equity_rows:
             guidance_lines.append(
                 "EQUITY rows: Fill price is **per share**. Qty is **share count**. "

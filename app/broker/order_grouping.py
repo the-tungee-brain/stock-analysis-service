@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timezone
+from datetime import date, datetime, timezone
 from typing import Dict, List, Literal, Optional
 
 from app.broker.option_utils import (
@@ -14,6 +14,8 @@ from app.broker.order_utils import (
     is_option_leg,
     order_fill_time,
     order_primary_leg,
+    order_relates_to_symbol,
+    order_symbols,
     order_underlying_symbol,
 )
 from app.models.schwab_order_models import OrderLeg, SchwabOrder
@@ -177,6 +179,109 @@ def detect_roll_groups(orders: List[SchwabOrder]) -> Dict[int, ActivityGroupInfo
                 groups[extra_id] = info
 
     return groups
+
+
+WASH_SALE_WINDOW_DAYS = 30
+
+
+@dataclass(frozen=True)
+class WashSaleFlag:
+    symbol: str
+    sell_fill_time: datetime
+    buy_fill_time: datetime
+
+
+def _order_trade_side(order: SchwabOrder) -> Optional[Literal["sell", "buy"]]:
+    leg = order_primary_leg(order)
+    if leg is None or not leg.instruction:
+        return None
+    side = leg.instruction.upper()
+    if side in CLOSE_INSTRUCTIONS or side == "SELL":
+        return "sell"
+    if side in OPEN_INSTRUCTIONS or side == "BUY":
+        return "buy"
+    return None
+
+
+def detect_wash_sale_flags(
+    orders: List[SchwabOrder],
+    *,
+    symbol: Optional[str] = None,
+    window_days: int = WASH_SALE_WINDOW_DAYS,
+) -> List[WashSaleFlag]:
+    """Flag sell + buy on the same underlying within the wash-sale window."""
+    scoped = orders
+    if symbol:
+        target = symbol.upper()
+        scoped = [order for order in orders if order_relates_to_symbol(order, target)]
+
+    by_symbol: dict[str, list[SchwabOrder]] = {}
+    for order in scoped:
+        for sym in order_symbols(order):
+            by_symbol.setdefault(sym, []).append(order)
+
+    flags: List[WashSaleFlag] = []
+    seen: set[tuple[str, int, int]] = set()
+
+    for sym, sym_orders in by_symbol.items():
+        sells: list[tuple[datetime, SchwabOrder]] = []
+        buys: list[tuple[datetime, SchwabOrder]] = []
+        for order in sym_orders:
+            fill_time = order_fill_time(order)
+            if fill_time is None:
+                continue
+            if fill_time.tzinfo is None:
+                fill_time = fill_time.replace(tzinfo=timezone.utc)
+            trade_side = _order_trade_side(order)
+            if trade_side == "sell":
+                sells.append((fill_time, order))
+            elif trade_side == "buy":
+                buys.append((fill_time, order))
+
+        for sell_time, sell_order in sells:
+            sell_id = getattr(sell_order, "orderId", None) or id(sell_order)
+            for buy_time, buy_order in buys:
+                buy_id = getattr(buy_order, "orderId", None) or id(buy_order)
+                if sell_id == buy_id:
+                    continue
+                delta_days = abs((sell_time.date() - buy_time.date()).days)
+                if delta_days > window_days:
+                    continue
+                key = (sym, min(sell_id, buy_id), max(sell_id, buy_id))
+                if key in seen:
+                    continue
+                seen.add(key)
+                flags.append(
+                    WashSaleFlag(
+                        symbol=sym,
+                        sell_fill_time=sell_time,
+                        buy_fill_time=buy_time,
+                    )
+                )
+
+    return sorted(flags, key=lambda flag: flag.sell_fill_time, reverse=True)
+
+
+def last_fill_time_for_symbol(
+    orders: List[SchwabOrder],
+    *,
+    symbol: Optional[str] = None,
+) -> Optional[datetime]:
+    scoped = orders
+    if symbol:
+        target = symbol.upper()
+        scoped = [order for order in orders if order_relates_to_symbol(order, target)]
+
+    latest: Optional[datetime] = None
+    for order in scoped:
+        fill_time = order_fill_time(order)
+        if fill_time is None:
+            continue
+        if fill_time.tzinfo is None:
+            fill_time = fill_time.replace(tzinfo=timezone.utc)
+        if latest is None or fill_time > latest:
+            latest = fill_time
+    return latest
 
 
 def spread_group_for_order(order: SchwabOrder) -> Optional[ActivityGroupInfo]:
