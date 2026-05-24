@@ -18,6 +18,45 @@ class ChatService:
         self.chat_sessions_builder = chat_sessions_builder
         self.chat_messages_builder = chat_messages_builder
 
+    def get_portfolio_analysis_session_id(
+        self,
+        user_id: str,
+        symbol: Optional[str],
+        prompt: Optional[str],
+        model: ResponsesModel,
+    ) -> tuple[Optional[UUID], bool]:
+        if not prompt:
+            return None, True
+
+        prefix = self._portfolio_session_title_prefix(symbol=symbol)
+        session = (
+            self.chat_sessions_builder.get_latest_session_by_user_id_and_title_prefix(
+                user_id=user_id,
+                title_prefix=prefix,
+            )
+        )
+        is_first_chat = not session
+
+        if is_first_chat:
+            new_session = ChatSession(
+                user_id=user_id,
+                title=f"{prefix} {prompt[:200]}",
+                model=model,
+                system_prompt=SYSTEM_NATURAL_MESSAGE,
+            )
+            created_session = self.chat_sessions_builder.create_session(
+                session=new_session
+            )
+            return created_session.id, is_first_chat
+
+        return session.id, is_first_chat
+
+    @staticmethod
+    def _portfolio_session_title_prefix(symbol: Optional[str]) -> str:
+        if symbol:
+            return f"Symbol:{symbol.strip().upper()}:"
+        return "Portfolio:"
+
     def get_chat_session_id(
         self,
         user_id: str,

@@ -607,12 +607,14 @@ class PromptEnrichmentService:
         return [system_msg, user_msg]
 
     def build_portfolio_strategy_prompt(
-        self, ctx: BaseAnalysisContext
+        self, ctx: BaseAnalysisContext, *, include_context: bool = True
     ) -> Dict[str, Any]:
         if isinstance(ctx, SymbolContext):
-            user_content = build_symbol_prompt(ctx=ctx)
+            user_content = build_symbol_prompt(ctx=ctx, include_context=include_context)
         elif isinstance(ctx, PortfolioContext):
-            user_content = build_portfolio_prompt(ctx=ctx)
+            user_content = build_portfolio_prompt(
+                ctx=ctx, include_context=include_context
+            )
         else:
             raise ValueError(f"Unknown context type: {type(ctx)}")
 

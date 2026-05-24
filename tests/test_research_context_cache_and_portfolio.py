@@ -2,7 +2,14 @@ import json
 from unittest.mock import MagicMock
 
 from app.adapters.cache.research_context_cache import ResearchContextCache
-from app.core.prompts import SymbolContext, build_symbol_prompt, AnalysisAction
+from app.core.prompts import (
+    AnalysisAction,
+    PortfolioContext,
+    SymbolContext,
+    build_portfolio_prompt,
+    build_symbol_prompt,
+    is_follow_up_affirmation,
+)
 from app.models.company_research_models import ResearchContext
 from app.services.prompt_enrichment_service import PromptEnrichmentService
 from tests.test_position_prompt_metrics import _make_account, _make_position
@@ -64,3 +71,43 @@ def test_build_symbol_prompt_includes_research_context():
 
     assert "EQUITY RESEARCH (FUNDAMENTALS, NEWS, SEC)" in prompt
     assert "AMD, INTC" in prompt
+
+
+def test_is_follow_up_affirmation():
+    assert is_follow_up_affirmation("let's do that")
+    assert is_follow_up_affirmation("Yes please!")
+    assert is_follow_up_affirmation("sure.")
+    assert not is_follow_up_affirmation("Should I trim NVDA?")
+    assert not is_follow_up_affirmation(None)
+
+
+def test_symbol_followup_prompt_omits_context_block():
+    ctx = SymbolContext(
+        symbol="NVDA",
+        account=_make_account(),
+        positions=[_make_position(symbol="NVDA")],
+        market_snapshot="NVDA last: $120",
+        action=AnalysisAction.FREE_FORM,
+        user_prompt="let's do that",
+    )
+
+    prompt = build_symbol_prompt(ctx=ctx, include_context=False)
+
+    assert "ACCOUNT CONTEXT" not in prompt
+    assert "let's do that" in prompt
+    assert "accepted a follow-up" in prompt
+    assert "earlier in this conversation" in prompt
+
+
+def test_portfolio_followup_prompt_omits_context_block():
+    ctx = PortfolioContext(
+        account=_make_account(),
+        positions=[_make_position(symbol="NVDA")],
+        user_prompt="let's do that",
+    )
+
+    prompt = build_portfolio_prompt(ctx=ctx, include_context=False)
+
+    assert "PORTFOLIO POSITIONS" not in prompt
+    assert "accepted a follow-up" in prompt
+    assert "earlier in this conversation" in prompt

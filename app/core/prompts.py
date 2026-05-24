@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -119,6 +120,22 @@ def should_use_natural_response(
     if action is not AnalysisAction.FREE_FORM:
         return True
     return bool(user_prompt and user_prompt.strip())
+
+
+_FOLLOW_UP_AFFIRMATION_RE = re.compile(
+    r"^(?:"
+    r"yes(?: please)?|yeah|yep|yup|sure|ok(?:ay)?|"
+    r"let['']s do (?:that|it)|go ahead|please do|sounds good|do it|"
+    r"that works|go for it|please|why not"
+    r")[\s.!?]*$",
+    re.IGNORECASE,
+)
+
+
+def is_follow_up_affirmation(text: Optional[str]) -> bool:
+    if not text or not text.strip():
+        return False
+    return bool(_FOLLOW_UP_AFFIRMATION_RE.match(text.strip()))
 
 
 STRATEGY_RULES = dedent("""
@@ -293,6 +310,15 @@ SYSTEM_NATURAL_MESSAGE = dedent(f"""
     - End with ONE clear recommendation when the question calls for a decision, stated plainly
       (e.g., "I'd trim about 30% of your NVDA position this week, or sell 1 covered call at the $140 strike.").
     - In follow-up messages, stay conversational and build on prior context — don't repeat the full intro.
+    - When the user accepts a follow-up you offered (e.g., "let's do that", "yes", "sure"),
+      deliver that follow-up immediately — do not restart the original analysis.
+
+    # Optional follow-ups after trim or sell recommendations
+    - After recommending **Trim**, **Close**, or a partial exit, you may close with ONE brief offer:
+      (a) where to redeploy proceeds — hold cash, buy a diversified ETF (e.g., VTI/VOO), or rotate into
+      another holding; OR (b) order mechanics — limit vs market, and a suggested limit price if relevant.
+    - Offer only one follow-up path at a time. Keep the offer to one short sentence.
+    - If the user accepts, pick a concrete recommendation (with rationale) instead of re-listing options.
 
     # What you help with
     - Single-stock positions, portfolio questions, and options strategies.
@@ -496,6 +522,23 @@ def _build_action_prompt(
     action: AnalysisAction, symbol: str, user_prompt: Optional[str]
 ) -> str:
     if action is AnalysisAction.FREE_FORM:
+        if user_prompt and is_follow_up_affirmation(user_prompt):
+            return dedent(f"""
+                The user accepted a follow-up you offered in your previous message:
+
+                "{user_prompt}"
+
+                Instructions:
+                - Read your immediately prior assistant message to infer what they accepted
+                  (e.g., redeploying trim proceeds, order mechanics, or a deeper dive you offered).
+                - Deliver that follow-up now — do not restart the original {symbol} analysis.
+                - If you offered redeploy options, recommend ONE specific path (cash, diversified ETF,
+                  or another stock) with a brief rationale and dollar amount if known from context.
+                - If you offered order mechanics, recommend limit vs market with a concrete price level
+                  or timing using the data from this conversation.
+                - Stay concise and actionable.
+                """).strip()
+
         if user_prompt:
             return dedent(f"""
                 The user asked:
@@ -596,11 +639,22 @@ def _build_action_prompt(
     return user_prompt or f"Give a clear, actionable plan for {symbol}."
 
 
-def build_symbol_prompt(ctx: SymbolContext) -> str:
+def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> str:
     """
     Build a compact user prompt for symbol-level analysis.
     Use this as the `user` content; pair with SYSTEM_MESSAGE as `system`.
     """
+    action_block = _build_action_prompt(ctx.action, ctx.symbol, ctx.user_prompt)
+
+    if not include_context:
+        return dedent(f"""
+            === USER MESSAGE ===
+            {action_block}
+
+            Use the account, position, market, and option data from earlier in this conversation.
+            Do not invent prices or figures that were not provided.
+            """).strip()
+
     now_iso = datetime.now(timezone.utc).isoformat()
     account_summary = _build_account_summary(ctx.account)
     positions_table = _enrich_positions_table(ctx.positions, account=ctx.account)
@@ -613,7 +667,6 @@ def build_symbol_prompt(ctx: SymbolContext) -> str:
         or "No equity research data (fundamentals, news, SEC filings) provided."
     )
     transactions_block = ctx.recent_transactions
-    action_block = _build_action_prompt(ctx.action, ctx.symbol, ctx.user_prompt)
 
     transactions_section = ""
     if transactions_block is not None:
@@ -661,18 +714,23 @@ def build_symbol_prompt(ctx: SymbolContext) -> str:
       """).strip()
 
 
-def build_portfolio_prompt(ctx: PortfolioContext) -> str:
+def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = True) -> str:
     """
     Build a compact user prompt for portfolio-level analysis.
     Use this as the `user` content; pair with SYSTEM_MESSAGE as `system`.
     """
-    now_iso = datetime.now(timezone.utc).isoformat()
-    account_summary = _build_account_summary(ctx.account)
-    positions_table = _enrich_positions_table(
-        ctx.positions, max_symbols=20, account=ctx.account
-    )
+    if ctx.user_prompt and is_follow_up_affirmation(ctx.user_prompt):
+        task_block = dedent(f"""
+            The user accepted a follow-up you offered in your previous message:
 
-    if ctx.user_prompt:
+            "{ctx.user_prompt}"
+
+            Instructions:
+            - Read your immediately prior assistant message to infer what they accepted.
+            - Deliver that follow-up now — do not restart the full portfolio analysis.
+            - Stay concise and actionable.
+            """).strip()
+    elif ctx.user_prompt:
         task_block = dedent(f"""
             The user asked:
 
@@ -700,6 +758,21 @@ def build_portfolio_prompt(ctx: PortfolioContext) -> str:
             5. **Top 3 priorities** — ranked by urgency with expected impact and effort (Low / Medium / High).
             6. **Summary** — main strengths, weaknesses, and the single most important change first.
             """).strip()
+
+    if not include_context:
+        return dedent(f"""
+            === USER MESSAGE ===
+            {task_block}
+
+            Use the account and portfolio data from earlier in this conversation.
+            Do not invent prices or figures that were not provided.
+            """).strip()
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    account_summary = _build_account_summary(ctx.account)
+    positions_table = _enrich_positions_table(
+        ctx.positions, max_symbols=20, account=ctx.account
+    )
 
     return dedent(f"""
         Today is {now_iso}.
