@@ -1,11 +1,13 @@
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator, Dict, List, Optional, Type
 
 import asyncio
 from openai import OpenAI
 from openai.types.shared import ResponsesModel
+from pydantic import BaseModel
+
 from app.adapters.llm.base import BaseLLM
 from app.core.llm_config import settings
-from typing import Optional, List, Dict, Any
+from app.core.llm_json import openai_response_schema
 
 
 class OpenAIAdapter(BaseLLM):
@@ -49,16 +51,33 @@ class OpenAIAdapter(BaseLLM):
                 continue
 
     async def generate(
-        self, model: Optional[ResponsesModel], prompts: List[str]
+        self,
+        model: Optional[ResponsesModel],
+        prompts: List[str],
+        *,
+        response_model: Type[BaseModel] | None = None,
+        max_output_tokens: int | None = None,
     ) -> str:
         system_msg, user_msg = prompts
         input = [
             {"role": "system", "content": system_msg},
             {"role": "user", "content": user_msg},
         ]
-        response = self.client.responses.create(
-            model=model or settings.OPENAI_MODEL,
-            input=input,
-        )
+        kwargs: dict[str, Any] = {
+            "model": model or settings.OPENAI_MODEL,
+            "input": input,
+            "max_output_tokens": max_output_tokens or settings.MAX_OUTPUT_TOKENS,
+        }
+        if response_model is not None:
+            kwargs["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": response_model.__name__,
+                    "schema": openai_response_schema(response_model),
+                    "strict": True,
+                }
+            }
+
+        response = self.client.responses.create(**kwargs)
 
         return response.output[0].content[0].text

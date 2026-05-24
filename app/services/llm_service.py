@@ -8,9 +8,8 @@ from typing import List, Dict, Any, Type
 from app.models.news_analytics_models import StockNewsView
 from app.builders.prompt_builder import PromptBuilder
 from app.core.llm_config import settings
-from app.models.company_research_models import AISummary
-from app.core.llm_config import Settings
-from pydantic import BaseModel
+from app.core.llm_json import validate_llm_model
+from pydantic import BaseModel, ValidationError
 import json
 
 T = TypeVar("T", bound=BaseModel)
@@ -76,11 +75,31 @@ class LLMService:
         response_model: Type[T],
     ) -> T:
         ai_response = await self.openai_adapter.generate(
-            model=Settings.OPENAI_MODEL,
+            model=settings.OPENAI_MODEL,
             prompts=prompts,
+            response_model=response_model,
+            max_output_tokens=settings.MAX_OUTPUT_TOKENS,
         )
 
-        if isinstance(ai_response, str):
-            return response_model.model_validate_json(ai_response)
-
-        return response_model.model_validate(ai_response)
+        try:
+            if isinstance(ai_response, str):
+                return validate_llm_model(ai_response, response_model)
+            return response_model.model_validate(ai_response)
+        except (ValidationError, ValueError, json.JSONDecodeError):
+            retry_prompts = [
+                prompts[0],
+                (
+                    f"{prompts[1]}\n\n"
+                    "Your previous answer was not valid JSON. "
+                    f"Return ONLY a valid JSON object matching the required schema for {response_model.__name__}."
+                ),
+            ]
+            ai_response = await self.openai_adapter.generate(
+                model=settings.OPENAI_MODEL,
+                prompts=retry_prompts,
+                response_model=response_model,
+                max_output_tokens=settings.MAX_OUTPUT_TOKENS,
+            )
+            if isinstance(ai_response, str):
+                return validate_llm_model(ai_response, response_model)
+            return response_model.model_validate(ai_response)
