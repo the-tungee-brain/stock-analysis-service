@@ -174,6 +174,16 @@ class PromptEnrichmentService:
             include_sec_trends = False
             include_filings = False
             include_earnings = False
+        elif action is AnalysisAction.CONCENTRATION_CHECK:
+            max_news = 0
+            max_trends = 0
+            include_peers = True
+            include_performance = False
+            include_market_fundamentals = False
+            include_sec_fundamentals = False
+            include_sec_trends = False
+            include_filings = False
+            include_earnings = False
 
         sections: list[str] = [f"Symbol: {ctx.symbol}"]
 

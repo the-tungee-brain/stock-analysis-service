@@ -23,6 +23,7 @@ class AnalysisAction(str, Enum):
     TAX_ANGLE = "tax-angle"
     WHAT_CHANGED = "what-changed"
     ASSIGNMENT_RISK = "assignment-risk"
+    CONCENTRATION_CHECK = "concentration-check"
 
     @property
     def label(self) -> str:
@@ -67,6 +68,7 @@ _ANALYSIS_ACTION_LABELS: dict[AnalysisAction, str] = {
     AnalysisAction.TAX_ANGLE: "tax angle",
     AnalysisAction.WHAT_CHANGED: "what changed",
     AnalysisAction.ASSIGNMENT_RISK: "assignment risk",
+    AnalysisAction.CONCENTRATION_CHECK: "concentration check",
 }
 
 _ANALYSIS_ACTION_ALIASES: dict[str, AnalysisAction] = {
@@ -100,6 +102,11 @@ _ANALYSIS_ACTION_ALIASES: dict[str, AnalysisAction] = {
     "assignment watch": AnalysisAction.ASSIGNMENT_RISK,
     "call away risk": AnalysisAction.ASSIGNMENT_RISK,
     "put assignment": AnalysisAction.ASSIGNMENT_RISK,
+    "concentrationcheck": AnalysisAction.CONCENTRATION_CHECK,
+    "concentration check": AnalysisAction.CONCENTRATION_CHECK,
+    "concentration": AnalysisAction.CONCENTRATION_CHECK,
+    "position sizing": AnalysisAction.CONCENTRATION_CHECK,
+    "overweight": AnalysisAction.CONCENTRATION_CHECK,
 }
 
 
@@ -715,6 +722,28 @@ def _build_action_prompt(
             Be direct and practical. Use retail language only.
             """).strip()
 
+    if action is AnalysisAction.CONCENTRATION_CHECK:
+        return dedent(f"""
+            Review concentration and position sizing for {symbol}.
+
+            Use the **WEIGHT_%** column in the position table — it is precomputed. Do not
+            recalculate portfolio weights unless WEIGHT_% is missing.
+
+            Cover these points:
+            1. **Single-name concentration** — cite weight % for {symbol} if in scope, and flag
+               any holding above 15% or 30% of the portfolio.
+            2. **Top holdings** — list the largest positions by weight with percentages.
+            3. **Sector or theme overlap** — if company/sector data is available, note clustering
+               (e.g., multiple mega-cap tech names) that increases effective concentration.
+            4. **Risk if a top name moves** — what happens to the portfolio if a top holding drops
+               20–30% (use dollar impact when liquidation value is known).
+            5. **Rebalancing plan** — recommend 2–4 specific trims or redeployments with target
+               weights or dollar amounts. Prioritize names above 30%, then above 20%.
+            6. **Single priority** — the one concentration fix to do first, with timing.
+
+            Be direct. Use percentages and dollar figures from the data provided.
+            """).strip()
+
     return user_prompt or f"Give a clear, actionable plan for {symbol}."
 
 
@@ -806,6 +835,12 @@ def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = Tru
     Use this as the `user` content; pair with SYSTEM_MESSAGE as `system`.
     """
     if ctx.action is AnalysisAction.ASSIGNMENT_RISK and not ctx.user_prompt:
+        task_block = _build_action_prompt(
+            ctx.action,
+            "the portfolio",
+            ctx.user_prompt,
+        )
+    elif ctx.action is AnalysisAction.CONCENTRATION_CHECK and not ctx.user_prompt:
         task_block = _build_action_prompt(
             ctx.action,
             "the portfolio",
