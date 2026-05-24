@@ -19,6 +19,7 @@ from app.core.prompts import (
     AnalysisAction,
     SYSTEM_MESSAGE,
     SYSTEM_NATURAL_MESSAGE,
+    should_use_natural_response,
 )
 from app.auth.dependencies import get_current_user_id
 from app.core.llm_config import settings
@@ -77,9 +78,14 @@ async def analyze_positions_by_symbol(
     assistant_content_parts: List[str] = []
 
     async def streamer():
+        system_prompt = (
+            SYSTEM_NATURAL_MESSAGE
+            if should_use_natural_response(request.prompt)
+            else SYSTEM_MESSAGE
+        )
         async for chunk in llm_service.analyze_option_position(
             model=request.model or settings.OPENAI_MODEL,
-            system_prompt=SYSTEM_NATURAL_MESSAGE if request.prompt else SYSTEM_MESSAGE,
+            system_prompt=system_prompt,
             user_prompt=[*recent_messages, user_prompt],
         ):
             assistant_content_parts.append(chunk)

@@ -244,7 +244,7 @@ class PromptEnrichmentService:
             return "No option chain data available."
 
         return (
-            "Nearest expiration option ladder (around ATM):\n\n"
+            "Nearest expiration option prices (near current price):\n\n"
             + header
             + "\n".join(lines)
             + "\n"
