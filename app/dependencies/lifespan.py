@@ -34,6 +34,7 @@ from app.builders.schwab_trader_builder import SchwabTraderBuilder
 from app.builders.performance_builder import PerformanceBuilder
 from app.builders.earnings_builder import EarningsBuilder
 from app.builders.ticker_symbol_builder import TickerSymbolBuilder
+from app.builders.fundamentals_builder import FundamentalsBuilder
 
 from app.core.llm_config import settings
 
