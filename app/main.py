@@ -24,6 +24,7 @@ from app.api.get_business_details_route import router as get_business_details_ro
 from app.api.get_fundamentals_route import router as get_fundamentals_route
 from app.api.sec_research_routes import router as sec_research_router
 from app.api.get_earnings_route import router as get_earnings_route
+from app.api.search_symbols_route import router as search_symbols_route
 
 API_PREFIX = "/api/v1"
 AUTH_SCHWAB_PREFIX = f"{API_PREFIX}/auth/schwab"
