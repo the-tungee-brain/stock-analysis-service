@@ -19,8 +19,10 @@ class OpenAIAdapter(BaseLLM):
         model: Optional[ResponsesModel],
         system_prompt: str,
         user_prompt: List[Dict[str, Any]],
+        *,
+        max_output_tokens: int | None = None,
     ) -> AsyncGenerator[str, None]:
-        input = [
+        input_messages = [
             {
                 "role": "system",
                 "content": [
@@ -31,8 +33,9 @@ class OpenAIAdapter(BaseLLM):
         ]
         stream = self.client.responses.create(
             model=model or settings.OPENAI_MODEL,
-            input=input,
+            input=input_messages,
             stream=True,
+            max_output_tokens=max_output_tokens or settings.MAX_OUTPUT_TOKENS_STREAM,
         )
 
         for event in stream:
@@ -47,10 +50,7 @@ class OpenAIAdapter(BaseLLM):
             elif event_type == "response.output_text.done":
                 break
 
-            else:
-                continue
-
-    async def generate(
+    def generate_blocking(
         self,
         model: Optional[ResponsesModel],
         prompts: List[str],
@@ -59,13 +59,13 @@ class OpenAIAdapter(BaseLLM):
         max_output_tokens: int | None = None,
     ) -> str:
         system_msg, user_msg = prompts
-        input = [
+        input_messages = [
             {"role": "system", "content": system_msg},
             {"role": "user", "content": user_msg},
         ]
         kwargs: dict[str, Any] = {
             "model": model or settings.OPENAI_MODEL,
-            "input": input,
+            "input": input_messages,
             "max_output_tokens": max_output_tokens or settings.MAX_OUTPUT_TOKENS,
         }
         if response_model is not None:
@@ -79,5 +79,36 @@ class OpenAIAdapter(BaseLLM):
             }
 
         response = self.client.responses.create(**kwargs)
-
         return response.output[0].content[0].text
+
+    async def generate(
+        self,
+        model: Optional[ResponsesModel],
+        prompts: List[str],
+        *,
+        response_model: Type[BaseModel] | None = None,
+        max_output_tokens: int | None = None,
+    ) -> str:
+        return await asyncio.to_thread(
+            self.generate_blocking,
+            model,
+            prompts,
+            response_model=response_model,
+            max_output_tokens=max_output_tokens,
+        )
+
+    async def generate_stream_from_prompts(
+        self,
+        model: Optional[ResponsesModel],
+        prompts: List[str],
+        *,
+        max_output_tokens: int | None = None,
+    ) -> AsyncGenerator[str, None]:
+        system_msg, user_msg = prompts
+        async for chunk in self.generate_stream(
+            model=model,
+            system_prompt=system_msg,
+            user_prompt=[{"role": "user", "content": user_msg}],
+            max_output_tokens=max_output_tokens,
+        ):
+            yield chunk

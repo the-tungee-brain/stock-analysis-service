@@ -1,4 +1,5 @@
 from typing import List, Optional
+import asyncio
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -51,7 +52,10 @@ async def research_chat(
             media_type="text/plain; charset=utf-8",
         )
 
-    ctx = company_research_service.build_context(symbol=symbol)
+    ctx = await asyncio.to_thread(
+        company_research_service.build_context,
+        symbol=symbol,
+    )
 
     session_id, is_first_chat = chat_service.get_research_chat_session_id(
         user_id=user_id,

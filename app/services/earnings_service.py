@@ -88,3 +88,37 @@ class EarningsService:
             to=end,
         )
         return self.earnings_builder.news_to_headlines(raw_news.root, limit=10)
+
+    def build_research_context(self, symbol: str):
+        from app.models.company_research_models import EarningsContext
+
+        listing = self.list_earnings(symbol=symbol, limit=4)
+        upcoming = listing.upcoming
+        last_report = listing.history[0] if listing.history else None
+
+        if upcoming is None and last_report is None:
+            return None
+
+        return EarningsContext(
+            upcoming_report_date=upcoming.reportDate if upcoming else None,
+            upcoming_fiscal_period=upcoming.fiscalPeriod if upcoming else None,
+            upcoming_timing=upcoming.timing if upcoming else None,
+            last_report_date=last_report.reportDate if last_report else None,
+            last_fiscal_period=last_report.fiscalPeriod if last_report else None,
+            last_beat_label=last_report.beatLabel if last_report else None,
+            last_eps_surprise_pct=(
+                self._fmt_surprise(last_report.epsSurprisePct)
+                if last_report and last_report.epsSurprisePct is not None
+                else None
+            ),
+            last_revenue_surprise_pct=(
+                self._fmt_surprise(last_report.revenueSurprisePct)
+                if last_report and last_report.revenueSurprisePct is not None
+                else None
+            ),
+        )
+
+    @staticmethod
+    def _fmt_surprise(value: float) -> str:
+        sign = "+" if value >= 0 else ""
+        return f"{sign}{value:.1f}%"

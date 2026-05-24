@@ -7,6 +7,7 @@ from app.dependencies.service_dependencies import (
     get_llm_service,
     get_prompt_enrichment_service,
 )
+from app.core.llm_routes import LLMRoute
 from app.models.earnings_models import (
     EarningsAnalysis,
     EarningsDetailResponse,
@@ -96,5 +97,8 @@ async def get_earnings_detail(
     detail.analysis = await llm_service.generate_from_prompts(
         prompts=prompts,
         response_model=EarningsAnalysis,
+        route=LLMRoute.EARNINGS,
+        symbol=detail.symbol,
+        context_fingerprint=f"{detail.symbol}:{detail.event.reportDate}",
     )
     return detail

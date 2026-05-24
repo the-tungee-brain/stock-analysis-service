@@ -85,7 +85,7 @@ class PortfolioAnalysisService:
                 symbol=symbol,
                 strike_count=10,
             ),
-            asyncio.to_thread(self._build_research_context_block, symbol=symbol),
+            asyncio.to_thread(self._build_research_context_block, symbol=symbol, action=action),
             asyncio.to_thread(
                 self._build_recent_transactions_block,
                 account_number=account_number,
@@ -126,12 +126,20 @@ class PortfolioAnalysisService:
             action=action,
         )
 
-    def _build_research_context_block(self, symbol: str) -> str | None:
+    def _build_research_context_block(
+        self,
+        symbol: str,
+        action: AnalysisAction,
+    ) -> str | None:
         try:
             ctx = self.company_research_service.build_context(symbol=symbol)
         except Exception:
             return None
-        return self.prompt_enrichment_service.format_research_context_block(ctx=ctx)
+        return self.prompt_enrichment_service.format_research_context_block(
+            ctx=ctx,
+            compact=True,
+            action=action,
+        )
 
     def _build_recent_transactions_block(
         self,

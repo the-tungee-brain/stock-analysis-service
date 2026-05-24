@@ -18,6 +18,7 @@ from app.adapters.schwab.schwab_auth_access_token_adapter import (
 from app.adapters.schwab.schwab_market_adapter import SchwabMarketAdapter
 from app.adapters.schwab.schwab_redis_token_manager import SchwabRedisTokenManager
 from app.adapters.cache.research_context_cache import ResearchContextCache
+from app.adapters.cache.llm_output_cache import LLMOutputCache
 from app.adapters.schwab.schwab_trader_adapter import SchwabTraderAdapter
 from app.adapters.user.app_user_adapter import AppUserAdapter
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
@@ -122,6 +123,7 @@ async def lifespan(app: FastAPI):
     )
     schwab_redis_token_manager = SchwabRedisTokenManager(redis_client=redis_client)
     research_context_cache = ResearchContextCache(redis_client=redis_client)
+    llm_output_cache = LLMOutputCache(redis_client=redis_client)
     openai_adapter = OpenAIAdapter(client=openai_client)
     chat_messages_adapter = ChatMessagesAdapter(client=powerpocketdb_client)
     chat_sessions_adapter = ChatSessionsAdapter(client=powerpocketdb_client)
@@ -171,10 +173,15 @@ async def lifespan(app: FastAPI):
         performance_builder=performance_builder,
     )
     prompt_enrichment_service = PromptEnrichmentService()
+    earnings_service = EarningsService(
+        earnings_builder=earnings_builder,
+        finnhub_builder=finnhub_builder,
+    )
     llm_service = LLMService(
         openai_adapter=openai_adapter,
         news_analytics_builder=news_analytics_builder,
         prompt_builder=prompt_builder,
+        llm_output_cache=llm_output_cache,
     )
     portfolio_service = PortfolioService(schwab_trader_builder=schwab_trader_builder)
     schwab_auth_service = SchwabAuthService(
@@ -195,6 +202,7 @@ async def lifespan(app: FastAPI):
         news_service=news_service,
         fundamentals_builder=fundamentals_builder,
         sec_research_service=sec_research_service,
+        earnings_service=earnings_service,
         research_context_cache=research_context_cache,
     )
     transaction_service = TransactionService(
@@ -206,10 +214,6 @@ async def lifespan(app: FastAPI):
         prompt_enrichment_service=prompt_enrichment_service,
         company_research_service=company_research_service,
         transaction_service=transaction_service,
-    )
-    earnings_service = EarningsService(
-        earnings_builder=earnings_builder,
-        finnhub_builder=finnhub_builder,
     )
     ticker_service = TickerService(ticker_symbol_builder=ticker_symbol_builder)
 

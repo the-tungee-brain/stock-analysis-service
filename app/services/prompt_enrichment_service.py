@@ -7,6 +7,7 @@ from app.models.finnhub_news_models import NewsResponse
 from app.models.company_research_models import ResearchContext, FundamentalMetric, SecRatioTrendPoint
 from textwrap import dedent
 from app.core.prompts import (
+    AnalysisAction,
     BaseAnalysisContext,
     build_symbol_prompt,
     build_portfolio_prompt,
@@ -87,7 +88,83 @@ class PromptEnrichmentService:
             )
         return header + "\n" + "\n".join(rows)
 
-    def _format_research_context_block(self, ctx: ResearchContext) -> str:
+    @staticmethod
+    def _format_earnings_section(ctx: ResearchContext) -> str | None:
+        earnings = ctx.earnings
+        if earnings is None:
+            return None
+
+        lines: list[str] = []
+        if earnings.upcoming_report_date:
+            timing = earnings.upcoming_timing or "unknown timing"
+            period = earnings.upcoming_fiscal_period or "unknown period"
+            lines.append(
+                f"- Next earnings: {earnings.upcoming_report_date} ({period}, {timing})"
+            )
+        if earnings.last_report_date:
+            beat = earnings.last_beat_label or "unknown"
+            period = earnings.last_fiscal_period or "unknown period"
+            eps = earnings.last_eps_surprise_pct or "N/A"
+            rev = earnings.last_revenue_surprise_pct or "N/A"
+            lines.append(
+                f"- Last report ({period}, {earnings.last_report_date}): "
+                f"{beat} — EPS surprise {eps}, revenue surprise {rev}"
+            )
+
+        if not lines:
+            return None
+        return "## Earnings calendar\n" + "\n".join(lines)
+
+    def _format_research_context_block(
+        self,
+        ctx: ResearchContext,
+        *,
+        compact: bool = False,
+        action: AnalysisAction | None = None,
+    ) -> str:
+        max_news = 10
+        max_trends = 5
+        include_peers = True
+        include_performance = True
+        include_news = True
+        include_sec_fundamentals = True
+        include_sec_trends = True
+        include_market_fundamentals = True
+        include_filings = True
+        include_earnings = True
+
+        if compact:
+            max_news = 3
+            max_trends = 3
+            include_filings = False
+            include_market_fundamentals = not bool(ctx.sec_fundamentals)
+
+        if action is AnalysisAction.TAX_ANGLE:
+            include_news = False
+            include_peers = False
+            include_performance = False
+            include_market_fundamentals = False
+            include_filings = False
+            max_trends = 3
+        elif action is AnalysisAction.WHAT_CHANGED:
+            max_news = 5
+            max_trends = 3
+            include_market_fundamentals = False
+            include_filings = False
+        elif action is AnalysisAction.DAILY_SUMMARY:
+            max_news = 3
+            include_peers = False
+            include_sec_fundamentals = False
+            include_sec_trends = False
+            include_market_fundamentals = False
+            include_filings = False
+            include_earnings = False
+        elif action is AnalysisAction.RISK_CHECK:
+            max_news = 0
+            max_trends = 3
+            include_market_fundamentals = False
+            include_filings = False
+
         sections: list[str] = [f"Symbol: {ctx.symbol}"]
 
         if ctx.data_gaps:
@@ -115,8 +192,8 @@ class PromptEnrichmentService:
         else:
             sections.append("## Company profile\nNo live profile data available.")
 
-        if ctx.peers:
-            peer_list = ", ".join(ctx.peers[:8])
+        if include_peers and ctx.peers:
+            peer_list = ", ".join(ctx.peers[:8 if not compact else 5])
             sections.append(
                 "## Peer companies (similar businesses)\n"
                 f"{peer_list}\n"
@@ -124,62 +201,69 @@ class PromptEnrichmentService:
                 "and valuation — do not invent peer-specific financial figures."
             )
 
-        if ctx.performance:
-            p = ctx.performance
-            sections.append(
-                dedent(f"""
-                ## Price performance
-                - 1-month return: {p.oneMonth}
-                - 3-month return: {p.threeMonth}
-                - 1-year return: {p.oneYear}
-                - Trend: {p.trendLabel}
-                - Volatility note: {p.volatilityNote}
-                """).strip()
-            )
-        else:
-            sections.append("## Price performance\nNo performance data available.")
-
-        if ctx.news:
-            news_lines = []
-            for idx, item in enumerate(ctx.news, start=1):
-                summary = item.summary or "(no summary)"
-                news_lines.append(
-                    f"{idx}. [{item.source}] {item.headline}\n   Summary: {summary}"
+        if include_performance:
+            if ctx.performance:
+                p = ctx.performance
+                sections.append(
+                    dedent(f"""
+                    ## Price performance
+                    - 1-month return: {p.oneMonth}
+                    - 3-month return: {p.threeMonth}
+                    - 1-year return: {p.oneYear}
+                    - Trend: {p.trendLabel}
+                    - Volatility note: {p.volatilityNote}
+                    """).strip()
                 )
-            sections.append(
-                "## Recent news headlines (past 7 days)\n" + "\n".join(news_lines)
-            )
-        else:
-            sections.append("## Recent news headlines\nNo recent headlines available.")
+            else:
+                sections.append("## Price performance\nNo performance data available.")
 
-        if ctx.sec_company_info:
+        if include_news:
+            if ctx.news:
+                news_lines = []
+                for idx, item in enumerate(ctx.news[:max_news], start=1):
+                    summary = item.summary or "(no summary)"
+                    news_lines.append(
+                        f"{idx}. [{item.source}] {item.headline}\n   Summary: {summary}"
+                    )
+                sections.append(
+                    "## Recent news headlines (past 7 days)\n" + "\n".join(news_lines)
+                )
+            else:
+                sections.append("## Recent news headlines\nNo recent headlines available.")
+
+        if include_earnings:
+            earnings_section = self._format_earnings_section(ctx)
+            if earnings_section:
+                sections.append(earnings_section)
+
+        if ctx.sec_company_info and include_sec_fundamentals:
             sections.append(f"## SEC company profile\n{ctx.sec_company_info}")
 
-        if ctx.sec_fundamentals:
+        if include_sec_fundamentals and ctx.sec_fundamentals:
             sections.append(
                 "## SEC filed financials (latest annual, from EDGAR)\n"
                 + self._format_metric_lines(ctx.sec_fundamentals)
             )
 
-        if ctx.sec_ratio_trends:
+        if include_sec_trends and ctx.sec_ratio_trends:
             sections.append(
                 "## SEC filed financial trends (annual, from EDGAR)\n"
                 "Multi-year margin, profitability, and growth trends from official filings.\n\n"
-                + self._format_sec_ratio_trends_table(ctx.sec_ratio_trends)
+                + self._format_sec_ratio_trends_table(ctx.sec_ratio_trends[:max_trends])
             )
 
-        if ctx.fundamentals:
+        if include_market_fundamentals and ctx.fundamentals:
             sections.append(
                 "## Market data fundamentals (estimates)\n"
                 + self._format_metric_lines(ctx.fundamentals)
             )
-        elif not ctx.sec_fundamentals:
+        elif not ctx.sec_fundamentals and include_market_fundamentals:
             sections.append("## Key fundamentals\nNo fundamental metrics available.")
 
-        if ctx.sec_recent_filings:
+        if include_filings and ctx.sec_recent_filings:
             filing_lines = [
                 f"- {filing.form} filed {filing.filing_date} (period end {filing.report_date})"
-                for filing in ctx.sec_recent_filings
+                for filing in ctx.sec_recent_filings[:3 if compact else 5]
             ]
             sections.append(
                 "## Recent SEC filings\n" + "\n".join(filing_lines)
@@ -187,8 +271,18 @@ class PromptEnrichmentService:
 
         return "\n\n".join(sections)
 
-    def format_research_context_block(self, ctx: ResearchContext) -> str:
-        return self._format_research_context_block(ctx)
+    def format_research_context_block(
+        self,
+        ctx: ResearchContext,
+        *,
+        compact: bool = False,
+        action: AnalysisAction | None = None,
+    ) -> str:
+        return self._format_research_context_block(
+            ctx,
+            compact=compact,
+            action=action,
+        )
 
     def build_research_chat_user_message(
         self,
@@ -583,6 +677,69 @@ class PromptEnrichmentService:
 
             Be as detailed and educational as possible. Help the reader understand this company
             well enough to decide whether it deserves further research or a place in their portfolio.
+            """
+        ).strip()
+        return [system_msg, user_msg]
+
+    def build_stock_summary_stream_prompt(self, ctx: ResearchContext) -> List[str]:
+        context_block = self._format_research_context_block(ctx, compact=True)
+        system_msg = dedent(
+            f"""
+            {RESEARCH_SYSTEM_PREAMBLE}
+
+            # Your task
+            Write a readable investment research summary in Markdown for a retail investor.
+            Use these section headings exactly:
+
+            ## Executive summary
+            ## Investment thesis
+            ## Key strengths
+            ## Key risks
+            ## What to watch
+            ## Valuation context
+            ## Overall sentiment
+
+            Keep the full response concise but substantive. Use bullet lists where helpful.
+            State sentiment as Bullish, Neutral, or Bearish in the last section.
+            Do not invent data that was not provided. Acknowledge missing data explicitly.
+            """
+        ).strip()
+        user_msg = dedent(
+            f"""
+            Write the research summary for:
+
+            {context_block}
+            """
+        ).strip()
+        return [system_msg, user_msg]
+
+    def build_business_details_stream_prompt(self, ctx: ResearchContext) -> List[str]:
+        context_block = self._format_research_context_block(ctx, compact=True)
+        system_msg = dedent(
+            f"""
+            {RESEARCH_SYSTEM_PREAMBLE}
+
+            # Your task
+            Explain this company's business model in Markdown for a retail investor.
+            Use these section headings exactly:
+
+            ## What they do
+            ## Business segments
+            ## Revenue model
+            ## Customers and markets
+            ## Competitive landscape
+            ## Moat and differentiators
+            ## Growth drivers
+            ## Key business risks
+
+            Be educational and specific to the supplied data. Do not invent figures.
+            """
+        ).strip()
+        user_msg = dedent(
+            f"""
+            Write the business breakdown for:
+
+            {context_block}
             """
         ).strip()
         return [system_msg, user_msg]

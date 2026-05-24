@@ -86,6 +86,17 @@ class FundamentalsOverview(BaseModel):
     overviewNote: str
 
 
+class EarningsContext(BaseModel):
+    upcoming_report_date: str | None = None
+    upcoming_fiscal_period: str | None = None
+    upcoming_timing: str | None = None
+    last_report_date: str | None = None
+    last_fiscal_period: str | None = None
+    last_beat_label: str | None = None
+    last_eps_surprise_pct: str | None = None
+    last_revenue_surprise_pct: str | None = None
+
+
 class ResearchContext(BaseModel):
     symbol: str
     snapshot: ResearchSnapshot | None = None
@@ -97,4 +108,5 @@ class ResearchContext(BaseModel):
     sec_recent_filings: list[SecFilingHeadline] = Field(default_factory=list)
     sec_company_info: str | None = None
     peers: list[str] = Field(default_factory=list)
+    earnings: EarningsContext | None = None
     data_gaps: list[str] = Field(default_factory=list)

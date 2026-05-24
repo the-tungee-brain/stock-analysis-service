@@ -1,8 +1,11 @@
+import asyncio
+
 from fastapi import APIRouter, Depends
 from app.models.company_research_models import (
     FundamentalsBlock,
     FundamentalsOverview,
 )
+from app.core.llm_routes import LLMRoute
 from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.llm_service import LLMService
 from app.services.company_research_service import CompanyResearchService
@@ -26,7 +29,10 @@ async def get_fundamentals(
     ),
     llm_service: LLMService = Depends(get_llm_service),
 ):
-    ctx = company_research_service.build_context(symbol=symbol)
+    ctx = await asyncio.to_thread(
+        company_research_service.build_context,
+        symbol=symbol,
+    )
     metrics = CompanyResearchService.merge_fundamentals(
         ctx.sec_fundamentals,
         ctx.fundamentals,
@@ -35,7 +41,11 @@ async def get_fundamentals(
         ctx=ctx, metrics=metrics
     )
     overview = await llm_service.generate_from_prompts(
-        prompts=prompts, response_model=FundamentalsOverview
+        prompts=prompts,
+        response_model=FundamentalsOverview,
+        route=LLMRoute.FUNDAMENTALS,
+        symbol=ctx.symbol,
+        context_fingerprint=CompanyResearchService.context_fingerprint(ctx),
     )
     return FundamentalsBlock(
         overviewNote=overview.overviewNote,
