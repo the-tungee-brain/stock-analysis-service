@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
+from app.broker.order_grouping import detect_roll_groups
 from app.broker.order_utils import order_relates_to_symbol
 from app.core.prompts import AnalysisAction
 from app.models.schwab_order_models import (
@@ -14,10 +15,11 @@ from app.services.transaction_service import TransactionService
 from tests.test_transaction_prompts import _make_filled_order
 
 
-def _make_option_order(*, underlying: str = "NVDA") -> SchwabOrder:
+def _make_option_order(*, underlying: str = "NVDA", order_id: int = 1) -> SchwabOrder:
     fill_time = datetime.now(timezone.utc) - timedelta(days=2)
     occ_symbol = f"{underlying}  250620C00180000"
     return SchwabOrder.model_construct(
+        orderId=order_id,
         orderType="LIMIT",
         quantity=1,
         filledQuantity=1,
@@ -139,6 +141,60 @@ def test_to_recent_order_entry_equity_total_cash_without_multiplier():
     assert entry.total_cash == 1200.0
 
 
+def test_to_recent_order_entry_includes_option_contract_and_legs():
+    service = TransactionService(schwab_trader_builder=None)  # type: ignore[arg-type]
+    entry = service.to_recent_order_entry(_make_option_order(underlying="NVDA"))
+
+    assert entry.symbol == "NVDA"
+    assert entry.contract_label == "Jun 20 '25 $180 Call"
+    assert entry.strike == 180.0
+    assert entry.put_call == "CALL"
+    assert entry.leg_count == 1
+    assert len(entry.legs) == 1
+    assert entry.legs[0].contract_label == "Jun 20 '25 $180 Call"
+
+
+def test_to_recent_order_entry_vertical_spread():
+    from tests.test_order_grouping import _make_vertical_spread
+
+    service = TransactionService(schwab_trader_builder=None)  # type: ignore[arg-type]
+    entry = service.to_recent_order_entry(_make_vertical_spread())
+
+    assert entry.leg_count == 2
+    assert entry.strategy_label == "Vertical spread"
+    assert entry.activity_group_kind == "spread"
+    assert len(entry.legs) == 2
+    assert entry.legs[0].strike == 180.0
+    assert entry.legs[1].strike == 190.0
+
+
+def test_to_recent_order_entry_roll_group():
+    from tests.test_order_grouping import _make_option_order as make_option
+
+    fill_time = datetime.now(timezone.utc) - timedelta(days=1)
+    close_order = make_option(
+        order_id=10,
+        instruction="BUY_TO_CLOSE",
+        fill_time=fill_time,
+    )
+    open_order = make_option(
+        order_id=11,
+        instruction="BUY_TO_OPEN",
+        occ_symbol="NVDA  250718C00175000",
+        description="NVDA 07/18/2025 175.00 C",
+        fill_time=fill_time,
+    )
+    roll_groups = detect_roll_groups([close_order, open_order])
+
+    service = TransactionService(schwab_trader_builder=None)  # type: ignore[arg-type]
+    close_entry = service.to_recent_order_entry(close_order, roll_groups=roll_groups)
+    open_entry = service.to_recent_order_entry(open_order, roll_groups=roll_groups)
+
+    assert close_entry.activity_group_kind == "roll"
+    assert open_entry.activity_group_id == close_entry.activity_group_id
+    assert "Roll:" in close_entry.activity_group_label
+
+
 def test_to_recent_order_entry_uses_underlying_for_options():
     service = TransactionService(schwab_trader_builder=None)  # type: ignore[arg-type]
     entry = service.to_recent_order_entry(_make_option_order(underlying="NVDA"))
@@ -165,7 +221,8 @@ def test_build_recent_transactions_markdown_equity_does_not_use_option_multiplie
     assert "EQUITY rows" in markdown
     assert "10 sh" in markdown
     assert "$1,200.00" in markdown
-    assert "Premium/contract (options only)" in markdown
+    assert "Premium/contract" in markdown
+    assert "Contract / strategy" in markdown
     assert "| — |" in markdown or "| — | $1,200.00 |" in markdown.replace(" ", "")
 
 
@@ -180,7 +237,6 @@ def test_build_recent_transactions_markdown_includes_option_premium():
     assert "OPTION rows only" in markdown
     assert "$250.00" in markdown
     assert "$2.50/sh" in markdown
-    assert "$1,220 total cash" in markdown or "$1,220" in markdown
 
 
 def test_build_recent_activity_summary():

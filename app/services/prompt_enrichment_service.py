@@ -1,11 +1,14 @@
 from app.models.schwab_market_models import PromptQuoteSnapshot
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
+from app.broker.order_grouping import detect_roll_groups, leg_contract_label, spread_group_for_order
 from app.broker.order_utils import (
     is_equity_leg,
     is_option_leg,
     option_premium_per_contract,
     order_average_fill_price,
     order_fill_time,
+    order_leg_average_fill_price,
+    order_net_total_cash,
     order_primary_leg,
     order_total_cash,
 )
@@ -364,67 +367,109 @@ class PromptEnrichmentService:
             reverse=True,
         )
 
+        roll_groups = detect_roll_groups(sorted_orders)
+
         header = (
-            "| Fill date | Side | Qty | Fill price | Premium/contract (options only) | Total cash | Order type | Open/Close | Tax lot |\n"
-            "|-----------|------|-----|------------|----------------------------------|------------|------------|------------|---------|"
+            "| Fill date | Contract / strategy | Side | Qty | Fill price | Premium/contract | Total cash | Type | Open/Close | Tax lot |\n"
+            "|-----------|---------------------|------|-----|------------|------------------|------------|------|------------|---------|"
         )
         rows: list[str] = []
         has_option_rows = False
         has_equity_rows = False
         for order in sorted_orders[:max_rows]:
-            leg = order_primary_leg(order)
-            if is_option_leg(leg):
-                has_option_rows = True
-            if is_equity_leg(leg):
-                has_equity_rows = True
-            fill_time = order_fill_time(order)
-            fill_date = fill_time.date().isoformat() if fill_time else "N/A"
-            side = (leg.instruction if leg and leg.instruction else "N/A").upper()
-            qty = leg.quantity if leg and leg.quantity is not None else order.filledQuantity
-            qty_str = f"{qty:g} ct" if is_option_leg(leg) and qty is not None else (
-                f"{qty:g} sh" if is_equity_leg(leg) and qty is not None else (
-                    f"{qty:g}" if qty is not None else "N/A"
+            legs = order.orderLegCollection or []
+            if len(legs) <= 1:
+                legs = [order_primary_leg(order)] if order_primary_leg(order) else []
+
+            order_id = getattr(order, "orderId", None)
+            roll_group = roll_groups.get(order_id) if order_id is not None else None
+            spread_group = spread_group_for_order(order)
+            group_label = (
+                roll_group.label
+                if roll_group
+                else (spread_group.label if spread_group else None)
+            )
+
+            net_cash = order_net_total_cash(order) if len(legs) > 1 else None
+
+            for index, leg in enumerate(legs):
+                if leg is None:
+                    continue
+                if is_option_leg(leg):
+                    has_option_rows = True
+                if is_equity_leg(leg):
+                    has_equity_rows = True
+
+                fill_time = order_fill_time(order)
+                fill_date = fill_time.date().isoformat() if fill_time else "N/A"
+                side = (leg.instruction if leg.instruction else "N/A").upper()
+                qty = leg.quantity if leg.quantity is not None else order.filledQuantity
+                qty_str = (
+                    f"{qty:g} ct"
+                    if is_option_leg(leg) and qty is not None
+                    else (
+                        f"{qty:g} sh"
+                        if is_equity_leg(leg) and qty is not None
+                        else (f"{qty:g}" if qty is not None else "N/A")
+                    )
                 )
-            )
-            avg_fill = order_average_fill_price(order)
-            if avg_fill is not None:
-                fill_str = f"${avg_fill:.2f}/sh" if is_option_leg(leg) else f"${avg_fill:.2f}"
-            else:
-                fill_str = "N/A"
-            if is_option_leg(leg) and avg_fill is not None:
-                premium_contract_str = f"${option_premium_per_contract(avg_fill):,.2f}"
-            else:
-                premium_contract_str = "—"
-            total_cash = order_total_cash(
-                leg,
-                fill_price_per_share=avg_fill,
-                quantity=qty,
-            )
-            total_cash_str = (
-                f"${total_cash:,.2f}" if total_cash is not None else "N/A"
-            )
-            order_type = order.orderType or "N/A"
-            open_close = (
-                leg.positionEffect if leg and leg.positionEffect else "N/A"
-            )
-            tax_lot = order.taxLotMethod or "N/A"
-            rows.append(
-                "| "
-                + " | ".join(
-                    [
-                        fill_date,
-                        side,
-                        qty_str,
-                        fill_str,
-                        premium_contract_str,
-                        total_cash_str,
-                        order_type,
-                        open_close,
-                        tax_lot,
-                    ]
+                avg_fill = order_leg_average_fill_price(order, leg.legId)
+                if avg_fill is None and index == 0:
+                    avg_fill = order_average_fill_price(order)
+                if avg_fill is not None:
+                    fill_str = (
+                        f"${avg_fill:.2f}/sh"
+                        if is_option_leg(leg)
+                        else f"${avg_fill:.2f}"
+                    )
+                else:
+                    fill_str = "N/A"
+                if is_option_leg(leg) and avg_fill is not None:
+                    premium_contract_str = f"${option_premium_per_contract(avg_fill):,.2f}"
+                else:
+                    premium_contract_str = "—"
+
+                if net_cash is not None and index == 0:
+                    total_cash_str = f"${net_cash:,.2f} net"
+                else:
+                    total_cash = order_total_cash(
+                        leg,
+                        fill_price_per_share=avg_fill,
+                        quantity=qty,
+                    )
+                    total_cash_str = (
+                        f"${total_cash:,.2f}" if total_cash is not None else "N/A"
+                    )
+
+                contract_label = leg_contract_label(leg) or "—"
+                if index == 0 and group_label:
+                    contract_str = f"{contract_label}; **{group_label}**"
+                elif index > 0:
+                    contract_str = f"↳ {contract_label}"
+                else:
+                    contract_str = contract_label
+
+                order_type = order.orderType or "N/A"
+                open_close = leg.positionEffect or "N/A"
+                tax_lot = order.taxLotMethod or "N/A"
+                rows.append(
+                    "| "
+                    + " | ".join(
+                        [
+                            fill_date if index == 0 else "",
+                            contract_str,
+                            side,
+                            qty_str,
+                            fill_str,
+                            premium_contract_str,
+                            total_cash_str if index == 0 or net_cash is None else "",
+                            order_type if index == 0 else "",
+                            open_close,
+                            tax_lot if index == 0 else "",
+                        ]
+                    )
+                    + " |"
                 )
-                + " |"
-            )
 
         guidance_lines = [
             "Filled brokerage orders from the last 30 days. "

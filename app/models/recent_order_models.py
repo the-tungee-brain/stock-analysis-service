@@ -1,9 +1,38 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
 from app.core.prompts import AnalysisAction
+
+
+class RecentOrderLegEntry(BaseModel):
+    leg_id: Optional[int] = Field(default=None, serialization_alias="legId")
+    instruction: str
+    quantity: Optional[float] = None
+    asset_type: Optional[str] = Field(default=None, serialization_alias="assetType")
+    option_symbol: Optional[str] = Field(default=None, serialization_alias="optionSymbol")
+    underlying_symbol: Optional[str] = Field(
+        default=None, serialization_alias="underlyingSymbol"
+    )
+    strike: Optional[float] = None
+    expiration: Optional[date] = None
+    put_call: Optional[str] = Field(default=None, serialization_alias="putCall")
+    contract_label: Optional[str] = Field(
+        default=None, serialization_alias="contractLabel"
+    )
+    average_fill_price: Optional[float] = Field(
+        default=None, serialization_alias="averageFillPrice"
+    )
+    premium_per_contract: Optional[float] = Field(
+        default=None, serialization_alias="premiumPerContract"
+    )
+    total_cash: Optional[float] = Field(default=None, serialization_alias="totalCash")
+    position_effect: Optional[str] = Field(
+        default=None, serialization_alias="positionEffect"
+    )
+
+    model_config = {"populate_by_name": True}
 
 
 class RecentOrderEntry(BaseModel):
@@ -29,6 +58,26 @@ class RecentOrderEntry(BaseModel):
     )
     total_premium: Optional[float] = Field(default=None, serialization_alias="totalPremium")
     total_cash: Optional[float] = Field(default=None, serialization_alias="totalCash")
+    leg_count: int = Field(default=1, serialization_alias="legCount")
+    strategy_label: Optional[str] = Field(
+        default=None, serialization_alias="strategyLabel"
+    )
+    contract_label: Optional[str] = Field(
+        default=None, serialization_alias="contractLabel"
+    )
+    strike: Optional[float] = None
+    expiration: Optional[date] = None
+    put_call: Optional[str] = Field(default=None, serialization_alias="putCall")
+    legs: List[RecentOrderLegEntry] = Field(default_factory=list)
+    activity_group_id: Optional[str] = Field(
+        default=None, serialization_alias="activityGroupId"
+    )
+    activity_group_kind: Optional[str] = Field(
+        default=None, serialization_alias="activityGroupKind"
+    )
+    activity_group_label: Optional[str] = Field(
+        default=None, serialization_alias="activityGroupLabel"
+    )
 
     model_config = {"populate_by_name": True}
 

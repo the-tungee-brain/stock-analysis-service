@@ -2,11 +2,23 @@ from datetime import datetime
 from typing import List, Optional
 
 from app.adapters.cache.recent_orders_cache import RecentOrdersCache
+from app.broker.order_grouping import (
+    ActivityGroupInfo,
+    detect_roll_groups,
+    leg_contract_label,
+    leg_expiration,
+    leg_put_call,
+    leg_strike,
+    spread_group_for_order,
+)
 from app.broker.order_utils import (
     is_order_within_days,
+    leg_option_fields,
     order_asset_type,
     order_average_fill_price,
     order_fill_time,
+    order_leg_average_fill_price,
+    order_net_total_cash,
     order_premium_fields,
     order_primary_leg,
     order_relates_to_symbol,
@@ -20,10 +32,11 @@ from app.models.recent_order_models import (
     RecentActivitySummary,
     RecentActivitySymbolSummary,
     RecentOrderEntry,
+    RecentOrderLegEntry,
     RecentOrdersResponse,
     SuggestedAnalysisAction,
 )
-from app.models.schwab_order_models import SchwabOrder
+from app.models.schwab_order_models import OrderLeg, SchwabOrder
 
 DEFAULT_DAYS_BACK = 30
 RECENT_ACTIVITY_DAYS = 7
@@ -132,7 +145,59 @@ class TransactionService:
             refresh=refresh,
         )
 
-    def to_recent_order_entry(self, order: SchwabOrder) -> RecentOrderEntry:
+    def to_recent_order_leg_entry(
+        self, order: SchwabOrder, leg: OrderLeg
+    ) -> RecentOrderLegEntry:
+        leg_id = leg.legId
+        qty = leg.quantity if leg.quantity is not None else order.filledQuantity
+        avg_fill = order_leg_average_fill_price(order, leg_id)
+        premium_per_contract, total_premium = order_premium_fields(
+            leg,
+            fill_price_per_share=avg_fill,
+            quantity=qty,
+        )
+        total_cash = order_total_cash(
+            leg,
+            fill_price_per_share=avg_fill,
+            quantity=qty,
+        )
+        option_fields = leg_option_fields(leg)
+
+        return RecentOrderLegEntry(
+            leg_id=leg_id,
+            instruction=(leg.instruction or "UNKNOWN").upper(),
+            quantity=qty,
+            asset_type=order_asset_type(leg),
+            option_symbol=option_fields["option_symbol"],  # type: ignore[arg-type]
+            underlying_symbol=option_fields["underlying_symbol"],  # type: ignore[arg-type]
+            strike=option_fields["strike"],  # type: ignore[arg-type]
+            expiration=option_fields["expiration"],  # type: ignore[arg-type]
+            put_call=option_fields["put_call"],  # type: ignore[arg-type]
+            contract_label=option_fields["contract_label"],  # type: ignore[arg-type]
+            average_fill_price=avg_fill,
+            premium_per_contract=premium_per_contract,
+            total_cash=total_cash if total_cash is not None else total_premium,
+            position_effect=leg.positionEffect,
+        )
+
+    def _activity_group_for_order(
+        self,
+        order: SchwabOrder,
+        roll_groups: dict[int, ActivityGroupInfo],
+    ) -> Optional[ActivityGroupInfo]:
+        order_id = getattr(order, "orderId", None)
+        if order_id is not None and order_id in roll_groups:
+            return roll_groups[order_id]
+        return spread_group_for_order(order)
+
+    def to_recent_order_entry(
+        self,
+        order: SchwabOrder,
+        *,
+        roll_groups: dict[int, ActivityGroupInfo] | None = None,
+    ) -> RecentOrderEntry:
+        roll_groups = roll_groups or {}
+        legs = order.orderLegCollection or []
         leg = order_primary_leg(order)
         instrument = leg.instrument if leg else None
         symbol = (
@@ -149,11 +214,19 @@ class TransactionService:
             fill_price_per_share=avg_fill,
             quantity=qty,
         )
-        total_cash = order_total_cash(
+        leg_count = len(legs) if legs else 1
+        net_total_cash = order_net_total_cash(order) if leg_count > 1 else None
+        total_cash = net_total_cash if net_total_cash is not None else order_total_cash(
             leg,
             fill_price_per_share=avg_fill,
             quantity=qty,
         )
+
+        strategy_label = spread_group_for_order(order)
+        strategy_label_text = strategy_label.label if strategy_label else None
+        contract_label = leg_contract_label(leg) if leg else None
+
+        activity_group = self._activity_group_for_order(order, roll_groups)
 
         return RecentOrderEntry(
             order_id=getattr(order, "orderId", None),
@@ -170,7 +243,26 @@ class TransactionService:
             premium_per_contract=premium_per_contract,
             total_premium=total_premium,
             total_cash=total_cash,
+            leg_count=leg_count,
+            strategy_label=strategy_label_text,
+            contract_label=contract_label,
+            strike=leg_strike(leg) if leg else None,
+            expiration=leg_expiration(leg) if leg else None,
+            put_call=leg_put_call(leg) if leg else None,
+            legs=[self.to_recent_order_leg_entry(order, item) for item in legs],
+            activity_group_id=activity_group.group_id if activity_group else None,
+            activity_group_kind=activity_group.kind if activity_group else None,
+            activity_group_label=activity_group.label if activity_group else None,
         )
+
+    def to_recent_order_entries(
+        self, orders: List[SchwabOrder]
+    ) -> List[RecentOrderEntry]:
+        roll_groups = detect_roll_groups(orders)
+        return [
+            self.to_recent_order_entry(order, roll_groups=roll_groups)
+            for order in orders
+        ]
 
     @staticmethod
     def suggest_analysis_actions(
@@ -271,6 +363,7 @@ class TransactionService:
             refresh=refresh,
         )
         sorted_orders = self._sort_orders_newest_first(orders)
+        roll_groups = detect_roll_groups(sorted_orders)
 
         symbol_stats: dict[str, dict[str, object]] = {}
         for order in orders:
@@ -310,7 +403,7 @@ class TransactionService:
             recent_order_count=recent_order_count,
             symbols_traded=symbols_traded,
             latest_orders=[
-                self.to_recent_order_entry(order)
+                self.to_recent_order_entry(order, roll_groups=roll_groups)
                 for order in sorted_orders[:PORTFOLIO_LATEST_ORDERS_LIMIT]
             ],
             suggested_actions=self.suggest_analysis_actions(
@@ -339,7 +432,11 @@ class TransactionService:
         )
 
         sorted_orders = self._sort_orders_newest_first(orders)
-        entries = [self.to_recent_order_entry(order) for order in sorted_orders]
+        roll_groups = detect_roll_groups(sorted_orders)
+        entries = [
+            self.to_recent_order_entry(order, roll_groups=roll_groups)
+            for order in sorted_orders
+        ]
 
         activity_by_symbol: dict[str, int] = {}
         for order in orders:

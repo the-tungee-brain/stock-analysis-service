@@ -276,6 +276,46 @@ def format_assignment_risk_markdown(summary: dict[str, object]) -> str:
     )
 
 
+def parse_put_call_from_option_symbol(symbol: str) -> Literal["CALL", "PUT"] | None:
+    if not symbol:
+        return None
+
+    normalized = symbol.replace(" ", "").upper()
+    match = re.search(r"(\d{6})([CP])\d", normalized)
+    if match:
+        return "CALL" if match.group(2) == "C" else "PUT"
+
+    match = re.search(r"_(\d{2})(\d{2})(\d{2})([CP])\d", normalized, re.IGNORECASE)
+    if match:
+        return "CALL" if match.group(4).upper() == "C" else "PUT"
+
+    match = re.search(r"([CP])\d+$", normalized)
+    if match:
+        return "CALL" if match.group(1) == "C" else "PUT"
+
+    return None
+
+
+def format_option_contract_label(
+    *,
+    expiration: date | None = None,
+    strike: float | None = None,
+    put_call: str | None = None,
+) -> str | None:
+    parts: list[str] = []
+    if expiration is not None:
+        parts.append(expiration.strftime("%b %d '%y"))
+    if strike is not None:
+        parts.append(f"${strike:g}" if strike == int(strike) else f"${strike:.2f}")
+    if put_call:
+        normalized = put_call.upper()
+        if normalized in {"CALL", "C"}:
+            parts.append("Call")
+        elif normalized in {"PUT", "P"}:
+            parts.append("Put")
+    return " ".join(parts) if parts else None
+
+
 def parse_strike_from_option_symbol(symbol: str) -> float | None:
     if not symbol:
         return None

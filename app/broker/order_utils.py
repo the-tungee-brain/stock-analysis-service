@@ -4,7 +4,13 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from app.broker.option_utils import SHARES_PER_OPTION_CONTRACT
+from app.broker.option_utils import (
+    SHARES_PER_OPTION_CONTRACT,
+    format_option_contract_label,
+    parse_expiration_from_option_symbol,
+    parse_put_call_from_option_symbol,
+    parse_strike_from_option_symbol,
+)
 from app.models.schwab_order_models import OrderLeg, SchwabOrder
 
 _OCC_UNDERLYING_RE = re.compile(r"^([A-Z]{1,6})")
@@ -36,6 +42,105 @@ def order_average_fill_price(order: SchwabOrder) -> Optional[float]:
     if order.price is not None:
         return float(order.price)
     return None
+
+
+def order_leg_average_fill_price(
+    order: SchwabOrder, leg_id: Optional[int]
+) -> Optional[float]:
+    if leg_id is None:
+        return None
+    total_qty = 0.0
+    total_notional = 0.0
+    for activity in order.orderActivityCollection or []:
+        for execution in activity.executionLegs or []:
+            if execution.legId != leg_id:
+                continue
+            if execution.price is None or execution.quantity is None:
+                continue
+            qty = abs(float(execution.quantity))
+            total_qty += qty
+            total_notional += float(execution.price) * qty
+    if total_qty > 0:
+        return total_notional / total_qty
+    return None
+
+
+def leg_option_fields(leg: OrderLeg) -> dict[str, object | None]:
+    instrument = leg.instrument
+    symbol = instrument.symbol if instrument else None
+    put_call = None
+    if instrument and instrument.putCall:
+        put_call = instrument.putCall.upper()
+    elif symbol:
+        put_call = parse_put_call_from_option_symbol(symbol)
+
+    strike = parse_strike_from_option_symbol(symbol) if symbol else None
+    expiration = parse_expiration_from_option_symbol(symbol) if symbol else None
+    contract_label = None
+    if is_option_leg(leg):
+        contract_label = format_option_contract_label(
+            expiration=expiration,
+            strike=strike,
+            put_call=put_call,
+        )
+
+    return {
+        "option_symbol": symbol,
+        "underlying_symbol": order_underlying_symbol(leg),
+        "strike": strike,
+        "expiration": expiration,
+        "put_call": put_call,
+        "contract_label": contract_label,
+    }
+
+
+def signed_leg_total_cash(
+    leg: Optional[OrderLeg],
+    *,
+    fill_price_per_share: Optional[float],
+    quantity: Optional[float],
+) -> Optional[float]:
+    if leg is None or not leg.instruction:
+        return order_total_cash(
+            leg,
+            fill_price_per_share=fill_price_per_share,
+            quantity=quantity,
+        )
+    total = order_total_cash(
+        leg,
+        fill_price_per_share=fill_price_per_share,
+        quantity=quantity,
+    )
+    if total is None:
+        return None
+    if leg.instruction.upper() in {"BUY", "BUY_TO_OPEN", "BUY_TO_CLOSE"}:
+        return -abs(total)
+    return abs(total)
+
+
+def order_net_total_cash(order: SchwabOrder) -> Optional[float]:
+    legs = order.orderLegCollection or []
+    if not legs:
+        return None
+
+    net = 0.0
+    found = False
+    for leg in legs:
+        leg_id = leg.legId
+        qty = leg.quantity if leg.quantity is not None else order.filledQuantity
+        fill = order_leg_average_fill_price(order, leg_id)
+        if fill is None and leg is order_primary_leg(order):
+            fill = order_average_fill_price(order)
+        signed = signed_leg_total_cash(
+            leg,
+            fill_price_per_share=fill,
+            quantity=qty,
+        )
+        if signed is None:
+            continue
+        net += signed
+        found = True
+    return round(net, 2) if found else None
 
 
 def order_primary_leg(order: SchwabOrder) -> Optional[OrderLeg]:
