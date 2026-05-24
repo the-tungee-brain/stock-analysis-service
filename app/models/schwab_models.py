@@ -27,6 +27,10 @@ class Position(BaseModel):
     instrument: Instrument
     marketValue: float
     maintenanceRequirement: float
+    optionStrategy: Optional[str] = Field(
+        default=None,
+        description="Detected options strategy (not from Schwab API)",
+    )
     averageLongPrice: Optional[float] = None
     taxLotAverageLongPrice: Optional[float] = None
     longOpenProfitLoss: Optional[float] = None

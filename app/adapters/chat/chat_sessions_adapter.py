@@ -149,12 +149,25 @@ class ChatSessionsAdapter:
         user_id: str,
         limit: int = 50,
         offset: int = 0,
+        title_prefix: Optional[str] = None,
     ) -> list[ChatSession]:
         sql = f"""
             SELECT id, user_id, title, model, system_prompt, metadata,
                    created_at, updated_at
             FROM {self.table_name}
             WHERE user_id = :user_id
+        """
+        params: dict[str, object] = {
+            "user_id": user_id,
+            "offset": offset,
+            "limit": limit,
+        }
+
+        if title_prefix:
+            sql += " AND title LIKE :title_prefix"
+            params["title_prefix"] = f"{title_prefix}%"
+
+        sql += """
             ORDER BY updated_at DESC
             OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
         """
@@ -164,11 +177,7 @@ class ChatSessionsAdapter:
             cur = con.cursor()
             cur.execute(
                 sql,
-                {
-                    "user_id": user_id,
-                    "offset": offset,
-                    "limit": limit,
-                },
+                params,
             )
             rows = cur.fetchall()
             return [self._row_to_session(r) for r in rows]

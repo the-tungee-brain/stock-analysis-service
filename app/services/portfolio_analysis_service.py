@@ -1,5 +1,13 @@
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, Set
+
+from app.broker.option_utils import (
+    format_assignment_risk_markdown,
+    is_short_option,
+    position_expiration_date,
+    days_to_expiration,
+    summarize_assignment_risk,
+)
 from app.models.schwab_models import Position, SchwabAccounts
 from app.services.market_service import MarketService
 from app.services.schwab_auth_service import SchwabAuthService
@@ -17,6 +25,7 @@ BENCHMARK_SYMBOLS = ["$SPX", "$DJI", "$VIX", "TLT"]
 TRANSACTION_ACTIONS = frozenset(
     {AnalysisAction.WHAT_CHANGED, AnalysisAction.TAX_ANGLE}
 )
+ASSIGNMENT_RISK_WINDOW_DAYS = 14
 
 
 class PortfolioAnalysisService:
@@ -38,6 +47,75 @@ class PortfolioAnalysisService:
     def _needs_transaction_history(action: AnalysisAction) -> bool:
         return action in TRANSACTION_ACTIONS
 
+    @staticmethod
+    def _needs_assignment_risk_block(action: AnalysisAction) -> bool:
+        return action is AnalysisAction.ASSIGNMENT_RISK
+
+    @staticmethod
+    def _assignment_risk_underlyings(
+        positions: List[Position],
+        *,
+        symbol: Optional[str],
+        within_days: int = ASSIGNMENT_RISK_WINDOW_DAYS,
+    ) -> Set[str]:
+        scoped_symbol = symbol.strip().upper() if symbol else None
+        underlyings: Set[str] = set()
+
+        for position in positions:
+            if not is_short_option(position):
+                continue
+
+            underlying = position.instrument.underlyingSymbol or position.instrument.symbol
+            if not underlying:
+                continue
+            if scoped_symbol and underlying.upper() != scoped_symbol:
+                continue
+
+            expiration = position_expiration_date(position)
+            if expiration is None:
+                continue
+            if days_to_expiration(expiration) > within_days:
+                continue
+
+            underlyings.add(underlying)
+
+        return underlyings
+
+    def _build_assignment_risk_block(
+        self,
+        *,
+        access_token: str,
+        positions: List[Position],
+        symbol: Optional[str],
+    ) -> str:
+        underlyings = sorted(
+            self._assignment_risk_underlyings(
+                positions,
+                symbol=symbol,
+            )
+        )
+        if not underlyings:
+            scope = symbol or "portfolio"
+            return (
+                f"No short options expiring within {ASSIGNMENT_RISK_WINDOW_DAYS} days "
+                f"for {scope}."
+            )
+
+        snapshots = self.market_service.get_enriched_quote_snapshot(
+            access_token=access_token,
+            symbols=underlyings,
+        )
+        underlying_prices = {
+            snapshot.symbol: snapshot.last for snapshot in snapshots.values()
+        }
+        summary = summarize_assignment_risk(
+            positions=positions,
+            underlying_prices=underlying_prices,
+            symbol=symbol,
+            within_days=ASSIGNMENT_RISK_WINDOW_DAYS,
+        )
+        return format_assignment_risk_markdown(summary)
+
     async def build_analysis_context(
         self,
         user_id: str,
@@ -51,11 +129,25 @@ class PortfolioAnalysisService:
         include_market_data: bool = True,
     ) -> BaseAnalysisContext:
         if not symbol:
+            assignment_risk_block = None
+            if include_market_data and self._needs_assignment_risk_block(action):
+                schwab_token = self.schwab_auth_service.get_valid_token_by_user_id(
+                    user_id=user_id
+                )
+                assignment_risk_block = await asyncio.to_thread(
+                    self._build_assignment_risk_block,
+                    access_token=schwab_token.access_token,
+                    positions=positions,
+                    symbol=None,
+                )
+
             return PortfolioContext(
                 account=account,
                 positions=positions,
                 session_id=session_id,
                 user_prompt=user_prompt,
+                action=action,
+                assignment_risk_block=assignment_risk_block,
             )
 
         if not include_market_data:
@@ -107,6 +199,15 @@ class PortfolioAnalysisService:
             ),
         )
 
+        assignment_risk_block = None
+        if self._needs_assignment_risk_block(action):
+            assignment_risk_block = await asyncio.to_thread(
+                self._build_assignment_risk_block,
+                access_token=access_token,
+                positions=positions,
+                symbol=symbol,
+            )
+
         market_snapshots_markdown = (
             self.prompt_enrichment_service.build_market_snapshot_markdown(
                 snapshots=market_snapshots
@@ -136,6 +237,7 @@ class PortfolioAnalysisService:
             research_context=research_context_block,
             recent_transactions=recent_transactions_block,
             action=action,
+            assignment_risk_block=assignment_risk_block,
         )
 
     def _build_research_context_block(

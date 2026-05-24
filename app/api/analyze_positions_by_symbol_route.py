@@ -7,6 +7,7 @@ from app.models.schwab_models import Position, SchwabAccounts
 from app.services.llm_service import LLMService
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.services.prompt_enrichment_service import PromptEnrichmentService
+from app.services.portfolio_service import PortfolioService
 from app.services.chat_service import ChatService
 from app.dependencies.service_dependencies import (
     get_llm_service,
@@ -59,6 +60,8 @@ async def analyze_positions_by_symbol(
     ),
     chat_service: ChatService = Depends(get_chat_service),
 ):
+    positions = PortfolioService._annotate_option_strategies(request.positions)
+
     session_prompt = chat_service.user_message_for_storage(
         prompt=request.prompt,
         action=request.action,
@@ -79,7 +82,7 @@ async def analyze_positions_by_symbol(
     ctx = await portfolio_analysis_service.build_analysis_context(
         user_id=user_id,
         account=request.account,
-        positions=request.positions,
+        positions=positions,
         session_id=request.session_id,
         symbol=request.symbol,
         user_prompt=request.prompt,

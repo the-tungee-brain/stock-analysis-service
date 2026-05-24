@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict, Any
+from typing import Literal, Optional, List, Dict, Any
 from uuid import UUID
 
 from app.builders.chat_sessions_builder import ChatSessionsBuilder
@@ -10,6 +10,9 @@ from openai.types.shared import ResponsesModel
 
 
 class ChatService:
+    PORTFOLIO_TITLE_PREFIXES = ("Portfolio:", "Symbol:")
+    RESEARCH_TITLE_PREFIX = "Research:"
+
     def __init__(
         self,
         chat_sessions_builder: ChatSessionsBuilder,
@@ -193,3 +196,108 @@ class ChatService:
             )
 
         return openai_messages
+
+    @classmethod
+    def _title_prefix_for_kind(cls, kind: str) -> Optional[str]:
+        if kind == "portfolio":
+            return cls.PORTFOLIO_TITLE_PREFIXES[0]
+        if kind == "research":
+            return cls.RESEARCH_TITLE_PREFIX
+        return None
+
+    @staticmethod
+    def _session_kind(title: Optional[str]) -> str:
+        if not title:
+            return "other"
+        if title.startswith("Research:"):
+            return "research"
+        if title.startswith("Portfolio:") or title.startswith("Symbol:"):
+            return "portfolio"
+        return "other"
+
+    def list_user_sessions(
+        self,
+        user_id: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        kind: Literal["all", "portfolio", "research"] = "all",
+    ) -> List[Dict[str, Any]]:
+        if kind == "all":
+            sessions = self.chat_sessions_builder.get_sessions_by_user_id(
+                user_id=user_id,
+                limit=limit,
+                offset=offset,
+            )
+        else:
+            prefix = self._title_prefix_for_kind(kind)
+            sessions = self.chat_sessions_builder.get_sessions_by_user_id(
+                user_id=user_id,
+                limit=limit,
+                offset=offset,
+                title_prefix=prefix,
+            )
+            if kind == "portfolio":
+                symbol_sessions = (
+                    self.chat_sessions_builder.get_sessions_by_user_id(
+                        user_id=user_id,
+                        limit=limit,
+                        offset=offset,
+                        title_prefix="Symbol:",
+                    )
+                )
+                combined = {session.id: session for session in sessions + symbol_sessions}
+                sessions = sorted(
+                    combined.values(),
+                    key=lambda session: session.updated_at,
+                    reverse=True,
+                )[:limit]
+
+        return [
+            {
+                "id": str(session.id),
+                "title": session.title,
+                "model": session.model,
+                "kind": self._session_kind(session.title),
+                "createdAt": session.created_at.isoformat(),
+                "updatedAt": session.updated_at.isoformat(),
+            }
+            for session in sessions
+            if session.id is not None
+        ]
+
+    def get_session_for_user(
+        self,
+        user_id: str,
+        session_id: UUID,
+    ) -> Optional[ChatSession]:
+        session = self.chat_sessions_builder.get_session_by_id(session_id)
+        if session is None or session.user_id != user_id:
+            return None
+        return session
+
+    def get_session_messages_for_user(
+        self,
+        user_id: str,
+        session_id: UUID,
+        *,
+        limit: int = 100,
+    ) -> Optional[List[Dict[str, Any]]]:
+        session = self.get_session_for_user(user_id=user_id, session_id=session_id)
+        if session is None:
+            return None
+
+        messages = self.chat_messages_builder.list_messages_by_session(
+            session_id=str(session_id),
+            limit=limit,
+            order="asc",
+        )
+        return [
+            {
+                "id": message.id,
+                "role": message.role,
+                "content": message.content,
+                "createdAt": message.created_at.isoformat(),
+            }
+            for message in messages
+        ]

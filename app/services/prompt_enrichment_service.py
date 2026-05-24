@@ -164,6 +164,16 @@ class PromptEnrichmentService:
             max_trends = 3
             include_market_fundamentals = False
             include_filings = False
+        elif action is AnalysisAction.ASSIGNMENT_RISK:
+            max_news = 2
+            max_trends = 0
+            include_peers = False
+            include_performance = False
+            include_market_fundamentals = False
+            include_sec_fundamentals = False
+            include_sec_trends = False
+            include_filings = False
+            include_earnings = False
 
         sections: list[str] = [f"Symbol: {ctx.symbol}"]
 

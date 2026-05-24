@@ -1,6 +1,8 @@
+from typing import Optional
+from uuid import UUID
+
 from app.adapters.chat.chat_sessions_adapter import ChatSessionsAdapter
 from app.models.chat_sessions_models import ChatSession
-from typing import Optional
 
 
 class ChatSessionsBuilder:
@@ -10,7 +12,21 @@ class ChatSessionsBuilder:
     def create_session(self, session: ChatSession) -> ChatSession:
         return self.chat_sessions_adapter.create_session(session=session)
 
-    def get_session_by_id(self, session_id: str) -> ChatSession:
+    def get_sessions_by_user_id(
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        title_prefix: Optional[str] = None,
+    ) -> list[ChatSession]:
+        return self.chat_sessions_adapter.get_sessions_by_user_id(
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+            title_prefix=title_prefix,
+        )
+
+    def get_session_by_id(self, session_id: UUID) -> Optional[ChatSession]:
         return self.chat_sessions_adapter.get_session_by_id(session_id=session_id)
 
     def get_latest_session_by_user_id_and_title_prefix(

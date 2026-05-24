@@ -23,6 +23,9 @@ from tests.test_position_prompt_metrics import _make_account, _make_position
         ("risk-check", AnalysisAction.RISK_CHECK),
         ("risk check", AnalysisAction.RISK_CHECK),
         ("risk review", AnalysisAction.RISK_CHECK),
+        ("assignment-risk", AnalysisAction.ASSIGNMENT_RISK),
+        ("assignment risk", AnalysisAction.ASSIGNMENT_RISK),
+        ("expiring this week", AnalysisAction.ASSIGNMENT_RISK),
         ("free-form", AnalysisAction.FREE_FORM),
         ("free form", AnalysisAction.FREE_FORM),
         ("TAX_ANGLE", AnalysisAction.TAX_ANGLE),
@@ -70,6 +73,7 @@ def test_request_model_rejects_invalid_action():
     [
         (AnalysisAction.TAX_ANGLE, None, True),
         (AnalysisAction.WHAT_CHANGED, "", True),
+        (AnalysisAction.ASSIGNMENT_RISK, None, True),
         (AnalysisAction.FREE_FORM, "Should I trim?", True),
         (AnalysisAction.FREE_FORM, None, False),
         (AnalysisAction.FREE_FORM, "   ", False),

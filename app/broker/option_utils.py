@@ -1,5 +1,6 @@
 import re
-from typing import List
+from datetime import date, datetime, timezone
+from typing import List, Literal
 
 from app.models.schwab_models import Position
 
@@ -7,6 +8,272 @@ SHARES_PER_OPTION_CONTRACT = 100
 
 _OCC_STRIKE_RE = re.compile(r"[CP](\d{8})$", re.IGNORECASE)
 _COMPACT_STRIKE_RE = re.compile(r"[CP](\d+)$", re.IGNORECASE)
+_COMPACT_EXPIRY_RE = re.compile(r"_(\d{2})(\d{2})(\d{2})[CP]", re.IGNORECASE)
+_OCC_EXPIRY_RE = re.compile(r"(\d{6})[CP]", re.IGNORECASE)
+
+AssignmentRiskLevel = Literal["critical", "high", "moderate", "watch", "low"]
+Moneyness = Literal["ITM", "ATM", "OTM", "unknown"]
+
+
+def parse_expiration_from_option_symbol(symbol: str) -> date | None:
+    if not symbol:
+        return None
+
+    normalized = symbol.replace(" ", "").upper()
+
+    match = _COMPACT_EXPIRY_RE.search(normalized)
+    if match:
+        month, day, year = (int(part) for part in match.groups())
+        return date(2000 + year, month, day)
+
+    match = _OCC_EXPIRY_RE.search(normalized)
+    if match:
+        raw = match.group(1)
+        year = 2000 + int(raw[:2])
+        month = int(raw[2:4])
+        day = int(raw[4:6])
+        return date(year, month, day)
+
+    return None
+
+
+def position_expiration_date(position: Position) -> date | None:
+    instrument = position.instrument
+    if instrument.expirationDate:
+        return date.fromisoformat(instrument.expirationDate[:10])
+    return parse_expiration_from_option_symbol(instrument.symbol or "")
+
+
+def days_to_expiration(
+    expiration: date,
+    *,
+    as_of: date | None = None,
+) -> int:
+    today = as_of or datetime.now(timezone.utc).date()
+    return (expiration - today).days
+
+
+def is_short_option(position: Position) -> bool:
+    instrument = position.instrument
+    return instrument.assetType == "OPTION" and position.shortQuantity > 0
+
+
+def classify_moneyness(
+    *,
+    put_call: str,
+    strike: float,
+    underlying_price: float | None,
+) -> Moneyness:
+    if underlying_price is None or underlying_price <= 0:
+        return "unknown"
+
+    tolerance = max(strike * 0.005, 0.05)
+    if put_call == "CALL":
+        if underlying_price > strike + tolerance:
+            return "ITM"
+        if underlying_price < strike - tolerance:
+            return "OTM"
+        return "ATM"
+
+    if underlying_price < strike - tolerance:
+        return "ITM"
+    if underlying_price > strike + tolerance:
+        return "OTM"
+    return "ATM"
+
+
+def assignment_risk_level(
+    *,
+    moneyness: Moneyness,
+    days_to_expiry: int,
+) -> AssignmentRiskLevel:
+    if days_to_expiry < 0:
+        return "critical"
+
+    if moneyness == "ITM":
+        if days_to_expiry <= 2:
+            return "critical"
+        if days_to_expiry <= 7:
+            return "high"
+        return "moderate"
+
+    if moneyness == "ATM":
+        if days_to_expiry <= 3:
+            return "high"
+        if days_to_expiry <= 7:
+            return "moderate"
+        return "watch"
+
+    if moneyness == "OTM":
+        if days_to_expiry <= 3:
+            return "moderate"
+        if days_to_expiry <= 7:
+            return "watch"
+        return "low"
+
+    if days_to_expiry <= 3:
+        return "moderate"
+    if days_to_expiry <= 7:
+        return "watch"
+    return "low"
+
+
+def _position_scope_symbol(position: Position) -> str | None:
+    instrument = position.instrument
+    if instrument.assetType != "OPTION":
+        return None
+    return instrument.underlyingSymbol or instrument.symbol
+
+
+def summarize_assignment_risk(
+    positions: List[Position],
+    underlying_prices: dict[str, float | None],
+    *,
+    symbol: str | None = None,
+    within_days: int = 14,
+    as_of: date | None = None,
+) -> dict[str, object]:
+    today = as_of or datetime.now(timezone.utc).date()
+    scoped_symbol = symbol.strip().upper() if symbol else None
+    entries: list[dict[str, object]] = []
+
+    for position in positions:
+        if not is_short_option(position):
+            continue
+
+        underlying = _position_scope_symbol(position)
+        if not underlying:
+            continue
+        if scoped_symbol and underlying.upper() != scoped_symbol:
+            continue
+
+        expiration = position_expiration_date(position)
+        if expiration is None:
+            continue
+
+        dte = days_to_expiration(expiration, as_of=today)
+        if dte > within_days:
+            continue
+
+        strike = position_strike_price(position)
+        underlying_price = underlying_prices.get(underlying)
+        if underlying_price is None:
+            underlying_price = underlying_prices.get(underlying.upper())
+
+        put_call = position.instrument.putCall or "CALL"
+        moneyness = (
+            classify_moneyness(
+                put_call=put_call,
+                strike=strike or 0.0,
+                underlying_price=underlying_price,
+            )
+            if strike is not None
+            else "unknown"
+        )
+        risk = assignment_risk_level(moneyness=moneyness, days_to_expiry=dte)
+        strategy = position.optionStrategy or "unknown"
+        contracts = position.shortQuantity
+        assignment_cash = None
+        if strategy == "cash_secured_put" and strike is not None:
+            assignment_cash = round(
+                strike * SHARES_PER_OPTION_CONTRACT * contracts,
+                2,
+            )
+
+        entries.append(
+            {
+                "symbol": position.instrument.symbol,
+                "underlyingSymbol": underlying,
+                "strategy": strategy,
+                "putCall": put_call,
+                "contracts": contracts,
+                "strike": strike,
+                "expiration": expiration.isoformat(),
+                "daysToExpiration": dte,
+                "underlyingPrice": underlying_price,
+                "moneyness": moneyness,
+                "riskLevel": risk,
+                "assignmentCashRequired": assignment_cash,
+            }
+        )
+
+    entries.sort(
+        key=lambda item: (
+            {"critical": 0, "high": 1, "moderate": 2, "watch": 3, "low": 4}[
+                str(item["riskLevel"])
+            ],
+            int(item["daysToExpiration"]),
+        )
+    )
+
+    return {
+        "asOf": today.isoformat(),
+        "withinDays": within_days,
+        "scopeSymbol": scoped_symbol,
+        "positions": entries,
+    }
+
+
+def summarize_assignment_risk_structural(
+    positions: List[Position],
+    *,
+    within_days: int = 14,
+    as_of: date | None = None,
+) -> dict[str, object]:
+    return summarize_assignment_risk(
+        positions=positions,
+        underlying_prices={},
+        within_days=within_days,
+        as_of=as_of,
+    )
+
+
+def format_assignment_risk_markdown(summary: dict[str, object]) -> str:
+    entries = summary.get("positions") or []
+    if not entries:
+        scope = summary.get("scopeSymbol") or "portfolio"
+        return (
+            f"No short options expiring within {summary.get('withinDays', 14)} days "
+            f"for {scope}."
+        )
+
+    header = (
+        "SYMBOL | UNDERLYING | STRATEGY | TYPE | STRIKE | EXPIRATION | DTE | "
+        "UNDERLYING_PX | MONEYNESS | RISK | ASSIGNMENT_CASH"
+    )
+    lines = [header]
+
+    for entry in entries:
+        strike = entry.get("strike")
+        underlying_price = entry.get("underlyingPrice")
+        assignment_cash = entry.get("assignmentCashRequired")
+        lines.append(
+            " | ".join(
+                [
+                    str(entry.get("symbol") or "—"),
+                    str(entry.get("underlyingSymbol") or "—"),
+                    str(entry.get("strategy") or "—"),
+                    str(entry.get("putCall") or "—"),
+                    f"{strike:.2f}" if strike is not None else "—",
+                    str(entry.get("expiration") or "—"),
+                    str(entry.get("daysToExpiration") or "—"),
+                    f"{underlying_price:.2f}" if underlying_price is not None else "—",
+                    str(entry.get("moneyness") or "—"),
+                    str(entry.get("riskLevel") or "—"),
+                    (
+                        f"{assignment_cash:.2f}"
+                        if assignment_cash is not None
+                        else "—"
+                    ),
+                ]
+            )
+        )
+
+    return (
+        f"Assignment risk scan as of {summary.get('asOf')} "
+        f"(short options expiring within {summary.get('withinDays')} days):\n\n"
+        + "\n".join(lines)
+    )
 
 
 def parse_strike_from_option_symbol(symbol: str) -> float | None:

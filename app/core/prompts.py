@@ -10,6 +10,8 @@ from typing import List, Optional
 from app.models.schwab_models import Position, SchwabAccounts
 from app.broker.option_utils import (
     cash_secured_put_reserved_cash,
+    position_expiration_date,
+    days_to_expiration,
     total_csp_reserved_cash,
 )
 
@@ -20,6 +22,7 @@ class AnalysisAction(str, Enum):
     RISK_CHECK = "risk-check"
     TAX_ANGLE = "tax-angle"
     WHAT_CHANGED = "what-changed"
+    ASSIGNMENT_RISK = "assignment-risk"
 
     @property
     def label(self) -> str:
@@ -63,6 +66,7 @@ _ANALYSIS_ACTION_LABELS: dict[AnalysisAction, str] = {
     AnalysisAction.RISK_CHECK: "risk check",
     AnalysisAction.TAX_ANGLE: "tax angle",
     AnalysisAction.WHAT_CHANGED: "what changed",
+    AnalysisAction.ASSIGNMENT_RISK: "assignment risk",
 }
 
 _ANALYSIS_ACTION_ALIASES: dict[str, AnalysisAction] = {
@@ -89,6 +93,13 @@ _ANALYSIS_ACTION_ALIASES: dict[str, AnalysisAction] = {
     "what has changed": AnalysisAction.WHAT_CHANGED,
     "recent changes": AnalysisAction.WHAT_CHANGED,
     "what is different": AnalysisAction.WHAT_CHANGED,
+    "assignmentrisk": AnalysisAction.ASSIGNMENT_RISK,
+    "assignment risk": AnalysisAction.ASSIGNMENT_RISK,
+    "expiring options": AnalysisAction.ASSIGNMENT_RISK,
+    "expiring this week": AnalysisAction.ASSIGNMENT_RISK,
+    "assignment watch": AnalysisAction.ASSIGNMENT_RISK,
+    "call away risk": AnalysisAction.ASSIGNMENT_RISK,
+    "put assignment": AnalysisAction.ASSIGNMENT_RISK,
 }
 
 
@@ -98,6 +109,8 @@ class BaseAnalysisContext:
     positions: List[Position]
     session_id: Optional[str] = None
     user_prompt: Optional[str] = None
+    action: AnalysisAction = AnalysisAction.FREE_FORM
+    assignment_risk_block: Optional[str] = None
 
 
 @dataclass(kw_only=True)
@@ -108,7 +121,6 @@ class PortfolioContext(BaseAnalysisContext):
 @dataclass(kw_only=True)
 class SymbolContext(BaseAnalysisContext):
     symbol: str
-    action: AnalysisAction = AnalysisAction.FREE_FORM
     market_snapshot: Optional[str] = None
     market_context: Optional[str] = None
     option_chain: Optional[str] = None
@@ -459,10 +471,20 @@ def _enrich_positions_table(
             p.averageLongPrice if p.longQuantity > 0 else p.averageShortPrice
         ) or p.averagePrice
 
+        expiration = position_expiration_date(p) if p.instrument.assetType == "OPTION" else None
+        dte = (
+            days_to_expiration(expiration)
+            if expiration is not None
+            else None
+        )
+
         rows.append(
             {
                 "symbol": symbol,
                 "type": _position_type_label(p),
+                "strategy": p.optionStrategy or "—",
+                "expiration": expiration.isoformat() if expiration else "—",
+                "dte": dte if dte is not None else "—",
                 "qty": round(qty, 2),
                 "avg": round(avg_price or 0, 2),
                 "mkt_val": round(p.marketValue, 2),
@@ -476,7 +498,8 @@ def _enrich_positions_table(
         )
 
     header = (
-        "SYMBOL | TYPE | QTY | AVG | MKT_VAL | PNL | PNL_% | WEIGHT_% | RESERVED_CASH | DAY_PNL | DAY_%"
+        "SYMBOL | TYPE | STRATEGY | EXPIRATION | DTE | QTY | AVG | MKT_VAL | PNL | PNL_% | "
+        "WEIGHT_% | RESERVED_CASH | DAY_PNL | DAY_%"
     )
     lines = [header]
 
@@ -487,7 +510,8 @@ def _enrich_positions_table(
             else "—"
         )
         lines.append(
-            f"{r['symbol']} | {r['type']} | {r['qty']} | {r['avg']} | {r['mkt_val']} | "
+            f"{r['symbol']} | {r['type']} | {r['strategy']} | {r['expiration']} | {r['dte']} | "
+            f"{r['qty']} | {r['avg']} | {r['mkt_val']} | "
             f"{r['pnl']} | {r['pnl_pct']} | {r['weight_pct']} | {reserved} | "
             f"{r['day_pnl']} | {r['day_%']}%"
         )
@@ -666,6 +690,31 @@ def _build_action_prompt(
             Focus on what changed, not a full re-analysis of the entire position.
             """).strip()
 
+    if action is AnalysisAction.ASSIGNMENT_RISK:
+        return dedent(f"""
+            Review assignment and call-away risk for {symbol}.
+
+            Use the precomputed assignment risk scan below as your primary source. Do not
+            recalculate moneyness or days to expiration unless a field is missing.
+
+            Cover these points:
+            1. **Expiring short options** — list each short option with DTE, strike, moneyness,
+               and risk level from the scan.
+            2. **Cash-secured puts** — for ITM/ATM puts, explain assignment cash required,
+               whether reserved cash appears adequate, and whether the user likely wants to own
+               shares at the strike.
+            3. **Covered calls** — for ITM/ATM calls, explain call-away risk, upside cap above
+               the strike, and whether keeping shares or letting assignment happen fits the thesis.
+            4. **Priority ranking** — address critical/high risk positions first.
+            5. **Recommended action per urgent leg** — for each critical/high item, recommend ONE
+               of: buy to close, roll the option, let assignment happen, or hold and monitor —
+               with specific timing (today / before Friday close / before expiration).
+            6. **Portfolio impact** — cash usage, concentration if assigned, and whether assignment
+               would improve or worsen overall portfolio risk.
+
+            Be direct and practical. Use retail language only.
+            """).strip()
+
     return user_prompt or f"Give a clear, actionable plan for {symbol}."
 
 
@@ -705,6 +754,13 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
       {transactions_block}
         """).strip() + "\n\n"
 
+    assignment_section = ""
+    if ctx.action is AnalysisAction.ASSIGNMENT_RISK:
+        assignment_section = dedent(f"""
+      === ASSIGNMENT RISK SCAN (PRECOMPUTED) ===
+      {ctx.assignment_risk_block or "No expiring short options identified within the scan window."}
+        """).strip() + "\n\n"
+
     return dedent(f"""
       Today is {now_iso}.
 
@@ -731,7 +787,7 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
       === EQUITY RESEARCH (FUNDAMENTALS, NEWS, SEC) ===
       {research_block}
 
-      {transactions_section}=== OPTION CHAIN (NEAREST EXPIRATION, NEAR CURRENT PRICE) ===
+      {transactions_section}{assignment_section}=== OPTION CHAIN (NEAREST EXPIRATION, NEAR CURRENT PRICE) ===
       {option_block}
 
       === YOUR TASK ===
@@ -749,7 +805,13 @@ def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = Tru
     Build a compact user prompt for portfolio-level analysis.
     Use this as the `user` content; pair with SYSTEM_MESSAGE as `system`.
     """
-    if ctx.user_prompt and is_follow_up_affirmation(ctx.user_prompt):
+    if ctx.action is AnalysisAction.ASSIGNMENT_RISK and not ctx.user_prompt:
+        task_block = _build_action_prompt(
+            ctx.action,
+            "the portfolio",
+            ctx.user_prompt,
+        )
+    elif ctx.user_prompt and is_follow_up_affirmation(ctx.user_prompt):
         task_block = dedent(f"""
             The user accepted a follow-up you offered in your previous message:
 
@@ -804,6 +866,14 @@ def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = Tru
         ctx.positions, max_symbols=20, account=ctx.account
     )
 
+    assignment_section = ""
+    if ctx.action is AnalysisAction.ASSIGNMENT_RISK:
+        assignment_section = dedent(f"""
+
+        === ASSIGNMENT RISK SCAN (PRECOMPUTED) ===
+        {ctx.assignment_risk_block or "No expiring short options identified within the scan window."}
+        """).strip()
+
     return dedent(f"""
         Today is {now_iso}.
 
@@ -812,6 +882,7 @@ def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = Tru
 
         === PORTFOLIO POSITIONS (TOP HOLDINGS) ===
         {positions_table}
+        {assignment_section}
 
         === YOUR TASK ===
         {task_block}
