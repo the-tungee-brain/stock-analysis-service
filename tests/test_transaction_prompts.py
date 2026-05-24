@@ -116,7 +116,21 @@ def test_build_symbol_prompt_includes_transactions_for_tax_angle():
     assert "Fill date" in prompt
 
 
-def test_build_symbol_prompt_omits_transactions_for_free_form():
+def test_build_symbol_prompt_includes_transactions_for_free_form_when_recent():
+    ctx = SymbolContext(
+        symbol="NVDA",
+        account=_make_account(),
+        positions=[_make_position(symbol="NVDA")],
+        recent_transactions="| Fill date | Side | Qty | Avg fill | Order type | Open/Close | Tax lot |",
+        action=AnalysisAction.FREE_FORM,
+    )
+
+    prompt = build_symbol_prompt(ctx=ctx)
+
+    assert "RECENT FILLED ORDERS" in prompt
+
+
+def test_build_symbol_prompt_omits_transactions_for_free_form_without_recent_activity():
     ctx = SymbolContext(
         symbol="NVDA",
         account=_make_account(),

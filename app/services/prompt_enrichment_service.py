@@ -1,5 +1,6 @@
 from app.models.schwab_market_models import PromptQuoteSnapshot
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
+from app.broker.order_utils import order_average_fill_price, order_fill_time, order_primary_leg
 from app.models.schwab_order_models import SchwabOrder
 from datetime import datetime
 from typing import List, Tuple, Dict, Any, Optional
@@ -337,38 +338,12 @@ class PromptEnrichmentService:
         ).strip()
         return {"role": "user", "content": content}
 
-    @staticmethod
-    def _order_fill_time(order: SchwabOrder) -> Optional[datetime]:
-        latest: Optional[datetime] = None
-        for activity in order.orderActivityCollection or []:
-            for execution in activity.executionLegs or []:
-                if execution.time and (latest is None or execution.time > latest):
-                    latest = execution.time
-        if latest is not None:
-            return latest
-        return order.closeTime or order.enteredTime
-
-    @staticmethod
-    def _order_average_fill_price(order: SchwabOrder) -> Optional[float]:
-        total_qty = 0.0
-        total_notional = 0.0
-        for activity in order.orderActivityCollection or []:
-            for execution in activity.executionLegs or []:
-                if execution.price is None or execution.quantity is None:
-                    continue
-                qty = abs(float(execution.quantity))
-                total_qty += qty
-                total_notional += float(execution.price) * qty
-        if total_qty > 0:
-            return total_notional / total_qty
-        if order.price is not None:
-            return float(order.price)
-        return None
-
     def build_recent_transactions_markdown(
         self,
         orders: List[SchwabOrder],
         symbol: str,
+        *,
+        max_rows: int = 20,
     ) -> str:
         if not orders:
             return (
@@ -377,7 +352,7 @@ class PromptEnrichmentService:
 
         sorted_orders = sorted(
             orders,
-            key=lambda order: self._order_fill_time(order) or datetime.min,
+            key=lambda order: order_fill_time(order) or datetime.min,
             reverse=True,
         )
 
@@ -386,14 +361,14 @@ class PromptEnrichmentService:
             "|-----------|------|-----|----------|------------|------------|---------|"
         )
         rows: list[str] = []
-        for order in sorted_orders[:20]:
-            leg = (order.orderLegCollection or [None])[0]
-            fill_time = self._order_fill_time(order)
+        for order in sorted_orders[:max_rows]:
+            leg = order_primary_leg(order)
+            fill_time = order_fill_time(order)
             fill_date = fill_time.date().isoformat() if fill_time else "N/A"
             side = (leg.instruction if leg and leg.instruction else "N/A").upper()
             qty = leg.quantity if leg and leg.quantity is not None else order.filledQuantity
             qty_str = f"{qty:g}" if qty is not None else "N/A"
-            avg_fill = self._order_average_fill_price(order)
+            avg_fill = order_average_fill_price(order)
             avg_fill_str = f"${avg_fill:.2f}" if avg_fill is not None else "N/A"
             order_type = order.orderType or "N/A"
             open_close = (

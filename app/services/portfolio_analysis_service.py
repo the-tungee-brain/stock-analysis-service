@@ -13,7 +13,8 @@ from app.services.market_service import MarketService
 from app.services.schwab_auth_service import SchwabAuthService
 from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.company_research_service import CompanyResearchService
-from app.services.transaction_service import TransactionService
+from app.broker.order_utils import is_order_within_days
+from app.services.transaction_service import RECENT_ACTIVITY_DAYS, TransactionService
 from app.core.prompts import (
     AnalysisAction,
     SymbolContext,
@@ -25,6 +26,7 @@ BENCHMARK_SYMBOLS = ["$SPX", "$DJI", "$VIX", "TLT"]
 TRANSACTION_ACTIONS = frozenset(
     {AnalysisAction.WHAT_CHANGED, AnalysisAction.TAX_ANGLE}
 )
+RECENT_ACTIVITY_TRANSACTION_ACTIONS = frozenset({AnalysisAction.FREE_FORM})
 ASSIGNMENT_RISK_WINDOW_DAYS = 14
 
 
@@ -45,7 +47,10 @@ class PortfolioAnalysisService:
 
     @staticmethod
     def _needs_transaction_history(action: AnalysisAction) -> bool:
-        return action in TRANSACTION_ACTIONS
+        return (
+            action in TRANSACTION_ACTIONS
+            or action in RECENT_ACTIVITY_TRANSACTION_ACTIONS
+        )
 
     @staticmethod
     def _needs_assignment_risk_block(action: AnalysisAction) -> bool:
@@ -192,6 +197,7 @@ class PortfolioAnalysisService:
             asyncio.to_thread(self._build_research_context_block, symbol=symbol, action=action),
             asyncio.to_thread(
                 self._build_recent_transactions_block,
+                user_id=user_id,
                 account_number=account_number,
                 access_token=access_token,
                 symbol=symbol,
@@ -258,6 +264,7 @@ class PortfolioAnalysisService:
     def _build_recent_transactions_block(
         self,
         *,
+        user_id: str,
         account_number: str,
         access_token: str,
         symbol: str,
@@ -271,11 +278,22 @@ class PortfolioAnalysisService:
                 account_number=account_number,
                 access_token=access_token,
                 symbol=symbol,
+                user_id=user_id,
             )
         except Exception:
             return "Recent filled order history could not be loaded."
 
+        if action in RECENT_ACTIVITY_TRANSACTION_ACTIONS:
+            orders = [
+                order
+                for order in orders
+                if is_order_within_days(order, within_days=RECENT_ACTIVITY_DAYS)
+            ]
+            if not orders:
+                return None
+
         return self.prompt_enrichment_service.build_recent_transactions_markdown(
             orders=orders,
             symbol=symbol,
+            max_rows=5 if action in RECENT_ACTIVITY_TRANSACTION_ACTIONS else 20,
         )

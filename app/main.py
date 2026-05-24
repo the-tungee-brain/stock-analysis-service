@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, APIRouter
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.get_account_positions_route import router as get_account_positions_router
+from app.api.get_recent_orders_route import router as get_recent_orders_router
 from app.api.analyze_positions_by_symbol_route import (
     router as analyze_positions_by_symbol_router,
 )
@@ -70,6 +70,7 @@ protected_api = APIRouter(
 )
 
 protected_api.include_router(get_account_positions_router)
+protected_api.include_router(get_recent_orders_router)
 protected_api.include_router(analyze_positions_by_symbol_router)
 protected_api.include_router(get_company_news_route)
 protected_api.include_router(get_stock_data_route)

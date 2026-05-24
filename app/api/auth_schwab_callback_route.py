@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import RedirectResponse
 from app.services.schwab_auth_service import SchwabAuthService
-from app.dependencies.service_dependencies import get_schwab_auth_service
+from app.dependencies.service_dependencies import get_schwab_auth_service, get_transaction_service
+from app.services.schwab_auth_service import SchwabAuthService
+from app.services.transaction_service import TransactionService
 import os
 import traceback
 
@@ -18,6 +20,7 @@ def auth_schwab_callback(
     state: str | None = None,
     error: str | None = None,
     schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
+    transaction_service: TransactionService = Depends(get_transaction_service),
 ):
     powerpocket_frontend_uri = os.getenv("POWERPOCKET_FRONTEND_URI")
     if error is not None:
@@ -34,6 +37,7 @@ def auth_schwab_callback(
     print("Getting access token: ", user_id, code, state)
     try:
         schwab_auth_service.claim_access_token(user_id=user_id, auth_code=code)
+        transaction_service.invalidate_recent_orders_cache(user_id=user_id)
     except Exception as e:
         print("Error in callback:" + user_id + ":" + code, e, flush=True)
         traceback.print_exc()

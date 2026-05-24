@@ -17,7 +17,7 @@ from app.adapters.schwab.schwab_auth_access_token_adapter import (
 )
 from app.adapters.schwab.schwab_market_adapter import SchwabMarketAdapter
 from app.adapters.schwab.schwab_redis_token_manager import SchwabRedisTokenManager
-from app.adapters.cache.research_context_cache import ResearchContextCache
+from app.adapters.cache.recent_orders_cache import RecentOrdersCache
 from app.adapters.cache.llm_output_cache import LLMOutputCache
 from app.adapters.schwab.schwab_trader_adapter import SchwabTraderAdapter
 from app.adapters.user.app_user_adapter import AppUserAdapter
@@ -124,6 +124,7 @@ async def lifespan(app: FastAPI):
     )
     schwab_redis_token_manager = SchwabRedisTokenManager(redis_client=redis_client)
     research_context_cache = ResearchContextCache(redis_client=redis_client)
+    recent_orders_cache = RecentOrdersCache(redis_client=redis_client)
     llm_output_cache = LLMOutputCache(redis_client=redis_client)
     openai_adapter = OpenAIAdapter(client=openai_client)
     chat_messages_adapter = ChatMessagesAdapter(client=powerpocketdb_client)
@@ -207,7 +208,8 @@ async def lifespan(app: FastAPI):
         research_context_cache=research_context_cache,
     )
     transaction_service = TransactionService(
-        schwab_trader_builder=schwab_trader_builder
+        schwab_trader_builder=schwab_trader_builder,
+        recent_orders_cache=recent_orders_cache,
     )
     portfolio_analysis_service = PortfolioAnalysisService(
         market_service=market_service,
@@ -236,6 +238,7 @@ async def lifespan(app: FastAPI):
     app.state.sec_research_service = sec_research_service
     app.state.ticker_service = ticker_service
     app.state.transaction_service = transaction_service
+    app.state.recent_orders_cache = recent_orders_cache
 
     try:
         yield
