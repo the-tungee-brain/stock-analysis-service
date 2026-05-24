@@ -106,6 +106,7 @@ async def lifespan(app: FastAPI):
     session = requests.Session()
     redis_client = get_redis_client()
     powerpocketdb_client = get_powerpocketdb_client()
+    settings.validate()
     openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
     finnhub_adapter = FinnhubAdapter(api_key=finnhub_api_key)
