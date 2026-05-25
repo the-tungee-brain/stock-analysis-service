@@ -1,6 +1,5 @@
 from unittest.mock import AsyncMock, MagicMock
-
-import pytest
+import asyncio
 
 from app.models.strategy_models import (
     DividendStrategyConfig,
@@ -98,8 +97,7 @@ def test_build_strategy_stock_suggestions_prompt_includes_preferences():
     assert "4.0%" in user_prompt
 
 
-@pytest.mark.asyncio
-async def test_suggest_stocks_returns_ranked_picks():
+def test_suggest_stocks_returns_ranked_picks():
     prompt_service = PromptEnrichmentService()
     llm_service = MagicMock()
     llm_service.generate_from_prompts = AsyncMock(
@@ -130,10 +128,12 @@ async def test_suggest_stocks_returns_ranked_picks():
         dividend=DividendStrategyConfig(dividend_symbols=[]),
     )
 
-    suggestions = await service.suggest_stocks(
-        profile=profile,
-        strategy=InvestmentStrategy.DIVIDEND,
-        limit=2,
+    suggestions = asyncio.run(
+        service.suggest_stocks(
+            profile=profile,
+            strategy=InvestmentStrategy.DIVIDEND,
+            limit=2,
+        )
     )
 
     assert suggestions is not None
@@ -142,8 +142,7 @@ async def test_suggest_stocks_returns_ranked_picks():
     llm_service.generate_from_prompts.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_suggest_stocks_excludes_existing_symbols():
+def test_suggest_stocks_excludes_existing_symbols():
     prompt_service = PromptEnrichmentService()
     llm_service = MagicMock()
     llm_service.generate_from_prompts = AsyncMock(
@@ -170,10 +169,12 @@ async def test_suggest_stocks_excludes_existing_symbols():
     service = StrategyStockSuggestionService(prompt_service, llm_service)
     profile = _wheel_profile(symbols=["AAPL"])
 
-    suggestions = await service.suggest_stocks(
-        profile=profile,
-        strategy=InvestmentStrategy.WHEEL,
-        limit=2,
+    suggestions = asyncio.run(
+        service.suggest_stocks(
+            profile=profile,
+            strategy=InvestmentStrategy.WHEEL,
+            limit=2,
+        )
     )
 
     assert suggestions is not None
