@@ -1633,10 +1633,12 @@ class PromptEnrichmentService:
             lines.extend(
                 [
                     "## Wheel / options preferences",
-                    f"- Approved symbols: {symbols}",
+                    f"- Strategy symbol list (working set — not a ban on other holdings): {symbols}",
                     f"- Target put delta: {wheel.target_delta_min:.2f}–{wheel.target_delta_max:.2f}",
                     f"- Preferred DTE: {wheel.preferred_dte_days} days",
                     f"- Max single-name weight: {wheel.max_single_name_pct:.0f}%",
+                    "- Off-list holdings: evaluate fit on merits; if strong, suggest adding to this list — "
+                    "do not treat off-list as a risk by itself.",
                 ]
             )
 
@@ -1660,9 +1662,11 @@ class PromptEnrichmentService:
             lines.extend(
                 [
                     "## Dividend preferences",
-                    f"- Watchlist symbols: {symbols}",
+                    f"- Strategy symbol list (working set — not a ban on other holdings): {symbols}",
                     f"- Target yield: {yield_target}",
                     f"- Max payout ratio: {payout}",
+                    "- Off-list holdings: evaluate fit on merits; if strong, suggest adding to this list — "
+                    "do not treat off-list as a risk by itself.",
                 ]
             )
 
@@ -1746,10 +1750,11 @@ class PromptEnrichmentService:
         )
         exclude = sorted({symbol.upper() for symbol in (exclude_symbols or []) if symbol})
         exclude_block = (
-            "Do not repeat these symbols (already in the investor's profile or Schwab holdings): "
+            "Do not repeat these symbols in NEW suggestions (already on the strategy list or "
+            "currently held — exclusions apply to discovery only, not analysis of existing holdings): "
             + ", ".join(exclude)
             if exclude
-            else "No symbols to exclude."
+            else "No symbols to exclude from new suggestions."
         )
         macro_block = macro_context or "No live macro context provided."
         strategy_guidance = self._strategy_specific_guidance(profile, strategy)

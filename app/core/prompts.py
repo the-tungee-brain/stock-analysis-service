@@ -132,6 +132,7 @@ class PortfolioContext(BaseAnalysisContext):
     intelligence_block: Optional[str] = None
     diversification_block: Optional[str] = None
     investment_profile_block: Optional[str] = None
+    strategy_alignment_block: Optional[str] = None
 
 
 @dataclass(kw_only=True)
@@ -142,6 +143,7 @@ class SymbolContext(BaseAnalysisContext):
     option_chain: Optional[str] = None
     research_context: Optional[str] = None
     intelligence_block: Optional[str] = None
+    investment_profile_block: Optional[str] = None
     recent_transactions: Optional[str] = None
     analysis_since: Optional[datetime] = None
 
@@ -297,6 +299,24 @@ STRATEGY_RULES = dedent("""
     - Every action must include timing (today / this week / before expiration).
     - Do not recommend trades for activity's sake. If Hold is correct under the matrix, say so clearly.
     - When rules conflict, prioritize: (1) capital preservation, (2) concentration limits, (3) thesis status.
+
+    ## Step 6 — Strategy symbol list (working set, not a whitelist)
+    - Saved strategy symbols are a working set — not an exclusive whitelist.
+    - If the analyzed symbol is NOT on the list, evaluate strategy fit on merits (quality, liquidity,
+      diversification, willingness to own, options market if relevant).
+    - Do NOT recommend Trim/Close solely because the symbol is off-list.
+    - If it is a strong fit for the investor's strategy, Hold (or Add if size allows) is appropriate —
+      suggest adding the symbol to the strategy list.
+    - If it is a poor fit, explain the real reason (concentration, weak thesis, illiquid options) —
+      not "it's not on your list."
+    """).strip()
+
+STRATEGY_SYMBOL_LIST_RULES = dedent("""
+    # Strategy symbol list (working set — not a whitelist)
+    - Saved strategy symbols are a working set the investor is building — not an exclusive whitelist.
+    - Off-list holdings or analyzed symbols are NOT automatically risky.
+    - Evaluate fit on merits before recommending Trim/Close.
+    - If fit is strong: recommend holding and suggest adding the symbol to the strategy list.
     """).strip()
 
 PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
@@ -324,7 +344,15 @@ PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
     - Every trim/add recommendation must include **dollar amount** and **target weight %** when possible.
     - If fully invested, give a ranked "next dollar" priority list instead of vague advice.
 
-    ## Step 5 — Respect saved investor preferences
+    ## Step 5 — Respect saved investor preferences (strategy list is NOT a whitelist)
+    - The strategy symbol list is a working set — not an exclusive whitelist.
+    - Holdings outside the list (e.g., TSM not on a wheel list) are NOT automatically risky.
+    - For off-list holdings: evaluate strategy fit on merits first (quality, liquidity,
+      diversification, willingness to own).
+    - If an off-list name is a good fit: say it is reasonable to hold and suggest adding it
+      to the strategy symbol list — do NOT recommend trimming/closing solely because it is off-list.
+    - If an off-list name is a poor fit (concentration, weak thesis, illiquid options): explain
+      the real reason — not "it's not on your list."
     - ETF core → allocation drift vs target weights is the primary lens.
     - Dividend → avoid yield chasing; note concentration in dividend names.
     - Wheel / CSP / covered call → honor max single-name %; do not sell puts on overweight underlyings.
@@ -434,6 +462,8 @@ SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE = dedent(f"""
     - Recommend specific trims, adds, or cash holds with dollar amounts and target weights.
     - Rank 2–4 actions by diversification impact — not a single speculative trade.
     - Respect saved investor preferences when provided.
+    - For holdings outside the strategy symbol list: evaluate fit on merits; if strong, suggest
+      adding to the list — never treat off-list as a risk by itself.
 
     {PORTFOLIO_DIVERSIFICATION_RULES}
 
@@ -470,6 +500,8 @@ SYSTEM_MESSAGE = dedent(f"""
     - Make every recommendation executable: side, quantity, and timing.
 
     {STRATEGY_RULES}
+
+    {STRATEGY_SYMBOL_LIST_RULES}
 
     {OPTIONS_LANGUAGE_RULES}
 
@@ -536,6 +568,8 @@ SYSTEM_NATURAL_MESSAGE = dedent(f"""
     - Honest, risk-aware advice with no hype or filler.
 
     {STRATEGY_RULES}
+
+    {STRATEGY_SYMBOL_LIST_RULES}
 
     {OPTIONS_LANGUAGE_RULES}
 
@@ -926,6 +960,7 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
         or "No equity research data (fundamentals, news, SEC filings) provided."
     )
     intelligence_block = ctx.intelligence_block or ""
+    profile_block = ctx.investment_profile_block or ""
     transactions_block = ctx.recent_transactions
 
     transactions_section = ""
@@ -944,6 +979,13 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
         assignment_section = dedent(f"""
       === ASSIGNMENT RISK SCAN (PRECOMPUTED) ===
       {ctx.assignment_risk_block or "No expiring short options identified within the scan window."}
+        """).strip() + "\n\n"
+
+    profile_section = ""
+    if profile_block:
+        profile_section = dedent(f"""
+      === INVESTOR PREFERENCES (SAVED PROFILE) ===
+      {profile_block}
         """).strip() + "\n\n"
 
     return dedent(f"""
@@ -975,7 +1017,7 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
       === PRECOMPUTED INTELLIGENCE (SIGNALS, PEERS, TIMELINE) ===
       {intelligence_block or "No precomputed intelligence signals provided."}
 
-      {transactions_section}{assignment_section}=== OPTION DATA (HELD CONTRACTS + CHAIN) ===
+      {transactions_section}{assignment_section}{profile_section}=== OPTION DATA (HELD CONTRACTS + CHAIN) ===
       {option_block}
 
       === YOUR TASK ===
@@ -1086,6 +1128,14 @@ def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = Tru
         {ctx.investment_profile_block}
         """).strip()
 
+    alignment_section = ""
+    if ctx.strategy_alignment_block:
+        alignment_section = dedent(f"""
+
+        === STRATEGY SYMBOL LIST ALIGNMENT (PRECOMPUTED) ===
+        {ctx.strategy_alignment_block}
+        """).strip()
+
     return dedent(f"""
         Today is {now_iso}.
 
@@ -1094,7 +1144,7 @@ def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = Tru
 
         === PORTFOLIO POSITIONS (TOP HOLDINGS) ===
         {positions_table}
-        {assignment_section}{diversification_section}{profile_section}{intelligence_section}
+        {assignment_section}{diversification_section}{profile_section}{alignment_section}{intelligence_section}
 
         === YOUR TASK ===
         {task_block}

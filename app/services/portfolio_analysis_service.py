@@ -15,6 +15,10 @@ from app.broker.option_utils import (
 )
 from app.adapters.user.user_investment_profile_adapter import UserInvestmentProfileAdapter
 from app.broker.portfolio_diversification import format_diversification_summary_block
+from app.broker.strategy_symbol_alignment import (
+    format_strategy_symbol_alignment_block,
+    format_symbol_strategy_fit_note,
+)
 from app.core.prompts import (
     AnalysisAction,
     SymbolContext,
@@ -216,6 +220,7 @@ class PortfolioAnalysisService:
             intelligence_block = None
             diversification_block = None
             investment_profile_block = None
+            strategy_alignment_block = None
 
             if include_market_data:
                 schwab_token = self.schwab_auth_service.get_valid_token_by_user_id(
@@ -267,6 +272,11 @@ class PortfolioAnalysisService:
                     sector_weights=sector_weights,
                     profile=profile,
                 )
+                strategy_alignment_block = format_strategy_symbol_alignment_block(
+                    positions=positions,
+                    account=account,
+                    profile=profile,
+                )
 
             return PortfolioContext(
                 account=account,
@@ -278,6 +288,7 @@ class PortfolioAnalysisService:
                 intelligence_block=intelligence_block,
                 diversification_block=diversification_block,
                 investment_profile_block=investment_profile_block,
+                strategy_alignment_block=strategy_alignment_block,
             )
 
         if not include_market_data:
@@ -400,6 +411,16 @@ class PortfolioAnalysisService:
             )
         )
 
+        profile = await asyncio.to_thread(self._get_investment_profile, user_id)
+        investment_profile_block = None
+        if profile is not None:
+            base_block = PromptEnrichmentService.format_investment_profile_block(profile)
+            fit_note = format_symbol_strategy_fit_note(profile, symbol)
+            if fit_note:
+                investment_profile_block = f"{base_block}\n\n{fit_note}"
+            else:
+                investment_profile_block = base_block
+
         return SymbolContext(
             symbol=symbol,
             account=account,
@@ -411,6 +432,7 @@ class PortfolioAnalysisService:
             option_chain=option_chains_markdown,
             research_context=research_context_block,
             intelligence_block=intelligence_block,
+            investment_profile_block=investment_profile_block,
             recent_transactions=recent_transactions_block,
             action=action,
             assignment_risk_block=assignment_risk_block,
