@@ -13,7 +13,13 @@ from app.services.prompt_enrichment_service import PromptEnrichmentService
 from tests.test_position_prompt_metrics import _make_account
 
 
-def _news_item(headline: str, hours_ago: int, item_id: int) -> NewsItem:
+def _news_item(
+    headline: str,
+    hours_ago: int,
+    item_id: int,
+    *,
+    image: str | None = None,
+) -> NewsItem:
     return NewsItem(
         category="general",
         datetime=datetime.now(timezone.utc) - timedelta(hours=hours_ago),
@@ -23,6 +29,7 @@ def _news_item(headline: str, hours_ago: int, item_id: int) -> NewsItem:
         source="Reuters",
         summary="Summary",
         url="https://example.com/news",
+        image=image,
     )
 
 
@@ -52,7 +59,14 @@ def test_get_market_news_filters_to_recent_and_limits_display_count():
 def test_portfolio_digest_includes_macro_news_from_single_finnhub_call():
     news_service = MagicMock()
     news_service.get_market_news.return_value = NewsResponse(
-        root=[_news_item("Fed holds rates steady", 2, 10)]
+        root=[
+            _news_item(
+                "Fed holds rates steady",
+                2,
+                10,
+                image="https://example.com/fed.jpg",
+            )
+        ]
     )
 
     service = PortfolioIntelligenceService(
@@ -72,6 +86,7 @@ def test_portfolio_digest_includes_macro_news_from_single_finnhub_call():
             headline="Fed holds rates steady",
             source="Reuters",
             url="https://example.com/news",
+            image="https://example.com/fed.jpg",
         )
     ]
     news_service.get_market_news.assert_called_once()
