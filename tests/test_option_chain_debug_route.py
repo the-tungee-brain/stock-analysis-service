@@ -74,7 +74,9 @@ def test_get_option_chain_debug_returns_parsed_summary():
     assert payload["symbol"] == "AAPL"
     assert payload["summary"]["underlyingPrice"] == 200.12
     assert payload["scorecard"] is not None
-    assert "Nearest expiration option prices" in payload["markdownPreview"]
+    assert "Underlying: AAPL @ $200.12" in payload["markdownPreview"]
+    assert "Expiration: 2026-06-20 (30 DTE)" in payload["markdownPreview"]
+    assert "Call Delta" in payload["markdownPreview"]
     assert "rawChain" not in payload
     market_service.get_option_chains.assert_called_once()
 
