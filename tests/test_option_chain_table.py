@@ -19,12 +19,18 @@ def test_build_option_chain_table_returns_up_down_rows():
 
     assert table is not None
     assert table.expiration == "2026-06-20"
+    assert table.days_to_expiration == 30
+    assert table.symbol == "AAPL"
     assert table.underlying_price == 200.12
     assert [row.strike for row in table.rows] == [195.0, 200.0]
     assert table.rows[0].put is not None
     assert table.rows[0].put.bid == 4.1
+    assert table.rows[0].put.mark == 4.2
     assert table.rows[1].call is not None
     assert table.rows[1].call.ask == 5.4
+    assert table.rows[1].call.mark == 5.3
+    assert table.rows[1].call.last_price == 5.3
+    assert table.rows[1].call.theta == -0.11
     assert table.rows[1].call.iv == 23.8
 
 

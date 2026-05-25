@@ -146,6 +146,8 @@ class OptionsScoringService:
                     open_interest=oi,
                     bid=contract.bidPrice,
                     ask=contract.askPrice,
+                    last_price=contract.lastPrice,
+                    theta=contract.theta,
                     iv=contract.volatility,
                     score=round(score, 3),
                     rationale=(

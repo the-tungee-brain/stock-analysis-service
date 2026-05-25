@@ -40,7 +40,10 @@ def _map_option_chain_side_quote(
     return OptionChainSideQuote(
         bid=quote.bid,
         ask=quote.ask,
+        mark=quote.mark,
+        last_price=quote.last_price,
         delta=quote.delta,
+        theta=quote.theta,
         open_interest=quote.open_interest,
         iv=quote.iv,
     )

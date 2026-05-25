@@ -827,7 +827,7 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
       === PRECOMPUTED INTELLIGENCE (SIGNALS, PEERS, TIMELINE) ===
       {intelligence_block or "No precomputed intelligence signals provided."}
 
-      {transactions_section}{assignment_section}=== OPTION CHAIN (NEAREST EXPIRATION, NEAR CURRENT PRICE) ===
+      {transactions_section}{assignment_section}=== OPTION CHAIN ===
       {option_block}
 
       === YOUR TASK ===

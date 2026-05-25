@@ -58,7 +58,7 @@ def test_build_analysis_context_loads_market_data_when_requested():
     prompt_enrichment_service.build_market_snapshot_markdown = MagicMock(
         return_value="snapshot"
     )
-    prompt_enrichment_service.build_option_chain_markdown = MagicMock(
+    prompt_enrichment_service.resolve_option_chain_block = MagicMock(
         return_value="options"
     )
     prompt_enrichment_service.format_research_context_block = MagicMock(
@@ -76,7 +76,7 @@ def test_build_analysis_context_loads_market_data_when_requested():
         transaction_service=MagicMock(),
         portfolio_intelligence_service=MagicMock(),
     )
-    service._build_research_bundle = MagicMock(return_value=("research", "intel"))
+    service._build_research_bundle = MagicMock(return_value=("research", "intel", False))
     service._build_recent_transactions_block = MagicMock(return_value=None)
     service.portfolio_intelligence_service.enriched_news_service.ensure_enriched = (
         AsyncMock(return_value=None)

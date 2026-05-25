@@ -283,7 +283,7 @@ class PortfolioAnalysisService:
                 symbol=symbol
             )
 
-        research_context_block, intelligence_block = await asyncio.to_thread(
+        research_context_block, intelligence_block, has_options_scorecard = await asyncio.to_thread(
             self._build_research_bundle,
             symbol=symbol,
             action=action,
@@ -314,8 +314,10 @@ class PortfolioAnalysisService:
             )
         )
         option_chains_markdown = (
-            self.prompt_enrichment_service.build_option_chain_markdown(
+            self.prompt_enrichment_service.resolve_option_chain_block(
                 chain=option_chains,
+                action=action,
+                has_options_scorecard=has_options_scorecard,
                 strike_count=10,
             )
         )
@@ -376,7 +378,7 @@ class PortfolioAnalysisService:
         option_chain,
         orders: list | None,
         research_context_block: str | None = None,
-    ) -> tuple[str | None, str | None]:
+    ) -> tuple[str | None, str | None, bool]:
         try:
             news_lookback_days = (
                 self._news_lookback_days(since)
@@ -389,7 +391,7 @@ class PortfolioAnalysisService:
             )
             ctx = self.portfolio_intelligence_service.attach_enriched_news(ctx)
         except Exception:
-            return research_context_block, None
+            return research_context_block, None, False
 
         if research_context_block is None:
             research_context_block = (
@@ -401,6 +403,7 @@ class PortfolioAnalysisService:
                 )
             )
 
+        has_options_scorecard = False
         try:
             intelligence = self.portfolio_intelligence_service.build_symbol_intelligence(
                 research=ctx,
@@ -412,6 +415,11 @@ class PortfolioAnalysisService:
                 option_chain=option_chain,
                 include_peers=self._include_peer_comparison(action),
             )
+            has_options_scorecard = (
+                self.prompt_enrichment_service.has_actionable_options_scorecard(
+                    intelligence
+                )
+            )
             intelligence_block = (
                 self.prompt_enrichment_service.format_intelligence_block(
                     intelligence
@@ -420,7 +428,7 @@ class PortfolioAnalysisService:
         except Exception:
             intelligence_block = None
 
-        return research_context_block, intelligence_block
+        return research_context_block, intelligence_block, has_options_scorecard
 
     def _load_portfolio_intelligence(
         self,

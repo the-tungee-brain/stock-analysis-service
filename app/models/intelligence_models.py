@@ -73,6 +73,8 @@ class OptionsStrikeCandidate(BaseModel):
     open_interest: int | None = Field(default=None, serialization_alias="openInterest")
     bid: float | None = None
     ask: float | None = None
+    last_price: float | None = Field(default=None, serialization_alias="lastPrice")
+    theta: float | None = None
     iv: float | None = None
     score: float
     rationale: str
@@ -100,7 +102,10 @@ class OptionChainSideQuote(BaseModel):
 
     bid: float | None = None
     ask: float | None = None
+    mark: float | None = None
+    last_price: float | None = Field(default=None, serialization_alias="lastPrice")
     delta: float | None = None
+    theta: float | None = None
     open_interest: int | None = Field(default=None, serialization_alias="openInterest")
     iv: float | None = None
 

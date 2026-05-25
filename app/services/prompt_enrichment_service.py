@@ -40,6 +40,20 @@ from app.core.prompts import (
     SymbolContext,
 )
 
+_SCORECARD_ONLY_OPTION_CHAIN_ACTIONS = frozenset(
+    {
+        AnalysisAction.DAILY_SUMMARY,
+        AnalysisAction.RISK_CHECK,
+    }
+)
+_NO_OPTION_CHAIN_TABLE_ACTIONS = frozenset(
+    {
+        AnalysisAction.TAX_ANGLE,
+        AnalysisAction.WHAT_CHANGED,
+        AnalysisAction.CONCENTRATION_CHECK,
+    }
+)
+
 RESEARCH_SYSTEM_PREAMBLE = dedent("""
     # Role
     You are an equity research educator helping a retail investor learn deeply about a stock
@@ -669,11 +683,12 @@ class PromptEnrichmentService:
         if table is None or not table.rows:
             return "No option chain data available."
 
+        meta_lines = self._format_option_chain_metadata(table)
         header = (
-            "| Strike | Call Bid | Call Ask | Call Δ | Call OI | Call IV | "
-            "Put Bid | Put Ask | Put Δ | Put OI | Put IV |\n"
-            "|--------|----------|----------|--------|---------|---------|"
-            "---------|---------|-------|---------|--------|\n"
+            "| Strike | Call Bid | Call Ask | Call Mark | Call Last | Call Δ | Call Θ | Call OI | Call IV | "
+            "Put Bid | Put Ask | Put Mark | Put Last | Put Δ | Put Θ | Put OI | Put IV |\n"
+            "|--------|----------|----------|-----------|-----------|--------|--------|---------|---------|"
+            "---------|---------|----------|----------|-------|--------|---------|--------|\n"
         )
 
         def fmt_price(value: float | None) -> str:
@@ -696,6 +711,11 @@ class PromptEnrichmentService:
                 return ""
             return f"{value:,}"
 
+        def fmt_theta(value: float | None) -> str:
+            if value is None:
+                return ""
+            return f"{value:.3f}"
+
         lines: List[str] = []
         for row in table.rows:
             call = row.call
@@ -704,21 +724,90 @@ class PromptEnrichmentService:
                 f"| {row.strike:.2f} | "
                 f"{fmt_price(call.bid if call else None)} | "
                 f"{fmt_price(call.ask if call else None)} | "
+                f"{fmt_price(call.mark if call else None)} | "
+                f"{fmt_price(call.last_price if call else None)} | "
                 f"{fmt_delta(call.delta if call else None)} | "
+                f"{fmt_theta(call.theta if call else None)} | "
                 f"{fmt_oi(call.open_interest if call else None)} | "
                 f"{fmt_iv(call.iv if call else None)} | "
                 f"{fmt_price(put.bid if put else None)} | "
                 f"{fmt_price(put.ask if put else None)} | "
+                f"{fmt_price(put.mark if put else None)} | "
+                f"{fmt_price(put.last_price if put else None)} | "
                 f"{fmt_delta(put.delta if put else None)} | "
+                f"{fmt_theta(put.theta if put else None)} | "
                 f"{fmt_oi(put.open_interest if put else None)} | "
                 f"{fmt_iv(put.iv if put else None)} |"
             )
 
+        return meta_lines + header + "\n".join(lines) + "\n"
+
+    @staticmethod
+    def has_actionable_options_scorecard(
+        intelligence: SymbolIntelligence | None,
+    ) -> bool:
+        if intelligence is None or intelligence.options_scorecard is None:
+            return False
+        scorecard = intelligence.options_scorecard
+        return bool(scorecard.covered_call_candidates or scorecard.csp_candidates)
+
+    def resolve_option_chain_block(
+        self,
+        chain: OptionChain | None,
+        action: AnalysisAction,
+        *,
+        has_options_scorecard: bool = False,
+        strike_count: int = 10,
+    ) -> str:
+        if chain is None:
+            return "No option chain data available."
+
+        if action in _NO_OPTION_CHAIN_TABLE_ACTIONS:
+            return (
+                "Option chain table omitted for this analysis type. "
+                "Use position data and other sections above."
+            )
+
+        if action in _SCORECARD_ONLY_OPTION_CHAIN_ACTIONS and has_options_scorecard:
+            return (
+                "Full strike table omitted — use the ranked options scorecard in "
+                "PRECOMPUTED INTELLIGENCE above for covered call and cash-secured put "
+                "candidates (strike, delta, OI, rationale). Request a free-form follow-up "
+                "if you need a full bid/ask chain for rolls or custom strikes."
+            )
+
+        return self.build_option_chain_markdown(chain, strike_count=strike_count)
+
+    @staticmethod
+    def _format_option_chain_metadata(table) -> str:
+        symbol = table.symbol or "symbol"
+        underlying = (
+            f"${table.underlying_price:.2f}"
+            if table.underlying_price is not None
+            else "N/A"
+        )
+        expiration = table.expiration or "N/A"
+        dte = (
+            f"{table.days_to_expiration} DTE"
+            if table.days_to_expiration is not None
+            else "DTE N/A"
+        )
+        quote_as_of = "quote time unavailable"
+        if table.quote_time_ms:
+            quote_dt = datetime.fromtimestamp(
+                table.quote_time_ms / 1000,
+                tz=timezone.utc,
+            )
+            quote_as_of = quote_dt.strftime("%Y-%m-%d %H:%M UTC")
+
         return (
-            "Nearest expiration option prices (near current price):\n\n"
-            + header
-            + "\n".join(lines)
-            + "\n"
+            f"Underlying: {symbol} @ {underlying}\n"
+            f"Expiration: {expiration} ({dte})\n"
+            f"Quotes as of: {quote_as_of}\n"
+            "Units: all option prices are per share (×100 per contract). "
+            "Mark = Schwab mark when available, else bid/ask mid. "
+            "Θ (theta) is daily decay per share. IV is annualized %.\n"
+            f"Strikes shown: {table.strike_count} above and below spot (nearest expiration).\n\n"
         )
 
     @staticmethod
