@@ -21,6 +21,7 @@ def test_build_symbol_intelligence_returns_symbol_on_research_failure():
         schwab_auth_service=MagicMock(),
         company_research_service=company_research_service,
         portfolio_intelligence_service=MagicMock(),
+        profile_adapter=MagicMock(),
     )
 
     result = service.build_symbol_intelligence(
@@ -57,6 +58,7 @@ def test_build_symbol_intelligence_delegates_to_intelligence_service():
         schwab_auth_service=MagicMock(),
         company_research_service=company_research_service,
         portfolio_intelligence_service=portfolio_intelligence_service,
+        profile_adapter=MagicMock(),
     )
 
     account = _make_account()

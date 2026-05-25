@@ -33,6 +33,7 @@ def test_build_research_chat_holdings_context_returns_none_without_positions():
         schwab_auth_service=MagicMock(),
         company_research_service=MagicMock(),
         portfolio_intelligence_service=MagicMock(),
+        profile_adapter=MagicMock(),
     )
     account = _make_account()
 

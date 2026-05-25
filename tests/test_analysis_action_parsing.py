@@ -109,11 +109,12 @@ def test_should_use_natural_response_for_preset_actions(
     assert should_use_natural_response(prompt, action=action) is expected
 
 
-def test_structured_analyze_uses_system_message_prompt_path():
+def test_structured_portfolio_analyze_uses_allocation_prompt_path():
     from app.core.prompts import (
         PortfolioContext,
-        _build_action_prompt,
+        SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE,
         build_portfolio_prompt,
+        system_message_for_structured_analysis,
     )
 
     ctx = PortfolioContext(
@@ -121,10 +122,28 @@ def test_structured_analyze_uses_system_message_prompt_path():
         positions=[_make_position()],
         action=AnalysisAction.FREE_FORM,
         user_prompt=None,
+        diversification_block="## Portfolio concentration metrics\n- Top 1 / 3 / 5 weights: 100.0%",
     )
     prompt = build_portfolio_prompt(ctx)
-    assert "### Position summary" in prompt
-    assert "Do not use a different outline" in prompt
+    assert "### Portfolio snapshot" in prompt
+    assert "### Diversification diagnosis" in prompt
+    assert "### Where to put money smarter" in prompt
+    assert "DIVERSIFICATION SUMMARY" in prompt
+    assert "diversification, concentration risk" in prompt
+
+    assert (
+        system_message_for_structured_analysis(symbol=None)
+        is SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE
+    )
+    assert "Portfolio diversification framework" in SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE
+
+
+def test_structured_symbol_analyze_uses_trade_prompt_path():
+    from app.core.prompts import (
+        SYSTEM_MESSAGE,
+        _build_action_prompt,
+        system_message_for_structured_analysis,
+    )
 
     symbol_task = _build_action_prompt(
         AnalysisAction.FREE_FORM,
@@ -132,3 +151,4 @@ def test_structured_analyze_uses_system_message_prompt_path():
         user_prompt=None,
     )
     assert "### Position summary" in symbol_task
+    assert system_message_for_structured_analysis(symbol="NVDA") is SYSTEM_MESSAGE

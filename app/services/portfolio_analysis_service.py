@@ -13,7 +13,8 @@ from app.broker.option_utils import (
     days_to_expiration,
     summarize_assignment_risk,
 )
-from app.broker.order_grouping import last_fill_time_for_symbol
+from app.adapters.user.user_investment_profile_adapter import UserInvestmentProfileAdapter
+from app.broker.portfolio_diversification import format_diversification_summary_block
 from app.core.prompts import (
     AnalysisAction,
     SymbolContext,
@@ -29,6 +30,7 @@ from app.models.intelligence_models import (
     SymbolIntelligence,
 )
 from app.models.schwab_models import Position, SchwabAccounts
+from app.models.strategy_models import UserInvestmentProfile
 from app.services.company_research_service import CompanyResearchService
 from app.services.intelligence.portfolio_intelligence_service import (
     PortfolioIntelligenceService,
@@ -70,6 +72,7 @@ class PortfolioAnalysisService:
         company_research_service: CompanyResearchService,
         transaction_service: TransactionService,
         portfolio_intelligence_service: PortfolioIntelligenceService,
+        profile_adapter: UserInvestmentProfileAdapter,
     ):
         self.market_service = market_service
         self.schwab_auth_service = schwab_auth_service
@@ -77,6 +80,14 @@ class PortfolioAnalysisService:
         self.company_research_service = company_research_service
         self.transaction_service = transaction_service
         self.portfolio_intelligence_service = portfolio_intelligence_service
+        self.profile_adapter = profile_adapter
+
+    def _get_investment_profile(self, user_id: str) -> UserInvestmentProfile | None:
+        try:
+            return self.profile_adapter.get_by_user_id(user_id)
+        except Exception:
+            logger.exception("Failed to load investment profile for %s", user_id)
+            return None
 
     @staticmethod
     def _needs_transaction_history(action: AnalysisAction) -> bool:
@@ -203,6 +214,8 @@ class PortfolioAnalysisService:
         if not symbol:
             assignment_risk_block = None
             intelligence_block = None
+            diversification_block = None
+            investment_profile_block = None
 
             if include_market_data:
                 schwab_token = self.schwab_auth_service.get_valid_token_by_user_id(
@@ -218,13 +231,41 @@ class PortfolioAnalysisService:
                         symbol=None,
                     )
 
-                intelligence_block = await asyncio.to_thread(
-                    self._build_portfolio_intelligence_block,
+                intelligence = await asyncio.to_thread(
+                    self._load_portfolio_intelligence,
                     user_id=user_id,
                     account=account,
                     positions=positions,
                     access_token=access_token,
-                    action=action,
+                )
+                if intelligence is not None:
+                    intelligence_block = (
+                        self.prompt_enrichment_service.format_portfolio_intelligence_block(
+                            intelligence
+                        )
+                    )
+
+                profile = await asyncio.to_thread(
+                    self._get_investment_profile,
+                    user_id,
+                )
+                if profile is not None:
+                    investment_profile_block = (
+                        PromptEnrichmentService.format_investment_profile_block(
+                            profile
+                        )
+                    )
+
+                sector_weights = (
+                    intelligence.digest.sector_weights
+                    if intelligence and intelligence.digest
+                    else None
+                )
+                diversification_block = format_diversification_summary_block(
+                    positions=positions,
+                    account=account,
+                    sector_weights=sector_weights,
+                    profile=profile,
                 )
 
             return PortfolioContext(
@@ -235,6 +276,8 @@ class PortfolioAnalysisService:
                 action=action,
                 assignment_risk_block=assignment_risk_block,
                 intelligence_block=intelligence_block,
+                diversification_block=diversification_block,
+                investment_profile_block=investment_profile_block,
             )
 
         if not include_market_data:

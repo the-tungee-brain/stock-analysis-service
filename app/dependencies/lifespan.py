@@ -271,6 +271,7 @@ async def lifespan(app: FastAPI):
         company_research_service=company_research_service,
         transaction_service=transaction_service,
         portfolio_intelligence_service=portfolio_intelligence_service,
+        profile_adapter=user_investment_profile_adapter,
     )
     ticker_service = TickerService(ticker_symbol_builder=ticker_symbol_builder)
     portfolio_memory_service = PortfolioMemoryService(

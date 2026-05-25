@@ -125,6 +125,7 @@ def test_build_portfolio_brief_returns_intelligence():
         company_research_service=company_research_service,
         transaction_service=transaction_service,
         portfolio_intelligence_service=portfolio_intelligence_service,
+        profile_adapter=MagicMock(),
     )
 
     account = _make_account()

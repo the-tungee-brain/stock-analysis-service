@@ -20,6 +20,7 @@ from app.core.prompts import (
     AnalysisAction,
     SYSTEM_MESSAGE,
     SYSTEM_NATURAL_MESSAGE,
+    system_message_for_structured_analysis,
     should_use_natural_response,
     uses_structured_system_message,
 )
@@ -123,7 +124,7 @@ async def analyze_positions_by_symbol(
         system_prompt = (
             SYSTEM_NATURAL_MESSAGE
             if should_use_natural_response(request.prompt, action=request.action)
-            else SYSTEM_MESSAGE
+            else system_message_for_structured_analysis(symbol=request.symbol)
         )
         llm_history = [] if structured else recent_messages
         async for chunk in llm_service.analyze_option_position(

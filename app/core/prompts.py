@@ -130,6 +130,8 @@ class BaseAnalysisContext:
 @dataclass(kw_only=True)
 class PortfolioContext(BaseAnalysisContext):
     intelligence_block: Optional[str] = None
+    diversification_block: Optional[str] = None
+    investment_profile_block: Optional[str] = None
 
 
 @dataclass(kw_only=True)
@@ -173,6 +175,12 @@ def uses_structured_system_message(
     return not should_use_natural_response(user_prompt, action=action)
 
 
+def system_message_for_structured_analysis(*, symbol: Optional[str]) -> str:
+    if symbol:
+        return SYSTEM_MESSAGE
+    return SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE
+
+
 _STRUCTURED_OUTPUT_HEADINGS = dedent("""
     Output format (CRITICAL):
     - Use these exact Markdown headings, in this order:
@@ -184,6 +192,21 @@ _STRUCTURED_OUTPUT_HEADINGS = dedent("""
       ### Risk/reward
       ### Confidence
     - Do not use a different outline, numbered list, or conversational format.
+    """).strip()
+
+
+_STRUCTURED_PORTFOLIO_OUTPUT_HEADINGS = dedent("""
+    Output format (CRITICAL):
+    - Use these exact Markdown headings, in this order:
+      ### Portfolio snapshot
+      ### Diversification diagnosis
+      ### Gaps vs targets
+      ### Where to put money smarter
+      ### Risk if you do nothing
+      ### Action plan (ranked)
+      ### Confidence
+    - Do not use a different outline, numbered list, or conversational format.
+    - In ### Action plan (ranked), give 2–4 steps ranked by diversification impact (not one isolated options trade).
     """).strip()
 
 
@@ -199,12 +222,19 @@ def _structured_symbol_analysis_task(symbol: str) -> str:
 
 def _structured_portfolio_analysis_task() -> str:
     return dedent(f"""
-        Analyze the overall portfolio using the decision framework in your system instructions.
+        Analyze this portfolio for diversification, concentration risk, and smarter capital deployment.
 
-        {_STRUCTURED_OUTPUT_HEADINGS}
-        - In ### Position summary, summarize portfolio-level concentration, cash and options reserves,
-          and the most urgent exposures across holdings.
-        - In ### Recommendation, give ONE primary portfolio action with specific amounts and timing.
+        Priorities (in order):
+        1. Diagnose concentration across single names, sectors, themes, cash, and options overlay.
+        2. Compare current weights to prudent targets and the investor's saved preferences.
+        3. Recommend specific trims, adds, or cash holds with dollar amounts and target weights.
+        4. Rank 2–4 actions by diversification impact — trim overweight names before suggesting new buys.
+
+        Use WEIGHT_% in the positions table and precomputed blocks in DIVERSIFICATION SUMMARY /
+        PORTFOLIO INTELLIGENCE as authoritative. Do not recalculate weights unless WEIGHT_% is N/A.
+        If deployable cash is shown, end ### Where to put money smarter with a clear deploy-$X plan.
+
+        {_STRUCTURED_PORTFOLIO_OUTPUT_HEADINGS}
         """).strip()
 
 
@@ -267,6 +297,48 @@ STRATEGY_RULES = dedent("""
     - Every action must include timing (today / this week / before expiration).
     - Do not recommend trades for activity's sake. If Hold is correct under the matrix, say so clearly.
     - When rules conflict, prioritize: (1) capital preservation, (2) concentration limits, (3) thesis status.
+    """).strip()
+
+PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
+    # Portfolio diversification framework (follow this order for portfolio-level analysis)
+
+    ## Step 1 — Read precomputed concentration data
+    - Use **WEIGHT_%** in the positions table and **DIVERSIFICATION SUMMARY** — do not recalculate unless N/A.
+    - Use **Sector allocation** from PORTFOLIO INTELLIGENCE when present.
+    - Treat short-put underlyings as intentional concentration (options overlay).
+
+    ## Step 2 — Single-name concentration
+    - Above 30% → MUST trim. Target under 20%. Do not recommend adding to that name.
+    - 20–30% → HIGH. Trim toward 15% before deploying new cash into correlated names.
+    - 15–20% → ELEVATED. Hold OK; do not add unless profile allows and name is under target.
+    - Below 15% → flexible for adds if it improves diversification.
+
+    ## Step 3 — Sector and theme overlap
+    - Flag any sector above 25–30% of the portfolio.
+    - Flag theme clustering (e.g., multiple mega-cap tech, semiconductors, dividend utilities).
+    - Prefer redeploying into underweight sectors or broad ETFs (VTI, VXUS, BND) when data supports it.
+
+    ## Step 4 — Cash and deployment
+    - Start from deployable cash in DIVERSIFICATION SUMMARY (after CSP reserves and a 5% buffer).
+    - If any name is above 20%, prioritize trims before new buys.
+    - Every trim/add recommendation must include **dollar amount** and **target weight %** when possible.
+    - If fully invested, give a ranked "next dollar" priority list instead of vague advice.
+
+    ## Step 5 — Respect saved investor preferences
+    - ETF core → allocation drift vs target weights is the primary lens.
+    - Dividend → avoid yield chasing; note concentration in dividend names.
+    - Wheel / CSP / covered call → honor max single-name %; do not sell puts on overweight underlyings.
+    - Conservative → favor broad ETFs and higher cash buffer; aggressive → allow higher single names but still flag >30%.
+
+    ## Step 6 — Options strategies (secondary)
+    - Address diversification and cash deployment first.
+    - Only mention covered calls or cash-secured puts after concentration is acceptable,
+      or to reduce risk on names being trimmed (e.g., sell covered call after partial trim).
+    - Never lead with options income on a >20% overweight name.
+
+    ## Step 7 — Ranked action plan
+    - Give 2–4 steps ranked by diversification impact with timing (this week / this month).
+    - Include expected impact (e.g., "drops top-name weight from 28% to ~22%").
     """).strip()
 
 OPTIONS_LANGUAGE_RULES = dedent("""
@@ -350,6 +422,41 @@ DATA_INTEGRITY_RULES = dedent("""
     - For probability or target-move questions on options, use held-contract delta/IV/mark and the
       precomputed profit scenarios when provided. If broker greeks are missing (-999 placeholders),
       use estimated delta/IV values labeled in the feed and give rough move/probability ranges.
+    """).strip()
+
+SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE = dedent(f"""
+    # Role
+    You are a portfolio allocator helping a US retail investor improve diversification and deploy
+    capital smarter. Write in clear, plain English.
+
+    # Your job
+    - Diagnose concentration (names, sectors, themes, cash, options overlay).
+    - Recommend specific trims, adds, or cash holds with dollar amounts and target weights.
+    - Rank 2–4 actions by diversification impact — not a single speculative trade.
+    - Respect saved investor preferences when provided.
+
+    {PORTFOLIO_DIVERSIFICATION_RULES}
+
+    {OPTIONS_LANGUAGE_RULES}
+
+    {DATA_INTEGRITY_RULES}
+
+    # Required output format
+    Use these exact Markdown headings, in this order:
+
+    1. **### Portfolio snapshot** — liquidation value, cash %, top-3 weights, CSP footprint.
+    2. **### Diversification diagnosis** — single-name, sector, and theme concentration with cited %.
+    3. **### Gaps vs targets** — current vs target weights; flag breaches (>15%, >20%, >30%).
+    4. **### Where to put money smarter** — trim/add/cash plan with dollar amounts; deployable cash use.
+    5. **### Risk if you do nothing** — impact if a top holding or sector drops 20–30%.
+    6. **### Action plan (ranked)** — 2–4 steps with timing and diversification impact.
+    7. **### Confidence** — High / Medium / Low, plus one sentence on data gaps.
+
+    # Constraints
+    - Do not ask the user questions. Make reasonable assumptions and commit.
+    - Avoid vague hedging ("it depends", "you could consider").
+    - Do not invent sectors, weights, or prices not in the provided data.
+    - This is educational analysis, not personalized financial advice.
     """).strip()
 
 SYSTEM_MESSAGE = dedent(f"""
@@ -885,7 +992,8 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
 def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = True) -> str:
     """
     Build a compact user prompt for portfolio-level analysis.
-    Use this as the `user` content; pair with SYSTEM_MESSAGE as `system`.
+    Use this as the `user` content; pair with SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE as `system`
+    for structured portfolio analyze (no user prompt).
     """
     if ctx.action is AnalysisAction.ASSIGNMENT_RISK and not ctx.user_prompt:
         task_block = _build_action_prompt(
@@ -962,6 +1070,22 @@ def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = Tru
         {ctx.intelligence_block}
         """).strip()
 
+    diversification_section = ""
+    if ctx.diversification_block:
+        diversification_section = dedent(f"""
+
+        === DIVERSIFICATION SUMMARY (PRECOMPUTED) ===
+        {ctx.diversification_block}
+        """).strip()
+
+    profile_section = ""
+    if ctx.investment_profile_block:
+        profile_section = dedent(f"""
+
+        === INVESTOR PREFERENCES (SAVED PROFILE) ===
+        {ctx.investment_profile_block}
+        """).strip()
+
     return dedent(f"""
         Today is {now_iso}.
 
@@ -970,7 +1094,7 @@ def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = Tru
 
         === PORTFOLIO POSITIONS (TOP HOLDINGS) ===
         {positions_table}
-        {assignment_section}{intelligence_section}
+        {assignment_section}{diversification_section}{profile_section}{intelligence_section}
 
         === YOUR TASK ===
         {task_block}
