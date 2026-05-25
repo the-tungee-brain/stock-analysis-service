@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from app.broker.option_chain_table import (
     build_option_chain_table,
     fair_option_price,
@@ -36,6 +38,24 @@ def test_build_option_chain_table_returns_up_down_rows():
     assert table.rows[1].call.last_price == 5.3
     assert table.rows[1].call.theta == -0.11
     assert table.rows[1].call.iv == 23.8
+
+
+def test_build_option_chain_preview_estimates_greeks_when_broker_sends_placeholders():
+    chain = OptionChain.model_validate(json.loads(FIXTURE.read_text()))
+    contract = chain.callExpDateMap["2026-06-20:30"]["200.0"][0]
+    contract.delta = -999
+    contract.volatility = -999
+    contract.theta = -999
+    chain.volatility = -999
+
+    preview = _build_option_chain_preview(chain, underlying_iv_percent=0.285)
+
+    assert preview is not None
+    row_200 = next(row for row in preview.rows if row.strike == 200.0)
+    assert row_200.call is not None
+    assert row_200.call.delta is not None
+    assert 0.3 <= row_200.call.delta <= 0.7
+    assert row_200.call.iv == pytest.approx(28.5)
 
 
 def test_build_option_chain_preview_serializes_for_symbol_intelligence():

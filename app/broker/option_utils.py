@@ -1,10 +1,32 @@
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Iterable, List, Literal
 
 from app.models.schwab_models import Position
 
 SHARES_PER_OPTION_CONTRACT = 100
+
+DEFAULT_OPTION_CHAIN_LOOKAHEAD_DAYS = 45
+
+
+def option_chain_date_window(
+    *,
+    held_expirations: Iterable[date] | None = None,
+    from_day: date | None = None,
+    lookahead_days: int = DEFAULT_OPTION_CHAIN_LOOKAHEAD_DAYS,
+) -> tuple[str, str]:
+    """Return ISO from/to dates for Schwab option chain requests.
+
+    Schwab often returns empty chains on weekends when fromDate/toDate are omitted.
+    """
+    start = from_day or date.today()
+    expirations = [exp for exp in (held_expirations or []) if exp >= start]
+    if expirations:
+        end = max(max(expirations), start + timedelta(days=lookahead_days))
+    else:
+        end = start + timedelta(days=lookahead_days)
+    return start.isoformat(), end.isoformat()
+
 
 _OCC_STRIKE_RE = re.compile(r"[CP](\d{8})$", re.IGNORECASE)
 _COMPACT_STRIKE_RE = re.compile(r"[CP](\d+)$", re.IGNORECASE)

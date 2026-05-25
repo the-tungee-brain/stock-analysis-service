@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 
+from app.broker.option_greeks import (
+    format_greek_value,
+    format_option_move_scenarios,
+    resolve_option_greeks,
+)
 from app.broker.option_utils import (
     parse_put_call_from_option_symbol,
     position_expiration_date,
@@ -89,7 +94,19 @@ class OptionChainTable:
     rows: list[OptionChainTableRow]
 
 
-def _side_quote(contract: OptionContract | None) -> OptionChainSideQuote | None:
+def _parse_contract_expiration(contract: OptionContract) -> date | None:
+    if not contract.expirationDate:
+        return None
+    return date.fromisoformat(contract.expirationDate[:10])
+
+
+def _side_quote(
+    contract: OptionContract | None,
+    *,
+    chain: OptionChain | None = None,
+    underlying_price: float | None = None,
+    underlying_iv_percent: float | None = None,
+) -> OptionChainSideQuote | None:
     if contract is None:
         return None
 
@@ -97,6 +114,15 @@ def _side_quote(contract: OptionContract | None) -> OptionChainSideQuote | None:
     ask = quoted_ask(contract)
     last = quoted_last(contract)
     mark = fair_option_price(contract)
+    greeks = resolve_option_greeks(
+        contract,
+        chain=chain,
+        underlying_price=underlying_price,
+        underlying_iv_percent=underlying_iv_percent,
+        put_call=contract.putCall,
+        strike=contract.strikePrice,
+        expiration=_parse_contract_expiration(contract),
+    )
     has_value = any(
         value is not None
         for value in (
@@ -104,10 +130,10 @@ def _side_quote(contract: OptionContract | None) -> OptionChainSideQuote | None:
             ask,
             mark,
             last,
-            contract.delta,
-            contract.theta,
+            greeks.delta,
+            greeks.theta,
             contract.openInterest,
-            contract.volatility,
+            greeks.iv_percent,
         )
     )
     if not has_value:
@@ -118,10 +144,10 @@ def _side_quote(contract: OptionContract | None) -> OptionChainSideQuote | None:
         ask=ask,
         mark=mark,
         last_price=last,
-        delta=contract.delta,
-        theta=contract.theta,
+        delta=greeks.delta,
+        theta=greeks.theta,
         open_interest=contract.openInterest,
-        iv=contract.volatility,
+        iv=greeks.iv_percent,
     )
 
 
@@ -142,6 +168,7 @@ def build_option_chain_table(
     chain: OptionChain,
     *,
     strike_count: int = 5,
+    underlying_iv_percent: float | None = None,
 ) -> OptionChainTable | None:
     if not chain.callExpDateMap and not chain.putExpDateMap:
         return None
@@ -172,8 +199,18 @@ def build_option_chain_table(
 
     rows: list[OptionChainTableRow] = []
     for strike in selected_strikes:
-        call = _side_quote(calls.get(strike))
-        put = _side_quote(puts.get(strike))
+        call = _side_quote(
+            calls.get(strike),
+            chain=chain,
+            underlying_price=underlying_price,
+            underlying_iv_percent=underlying_iv_percent,
+        )
+        put = _side_quote(
+            puts.get(strike),
+            chain=chain,
+            underlying_price=underlying_price,
+            underlying_iv_percent=underlying_iv_percent,
+        )
         if call is None and put is None:
             continue
         rows.append(OptionChainTableRow(strike=strike, call=call, put=put))
@@ -255,6 +292,7 @@ def build_option_chain_table_for_expiration(
     *,
     strike_count: int = 5,
     focus_strikes: list[float] | None = None,
+    underlying_iv_percent: float | None = None,
 ) -> OptionChainTable | None:
     underlying_price = chain.underlyingPrice or (
         chain.underlying.last if chain.underlying and chain.underlying.last else None
@@ -287,8 +325,18 @@ def build_option_chain_table_for_expiration(
 
     rows: list[OptionChainTableRow] = []
     for strike in selected_strikes:
-        call = _side_quote(calls.get(strike))
-        put = _side_quote(puts.get(strike))
+        call = _side_quote(
+            calls.get(strike),
+            chain=chain,
+            underlying_price=underlying_price,
+            underlying_iv_percent=underlying_iv_percent,
+        )
+        put = _side_quote(
+            puts.get(strike),
+            chain=chain,
+            underlying_price=underlying_price,
+            underlying_iv_percent=underlying_iv_percent,
+        )
         if call is None and put is None:
             continue
         rows.append(OptionChainTableRow(strike=strike, call=call, put=put))
@@ -344,6 +392,8 @@ def format_held_option_contracts_markdown(
     chain: OptionChain | None,
     positions: list[Position],
     symbol: str,
+    *,
+    underlying_iv_percent: float | None = None,
 ) -> str:
     if chain is None:
         return "No option chain data available for held-contract greeks."
@@ -389,24 +439,49 @@ def format_held_option_contracts_markdown(
         mark = fair_option_price(contract)
         bid = quoted_bid(contract)
         ask = quoted_ask(contract)
+        greeks = resolve_option_greeks(
+            contract,
+            chain=chain,
+            underlying_price=underlying_price,
+            underlying_iv_percent=underlying_iv_percent,
+            put_call=put_call,
+            strike=strike,
+            expiration=expiration,
+        )
+        days_to_exp = max((expiration - date.today()).days, 0)
+        cost_per_share = position.averageLongPrice or position.averagePrice
         underlying_label = (
             f"${underlying_price:.2f}" if underlying_price is not None else "N/A"
         )
         lines.append(
-            f"- {put_call} ${strike:g} exp {expiration.isoformat()} ({side} {qty:g}): "
+            f"- {put_call} ${strike:g} exp {expiration.isoformat()} ({side} {qty:g}, {days_to_exp} DTE): "
             f"underlying {underlying_label} | bid/ask/mark "
             f"{bid or '—'}/{ask or '—'}/{mark or '—'} | "
-            f"delta {contract.delta if contract.delta is not None else '—'} | "
-            f"theta {contract.theta if contract.theta is not None else '—'} | "
-            f"IV {contract.volatility if contract.volatility is not None else '—'}% | "
+            f"delta {format_greek_value(greeks.delta, source=greeks.delta_source)} | "
+            f"theta {format_greek_value(greeks.theta, source='broker', precision=3)} | "
+            f"IV {format_greek_value(greeks.iv_percent, source=greeks.iv_source, suffix='%')} | "
             f"position MKT_VAL ${mkt_val:,.2f}"
         )
+        if underlying_price and mark:
+            scenario_block = format_option_move_scenarios(
+                put_call=put_call,
+                side=side,
+                strike=strike,
+                underlying=underlying_price,
+                days_to_expiration=days_to_exp,
+                cost_per_share=cost_per_share,
+                mark_per_share=mark,
+                delta=greeks.delta,
+            )
+            if scenario_block:
+                lines.append(scenario_block.rstrip())
 
     if not lines:
         return "No held option contracts for this symbol."
 
     return (
-        "Held option contracts for this symbol (use these exact greeks and marks):\n"
+        "Held option contracts for this symbol (broker greeks sanitized; placeholder values ignored; "
+        "estimated delta/IV noted when computed from underlying quote + Black-Scholes):\n"
         + "\n".join(lines)
         + "\n"
     )
@@ -418,6 +493,7 @@ def build_option_chain_tables_for_positions(
     symbol: str,
     *,
     strike_count: int = 5,
+    underlying_iv_percent: float | None = None,
 ) -> list[OptionChainTable]:
     symbol_upper = symbol.strip().upper()
     expirations: dict[date, set[float]] = {}
@@ -443,6 +519,7 @@ def build_option_chain_tables_for_positions(
             key,
             strike_count=strike_count,
             focus_strikes=sorted(expirations[expiration]),
+            underlying_iv_percent=underlying_iv_percent,
         )
         if table is not None:
             tables.append(table)
@@ -450,5 +527,9 @@ def build_option_chain_tables_for_positions(
     if tables:
         return tables
 
-    nearest = build_option_chain_table(chain, strike_count=strike_count)
+    nearest = build_option_chain_table(
+        chain,
+        strike_count=strike_count,
+        underlying_iv_percent=underlying_iv_percent,
+    )
     return [nearest] if nearest is not None else []

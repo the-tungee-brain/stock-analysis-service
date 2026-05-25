@@ -1,3 +1,4 @@
+from app.broker.option_utils import option_chain_date_window
 from app.builders.schwab_market_builder import SchwabMarketBuilder
 from app.models.schwab_market_models import PromptQuoteSnapshot
 from typing import Dict, List, Optional
@@ -59,6 +60,11 @@ class MarketService:
         to_date: Optional[str] = None,
         strategy: StrategyType = "SINGLE",
     ) -> OptionChain:
+        if not from_date or not to_date:
+            default_from, default_to = option_chain_date_window()
+            from_date = from_date or default_from
+            to_date = to_date or default_to
+
         return self.schwab_market_builder.get_option_chains(
             access_token=access_token,
             symbol=symbol,

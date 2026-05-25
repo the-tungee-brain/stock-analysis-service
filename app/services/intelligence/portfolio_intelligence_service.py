@@ -50,10 +50,15 @@ def _map_option_chain_side_quote(
     )
 
 
-def _build_option_chain_preview(option_chain: OptionChain) -> OptionChainPreview | None:
+def _build_option_chain_preview(
+    option_chain: OptionChain,
+    *,
+    underlying_iv_percent: float | None = None,
+) -> OptionChainPreview | None:
     table = build_option_chain_table(
         option_chain,
         strike_count=INTELLIGENCE_OPTION_STRIKE_COUNT,
+        underlying_iv_percent=underlying_iv_percent,
     )
     if table is None:
         return None
@@ -103,6 +108,7 @@ class PortfolioIntelligenceService:
         since: datetime | None = None,
         option_chain: OptionChain | None = None,
         include_peers: bool = True,
+        underlying_iv_percent: float | None = None,
     ) -> SymbolIntelligence:
         research = self.attach_enriched_news(research)
 
@@ -141,7 +147,10 @@ class PortfolioIntelligenceService:
                 short_call_strikes=short_calls,
                 short_put_strikes=short_puts,
             )
-            option_chain_preview = _build_option_chain_preview(option_chain)
+            option_chain_preview = _build_option_chain_preview(
+                option_chain,
+                underlying_iv_percent=underlying_iv_percent,
+            )
             roll_suggestions = OptionRollPlannerService.build_roll_suggestions(
                 positions=positions,
                 symbol=symbol,

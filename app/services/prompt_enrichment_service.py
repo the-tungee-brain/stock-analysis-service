@@ -685,8 +685,13 @@ class PromptEnrichmentService:
         self,
         chain: OptionChain,
         strike_count: int = 5,
+        underlying_iv_percent: float | None = None,
     ) -> str:
-        table = build_option_chain_table(chain, strike_count=strike_count)
+        table = build_option_chain_table(
+            chain,
+            strike_count=strike_count,
+            underlying_iv_percent=underlying_iv_percent,
+        )
         if table is None or not table.rows:
             return "No option chain data available."
         return self.render_option_chain_table(table)
@@ -769,6 +774,7 @@ class PromptEnrichmentService:
         strike_count: int = 10,
         positions: list[Position] | None = None,
         symbol: str | None = None,
+        underlying_iv_percent: float | None = None,
     ) -> str:
         sections: list[str] = []
 
@@ -778,6 +784,7 @@ class PromptEnrichmentService:
                     chain=chain,
                     positions=positions,
                     symbol=symbol,
+                    underlying_iv_percent=underlying_iv_percent,
                 )
             )
 
@@ -808,6 +815,7 @@ class PromptEnrichmentService:
                 positions,
                 symbol,
                 strike_count=strike_count,
+                underlying_iv_percent=underlying_iv_percent,
             )
             for index, table in enumerate(tables):
                 label = (
@@ -818,7 +826,11 @@ class PromptEnrichmentService:
                 sections.append(f"{label}:\n{self.render_option_chain_table(table)}")
             return "\n\n".join(sections)
 
-        return self.build_option_chain_markdown(chain, strike_count=strike_count)
+        return self.build_option_chain_markdown(
+            chain,
+            strike_count=strike_count,
+            underlying_iv_percent=underlying_iv_percent,
+        )
 
     @staticmethod
     def _format_option_chain_metadata(table) -> str:

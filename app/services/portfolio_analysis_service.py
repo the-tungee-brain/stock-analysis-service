@@ -5,8 +5,10 @@ from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional, Set
 
 from app.broker.option_utils import (
+    DEFAULT_OPTION_CHAIN_LOOKAHEAD_DAYS,
     format_assignment_risk_markdown,
     is_short_option,
+    option_chain_date_window,
     position_expiration_date,
     days_to_expiration,
     summarize_assignment_risk,
@@ -54,7 +56,7 @@ NEWS_ENRICH_ACTIONS = frozenset(
 ASSIGNMENT_RISK_WINDOW_DAYS = 14
 PORTFOLIO_RESEARCH_LIMIT = 8
 INTELLIGENCE_OPTION_STRIKE_COUNT = 5
-INTELLIGENCE_OPTION_LOOKAHEAD_DAYS = 45
+INTELLIGENCE_OPTION_LOOKAHEAD_DAYS = DEFAULT_OPTION_CHAIN_LOOKAHEAD_DAYS
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +102,6 @@ class PortfolioAnalysisService:
         positions: List[Position],
         symbol: str,
     ) -> tuple[str, str]:
-        today = date.today()
         symbol_upper = symbol.strip().upper()
         expirations: list[date] = []
 
@@ -116,11 +117,7 @@ class PortfolioAnalysisService:
             if expiration is not None:
                 expirations.append(expiration)
 
-        if not expirations:
-            end = today + timedelta(days=ASSIGNMENT_RISK_WINDOW_DAYS)
-            return today.isoformat(), end.isoformat()
-
-        return today.isoformat(), max(expirations).isoformat()
+        return option_chain_date_window(held_expirations=expirations or None)
 
     @staticmethod
     def _should_auto_enrich_news(action: AnalysisAction) -> bool:
@@ -351,6 +348,12 @@ class PortfolioAnalysisService:
                 strike_count=10,
                 positions=positions,
                 symbol=symbol,
+                underlying_iv_percent=(
+                    market_snapshots.get(symbol).implied_vol
+                    if symbol in market_snapshots
+                    and market_snapshots[symbol].implied_vol is not None
+                    else None
+                ),
             )
         )
 
@@ -597,27 +600,29 @@ class PortfolioAnalysisService:
         def load_option_chain():
             if not include_options or not has_schwab:
                 return None
-            today = date.today()
-            end = today + timedelta(days=INTELLIGENCE_OPTION_LOOKAHEAD_DAYS)
+            held_expirations = [
+                expiration
+                for position in positions
+                if position.instrument.assetType == "OPTION"
+                and (
+                    (position.instrument.underlyingSymbol or position.instrument.symbol or "")
+                    .strip()
+                    .upper()
+                    .split()[0]
+                    == symbol_upper
+                )
+                and (expiration := position_expiration_date(position)) is not None
+            ]
+            from_date, to_date = option_chain_date_window(
+                held_expirations=held_expirations or None
+            )
             try:
                 return self.market_service.get_option_chains(
                     access_token=access_token,
                     symbol=symbol_upper,
                     strike_count=INTELLIGENCE_OPTION_STRIKE_COUNT,
-                    from_date=today.isoformat(),
-                    to_date=end.isoformat(),
-                )
-            except Exception:
-                logger.warning(
-                    "Narrow option chain fetch failed for %s; retrying without dates",
-                    symbol_upper,
-                    exc_info=True,
-                )
-            try:
-                return self.market_service.get_option_chains(
-                    access_token=access_token,
-                    symbol=symbol_upper,
-                    strike_count=INTELLIGENCE_OPTION_STRIKE_COUNT,
+                    from_date=from_date,
+                    to_date=to_date,
                 )
             except Exception:
                 logger.exception(
@@ -626,15 +631,32 @@ class PortfolioAnalysisService:
                 )
                 return None
 
+        def load_quote_snapshot():
+            if not has_schwab:
+                return None
+            try:
+                snapshots = self.market_service.get_enriched_quote_snapshot(
+                    access_token=access_token,
+                    symbols=[symbol_upper],
+                )
+                return snapshots.get(symbol_upper)
+            except Exception:
+                logger.exception(
+                    "Failed to load quote snapshot for symbol intelligence: %s",
+                    symbol_upper,
+                )
+                return None
+
         worker_count = 1
         if has_schwab:
-            worker_count += 1
+            worker_count += 2
         if include_options and has_schwab:
             worker_count += 1
 
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             ctx_future = executor.submit(load_context)
             orders_future = executor.submit(load_orders) if has_schwab else None
+            quote_future = executor.submit(load_quote_snapshot) if has_schwab else None
             chain_future = (
                 executor.submit(load_option_chain)
                 if include_options and has_schwab
@@ -643,7 +665,14 @@ class PortfolioAnalysisService:
 
             ctx = ctx_future.result()
             orders = orders_future.result() if orders_future is not None else None
+            quote_snapshot = quote_future.result() if quote_future is not None else None
             option_chain = chain_future.result() if chain_future is not None else None
+
+        underlying_iv_percent = (
+            quote_snapshot.implied_vol
+            if quote_snapshot is not None and quote_snapshot.implied_vol is not None
+            else None
+        )
 
         if ctx is None:
             return SymbolIntelligence(symbol=symbol_upper, partial=True)
@@ -657,6 +686,7 @@ class PortfolioAnalysisService:
                 orders=orders,
                 option_chain=option_chain,
                 include_peers=True,
+                underlying_iv_percent=underlying_iv_percent,
             )
         except Exception:
             logger.exception(

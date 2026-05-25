@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from app.broker.option_greeks import sanitize_delta
 from app.broker.option_chain_table import (
     fair_option_price,
     quoted_ask,
@@ -116,7 +117,7 @@ class OptionsScoringService:
             except ValueError:
                 continue
 
-            delta = contract.delta
+            delta = sanitize_delta(contract.delta)
             if delta is None:
                 continue
 

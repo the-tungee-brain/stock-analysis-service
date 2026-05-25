@@ -1,5 +1,9 @@
+from datetime import date, timedelta
+
 from app.broker.option_utils import (
     cash_secured_put_reserved_cash,
+    DEFAULT_OPTION_CHAIN_LOOKAHEAD_DAYS,
+    option_chain_date_window,
     parse_strike_from_option_symbol,
     select_strikes_around_spot,
     summarize_csp_cash_reserves,
@@ -8,6 +12,28 @@ from app.broker.option_utils import (
 from app.core.prompts import _build_account_summary, _enrich_positions_table
 from app.models.schwab_models import Instrument, Position
 from tests.test_position_prompt_metrics import _make_account, _make_position
+
+
+def test_option_chain_date_window_defaults_to_lookahead():
+    start = date(2026, 5, 24)
+    from_date, to_date = option_chain_date_window(from_day=start)
+
+    assert from_date == "2026-05-24"
+    assert to_date == (
+        start + timedelta(days=DEFAULT_OPTION_CHAIN_LOOKAHEAD_DAYS)
+    ).isoformat()
+
+
+def test_option_chain_date_window_extends_to_held_expiration():
+    start = date(2026, 5, 24)
+    held = date(2026, 8, 15)
+    from_date, to_date = option_chain_date_window(
+        held_expirations=[held],
+        from_day=start,
+    )
+
+    assert from_date == "2026-05-24"
+    assert to_date == held.isoformat()
 
 
 def _make_option_position(

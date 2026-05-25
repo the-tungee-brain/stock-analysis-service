@@ -43,6 +43,9 @@ def test_build_symbol_intelligence_delegates_to_intelligence_service():
 
     market_service = MagicMock()
     market_service.get_option_chains.return_value = MagicMock()
+    quote_snapshot = MagicMock()
+    quote_snapshot.implied_vol = 0.285
+    market_service.get_enriched_quote_snapshot.return_value = {"AAPL": quote_snapshot}
 
     transaction_service = MagicMock()
     transaction_service.get_filled_orders_by_symbol.return_value = []
@@ -70,7 +73,15 @@ def test_build_symbol_intelligence_delegates_to_intelligence_service():
 
     assert result == expected
     portfolio_intelligence_service.build_symbol_intelligence.assert_called_once()
+    _, delegate_kwargs = (
+        portfolio_intelligence_service.build_symbol_intelligence.call_args
+    )
+    assert delegate_kwargs["underlying_iv_percent"] == 0.285
     market_service.get_option_chains.assert_called_once()
+    market_service.get_enriched_quote_snapshot.assert_called_once_with(
+        access_token="token",
+        symbols=["AAPL"],
+    )
     _, kwargs = market_service.get_option_chains.call_args
     assert kwargs["strike_count"] == INTELLIGENCE_OPTION_STRIKE_COUNT
     today = date.today()

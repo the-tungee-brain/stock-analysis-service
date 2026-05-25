@@ -348,7 +348,8 @@ DATA_INTEGRITY_RULES = dedent("""
     - Do NOT invent prices, strikes, dates, news, or volatility figures that were not supplied.
     - When exact numbers are unavailable, use ranges or qualitative language and note the gap.
     - For probability or target-move questions on options, use held-contract delta/IV/mark and the
-      underlying price from the provided data to estimate scenarios — do not ask the user to supply them.
+      precomputed profit scenarios when provided. If broker greeks are missing (-999 placeholders),
+      use estimated delta/IV values labeled in the feed and give rough move/probability ranges.
     """).strip()
 
 SYSTEM_MESSAGE = dedent(f"""

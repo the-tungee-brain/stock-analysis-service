@@ -1,8 +1,6 @@
-from datetime import date, timedelta
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.broker.option_utils import select_strikes_around_spot
+from app.broker.option_utils import option_chain_date_window, select_strikes_around_spot
 from app.auth.dependencies import get_current_user_id
 from app.dependencies.service_dependencies import (
     get_market_service,
@@ -15,10 +13,7 @@ from app.services.intelligence.portfolio_intelligence_service import (
     PortfolioIntelligenceService,
 )
 from app.services.market_service import MarketService
-from app.services.portfolio_analysis_service import (
-    INTELLIGENCE_OPTION_LOOKAHEAD_DAYS,
-    INTELLIGENCE_OPTION_STRIKE_COUNT,
-)
+from app.services.portfolio_analysis_service import INTELLIGENCE_OPTION_STRIKE_COUNT
 from app.services.portfolio_service import PortfolioService
 from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.schwab_auth_service import SchwabAuthService, SchwabReauthRequired
@@ -93,13 +88,12 @@ def get_option_chain_debug(
     schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
 ):
     symbol_upper = symbol.strip().upper()
-    today = date.today()
-    end = today + timedelta(days=INTELLIGENCE_OPTION_LOOKAHEAD_DAYS)
+    from_date, to_date = option_chain_date_window()
     fetch_params = {
         "symbol": symbol_upper,
         "strikeCount": strike_count,
-        "fromDate": today.isoformat(),
-        "toDate": end.isoformat(),
+        "fromDate": from_date,
+        "toDate": to_date,
         "contractType": "ALL",
         "includeUnderlyingQuote": True,
     }
@@ -126,38 +120,25 @@ def get_option_chain_debug(
 
     chain = None
     parse_error = None
-    used_fallback_fetch = False
 
     try:
         chain = market_service.get_option_chains(
             access_token=schwab_token.access_token,
             symbol=symbol_upper,
             strike_count=strike_count,
-            from_date=today.isoformat(),
-            to_date=end.isoformat(),
+            from_date=from_date,
+            to_date=to_date,
         )
     except Exception as exc:
-        parse_error = str(exc)
-        try:
-            chain = market_service.get_option_chains(
-                access_token=schwab_token.access_token,
-                symbol=symbol_upper,
-                strike_count=strike_count,
-            )
-            parse_error = None
-            used_fallback_fetch = True
-            fetch_params.pop("fromDate", None)
-            fetch_params.pop("toDate", None)
-        except Exception as fallback_exc:
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "message": "Failed to fetch or parse option chain",
-                    "symbol": symbol_upper,
-                    "fetchParams": fetch_params,
-                    "parseError": str(fallback_exc),
-                },
-            ) from fallback_exc
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "Failed to fetch or parse option chain",
+                "symbol": symbol_upper,
+                "fetchParams": fetch_params,
+                "parseError": str(exc),
+            },
+        ) from exc
 
     short_calls, short_puts = PortfolioIntelligenceService._short_option_strikes(
         positions=positions,
@@ -176,7 +157,6 @@ def get_option_chain_debug(
     payload: dict[str, object] = {
         "symbol": symbol_upper,
         "fetchParams": fetch_params,
-        "usedFallbackFetch": used_fallback_fetch,
         "parseError": parse_error,
         "summary": _summarize_chain(chain, strike_count=strike_count),
         "scorecard": (
