@@ -4,7 +4,7 @@ from uuid import UUID
 from app.builders.chat_sessions_builder import ChatSessionsBuilder
 from app.builders.chat_messages_builder import ChatMessagesBuilder
 from app.models.chat_sessions_models import ChatSession, ChatMessage
-from app.core.prompts import SYSTEM_NATURAL_MESSAGE, AnalysisAction
+from app.core.prompts import SYSTEM_NATURAL_MESSAGE, AnalysisAction, should_use_natural_response
 from app.services.prompt_enrichment_service import RESEARCH_CHAT_SYSTEM_MESSAGE
 from openai.types.shared import ResponsesModel
 
@@ -37,7 +37,11 @@ class ChatService:
         is_first_chat: bool,
         action: AnalysisAction,
         recent_messages: List[Dict[str, Any]],
+        user_prompt: Optional[str] = None,
     ) -> bool:
+        if not should_use_natural_response(user_prompt, action=action):
+            return True
+
         has_assistant_history = any(
             message["role"] == "assistant" for message in recent_messages
         )

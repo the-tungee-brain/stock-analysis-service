@@ -110,7 +110,11 @@ def test_should_use_natural_response_for_preset_actions(
 
 
 def test_structured_analyze_uses_system_message_prompt_path():
-    from app.core.prompts import build_portfolio_prompt, PortfolioContext
+    from app.core.prompts import (
+        PortfolioContext,
+        _build_action_prompt,
+        build_portfolio_prompt,
+    )
 
     ctx = PortfolioContext(
         account=_make_account(),
@@ -119,4 +123,12 @@ def test_structured_analyze_uses_system_message_prompt_path():
         user_prompt=None,
     )
     prompt = build_portfolio_prompt(ctx)
-    assert "Analyze the overall portfolio" in prompt
+    assert "### Position summary" in prompt
+    assert "Do not use a different outline" in prompt
+
+    symbol_task = _build_action_prompt(
+        AnalysisAction.FREE_FORM,
+        "NVDA",
+        user_prompt=None,
+    )
+    assert "### Position summary" in symbol_task

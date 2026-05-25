@@ -21,6 +21,7 @@ from app.core.prompts import (
     SYSTEM_MESSAGE,
     SYSTEM_NATURAL_MESSAGE,
     should_use_natural_response,
+    uses_structured_system_message,
 )
 from app.auth.dependencies import get_current_user_id
 from app.core.llm_config import settings
@@ -74,10 +75,15 @@ async def analyze_positions_by_symbol(
         model=request.model,
     )
     recent_messages = chat_service.get_chat_messages_by_session(session_id=session_id)
+    structured = uses_structured_system_message(
+        request.prompt,
+        action=request.action,
+    )
     include_context = chat_service.should_include_portfolio_context(
         is_first_chat=is_first_chat,
         action=request.action,
         recent_messages=recent_messages,
+        user_prompt=request.prompt,
     )
 
     ctx = await portfolio_analysis_service.build_analysis_context(
@@ -111,10 +117,11 @@ async def analyze_positions_by_symbol(
             if should_use_natural_response(request.prompt, action=request.action)
             else SYSTEM_MESSAGE
         )
+        llm_history = [] if structured else recent_messages
         async for chunk in llm_service.analyze_option_position(
             model=request.model or settings.OPENAI_MODEL,
             system_prompt=system_prompt,
-            user_prompt=[*recent_messages, user_prompt],
+            user_prompt=[*llm_history, user_prompt],
         ):
             assistant_content_parts.append(chunk)
             yield chunk

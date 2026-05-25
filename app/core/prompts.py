@@ -166,6 +166,48 @@ def should_use_natural_response(
     return bool(user_prompt and user_prompt.strip())
 
 
+def uses_structured_system_message(
+    user_prompt: Optional[str],
+    action: AnalysisAction = AnalysisAction.FREE_FORM,
+) -> bool:
+    return not should_use_natural_response(user_prompt, action=action)
+
+
+_STRUCTURED_OUTPUT_HEADINGS = dedent("""
+    Output format (CRITICAL):
+    - Use these exact Markdown headings, in this order:
+      ### Position summary
+      ### Recommendation
+      ### Execution plan
+      ### Why this makes sense
+      ### Thesis and invalidation
+      ### Risk/reward
+      ### Confidence
+    - Do not use a different outline, numbered list, or conversational format.
+    """).strip()
+
+
+def _structured_symbol_analysis_task(symbol: str) -> str:
+    return dedent(f"""
+        Analyze {symbol} and recommend exactly ONE action using the decision framework in your
+        system instructions (Buy more, Trim, Close, Hold, Sell covered call, Sell cash-secured put,
+        or Roll the option).
+
+        {_STRUCTURED_OUTPUT_HEADINGS}
+        """).strip()
+
+
+def _structured_portfolio_analysis_task() -> str:
+    return dedent(f"""
+        Analyze the overall portfolio using the decision framework in your system instructions.
+
+        {_STRUCTURED_OUTPUT_HEADINGS}
+        - In ### Position summary, summarize portfolio-level concentration, cash and options reserves,
+          and the most urgent exposures across holdings.
+        - In ### Recommendation, give ONE primary portfolio action with specific amounts and timing.
+        """).strip()
+
+
 _FOLLOW_UP_AFFIRMATION_RE = re.compile(
     r"^(?:"
     r"yes(?: please)?|yeah|yep|yup|sure|ok(?:ay)?|"
@@ -607,20 +649,7 @@ def _build_action_prompt(
                 - If Hold is correct under the decision rules, say so confidently.
                 """).strip()
 
-        return dedent(f"""
-            Analyze {symbol} and recommend exactly ONE action:
-            Buy more, Trim, Close, Hold, Sell covered call, Sell cash-secured put, or Roll the option.
-
-            Follow the decision framework: estimate position size and P&L %, assess thesis status,
-            then apply the size × P&L matrix before choosing an action.
-
-            Rules:
-            - Use retail language in your response (e.g., "sell a covered call" — never "short call").
-            - Sell covered call is eligible only with at least 100 shares per contract,
-              or a qualifying call you own for a poor man's covered call.
-            - State thesis status (intact / weakened / broken) and the invalidation trigger.
-            - Include max risk / downside to watch and a next review trigger (price, date, or event).
-            """).strip()
+        return _structured_symbol_analysis_task(symbol=symbol)
 
     if action is AnalysisAction.DAILY_SUMMARY:
         return dedent(f"""
@@ -892,18 +921,7 @@ def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = Tru
               each with expected impact and effort (Low / Medium / High).
             """).strip()
     else:
-        task_block = dedent("""
-            Analyze the overall portfolio and provide:
-
-            1. **Diversification & concentration** — flag any position above 15% or 30% of portfolio.
-            2. **Overall risk level** — conservative, moderate, or aggressive in plain English.
-            3. **Main risk drivers** — names, sectors, or factors contributing most to portfolio risk.
-            4. **Recommended adjustments** — 3–6 specific changes (trim/add with % or dollar amounts)
-               following the decision matrix: reduce anything above 30%, trim oversized winners, address
-               broken-thesis positions.
-            5. **Top 3 priorities** — ranked by urgency with expected impact and effort (Low / Medium / High).
-            6. **Summary** — main strengths, weaknesses, and the single most important change first.
-            """).strip()
+        task_block = _structured_portfolio_analysis_task()
 
     if not include_context:
         return dedent(f"""

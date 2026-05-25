@@ -119,6 +119,7 @@ def test_should_omit_portfolio_context_on_valid_followup():
             {"role": "user", "content": "Should I trim?"},
             {"role": "assistant", "content": "I'd trim 30%. Want redeploy ideas?"},
         ],
+        user_prompt="let's do that",
     )
 
 
