@@ -164,6 +164,7 @@ class PortfolioNewsItem(BaseModel):
     headline: str
     sentiment: str | None = None
     weight_pct: float | None = Field(default=None, serialization_alias="weightPct")
+    url: str | None = None
 
 
 class MarketNewsItem(BaseModel):

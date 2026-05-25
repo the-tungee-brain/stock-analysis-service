@@ -1035,6 +1035,7 @@ class PromptEnrichmentService:
                     f"- {item.symbol} ({item.weight_pct:.1f}% of portfolio): "
                     f"{item.headline}"
                     + (f" [{item.sentiment}]" if item.sentiment else "")
+                    + (f" {item.url}" if item.url else "")
                     for item in digest.top_news
                     if item.weight_pct is not None
                 ]

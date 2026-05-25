@@ -80,6 +80,22 @@ def _build_option_chain_preview(
     )
 
 
+def _top_news_article_url(
+    ctx: ResearchContext,
+    enriched_news_service: EnrichedNewsService,
+) -> str | None:
+    view = enriched_news_service.get_cached_view(symbol=ctx.symbol)
+    if view is not None:
+        for item in view.items:
+            if item.url:
+                return str(item.url)
+
+    for headline in ctx.news:
+        if headline.url:
+            return headline.url
+    return None
+
+
 class PortfolioIntelligenceService:
     def __init__(
         self,
@@ -403,6 +419,9 @@ class PortfolioIntelligenceService:
                             headline=ctx.enriched_news.dominant_driver[:160],
                             sentiment=ctx.enriched_news.overall_sentiment,
                             weight_pct=weight_pct,
+                            url=_top_news_article_url(
+                                ctx, self.enriched_news_service
+                            ),
                         ),
                     )
                 )
@@ -415,6 +434,9 @@ class PortfolioIntelligenceService:
                             symbol=ctx.symbol,
                             headline=headline[:160],
                             weight_pct=weight_pct,
+                            url=_top_news_article_url(
+                                ctx, self.enriched_news_service
+                            ),
                         ),
                     )
                 )
