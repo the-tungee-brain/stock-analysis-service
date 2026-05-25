@@ -159,7 +159,11 @@ def test_portfolio_analysis_v1_prompt_uses_json_task_not_markdown_headings():
         STRUCTURED_ANALYSIS_V1,
         wants_structured_analysis_v1,
     )
-    from app.core.prompts import PortfolioContext, build_portfolio_prompt
+    from app.core.prompts import (
+        PortfolioContext,
+        build_portfolio_prompt,
+        system_message_for_structured_v1_analysis,
+    )
 
     ctx = PortfolioContext(
         account=_make_account(),
@@ -169,9 +173,12 @@ def test_portfolio_analysis_v1_prompt_uses_json_task_not_markdown_headings():
         diversification_block="## Portfolio concentration metrics\n- Top 1 / 3 / 5 weights: 100.0%",
     )
     prompt = build_portfolio_prompt(ctx, json_response=True)
+    system_prompt = system_message_for_structured_v1_analysis(symbol=None)
     assert "Populate the JSON schema" in prompt
     assert "recommendedAction" in prompt
     assert "### Portfolio snapshot" not in prompt
+    assert "### Portfolio snapshot" not in system_prompt
+    assert "plain text only" in system_prompt
     assert "DIVERSIFICATION SUMMARY" in prompt
 
     assert wants_structured_analysis_v1(

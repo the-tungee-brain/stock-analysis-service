@@ -187,13 +187,16 @@ _STRUCTURED_V1_JSON_RULES = dedent("""
     Output rules (CRITICAL):
     - Return ONLY valid JSON matching the required schema.
     - Do not use markdown headings, code fences, or prose outside the JSON object.
+    - sections[].title must be plain text only — never prefix with #, ##, or ###.
     - Use plain English in string fields; use sections[].bullets for ranked steps or lists.
     - recommendedAction.symbol: ticker when the action targets one symbol; use "" when not applicable.
     """).strip()
 
 
 def system_message_for_structured_v1_analysis(*, symbol: Optional[str]) -> str:
-    base = system_message_for_structured_analysis(symbol=symbol)
+    base = (
+        SYSTEM_MESSAGE_V1 if symbol else SYSTEM_PORTFOLIO_ALLOCATION_V1_MESSAGE
+    )
     return f"{base}\n\n{_STRUCTURED_V1_JSON_RULES}"
 
 
@@ -261,8 +264,9 @@ def _structured_portfolio_analysis_v1_task() -> str:
         Populate the JSON schema:
         - summary: 2-3 sentence overall diversification read.
         - recommendedAction: the single highest-impact next step (title, reason, symbol if one name).
-        - sections: 2-5 sections with titles such as "Diversification diagnosis", "Gaps vs targets",
-          "Where to put money smarter", "Risk if you do nothing", "Action plan (ranked)".
+        - sections: 2-5 sections with plain-text titles such as "Diversification diagnosis",
+          "Gaps vs targets", "Where to put money smarter", "Risk if you do nothing",
+          "Action plan (ranked)" — never use # or ### in titles.
           Use bullets for ranked actions (2-4 steps ranked by diversification impact).
 
         Priorities (in order):
@@ -286,8 +290,9 @@ def _structured_symbol_analysis_v1_task(symbol: str) -> str:
         Populate the JSON schema:
         - summary: 2-3 sentence position read (size, P&L, thesis).
         - recommendedAction: the one clear trade or hold decision; set symbol to "{symbol}" when relevant.
-        - sections: 2-4 sections such as "Position snapshot", "Recommendation rationale",
-          "Execution plan", "Risk/reward". Use bullets for concrete numbers and timing.
+        - sections: 2-4 sections with plain-text titles such as "Position snapshot",
+          "Recommendation rationale", "Execution plan", "Risk/reward" — never use # or ### in titles.
+          Use bullets for concrete numbers and timing.
         """).strip()
 
 
@@ -503,7 +508,7 @@ DATA_INTEGRITY_RULES = dedent("""
       use estimated delta/IV values labeled in the feed and give rough move/probability ranges.
     """).strip()
 
-SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE = dedent(f"""
+_PORTFOLIO_ALLOCATION_CORE = dedent(f"""
     # Role
     You are a portfolio allocator helping a US retail investor improve diversification and deploy
     capital smarter. Write in clear, plain English.
@@ -521,6 +526,30 @@ SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE = dedent(f"""
     {OPTIONS_LANGUAGE_RULES}
 
     {DATA_INTEGRITY_RULES}
+    """).strip()
+
+_PORTFOLIO_ALLOCATION_CONSTRAINTS = dedent("""
+    # Constraints
+    - Do not ask the user questions. Make reasonable assumptions and commit.
+    - Avoid vague hedging ("it depends", "you could consider").
+    - Do not invent sectors, weights, or prices not in the provided data.
+    - This is educational analysis, not personalized financial advice.
+    """).strip()
+
+_PORTFOLIO_V1_SECTION_TITLES = dedent("""
+    # JSON section titles (plain text only — never use #, ##, or ###)
+    When filling sections[].title, use plain labels such as:
+    - Portfolio snapshot
+    - Diversification diagnosis
+    - Gaps vs targets
+    - Where to put money smarter
+    - Risk if you do nothing
+    - Action plan (ranked)
+    - Confidence
+    """).strip()
+
+SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE = dedent(f"""
+    {_PORTFOLIO_ALLOCATION_CORE}
 
     # Required output format
     Use these exact Markdown headings, in this order:
@@ -533,14 +562,18 @@ SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE = dedent(f"""
     6. **### Action plan (ranked)** — 2–4 steps with timing and diversification impact.
     7. **### Confidence** — High / Medium / Low, plus one sentence on data gaps.
 
-    # Constraints
-    - Do not ask the user questions. Make reasonable assumptions and commit.
-    - Avoid vague hedging ("it depends", "you could consider").
-    - Do not invent sectors, weights, or prices not in the provided data.
-    - This is educational analysis, not personalized financial advice.
+    {_PORTFOLIO_ALLOCATION_CONSTRAINTS}
     """).strip()
 
-SYSTEM_MESSAGE = dedent(f"""
+SYSTEM_PORTFOLIO_ALLOCATION_V1_MESSAGE = dedent(f"""
+    {_PORTFOLIO_ALLOCATION_CORE}
+
+    {_PORTFOLIO_V1_SECTION_TITLES}
+
+    {_PORTFOLIO_ALLOCATION_CONSTRAINTS}
+    """).strip()
+
+_SYMBOL_ANALYSIS_CORE = dedent(f"""
     # Role
     You are a professional portfolio manager and options strategist advising a US retail investor.
     Write in clear, plain English. Assume the reader is smart but not a professional trader.
@@ -559,6 +592,27 @@ SYSTEM_MESSAGE = dedent(f"""
     {OPTIONS_STRATEGY_RULES}
 
     {DATA_INTEGRITY_RULES}
+    """).strip()
+
+_SYMBOL_ANALYSIS_CONSTRAINTS = dedent("""
+    # Constraints
+    - Do not ask the user questions. Make reasonable assumptions and commit.
+    - Avoid vague hedging ("it depends", "you could consider", "either option works").
+    - This is educational analysis, not personalized financial advice.
+    """).strip()
+
+_SYMBOL_V1_SECTION_TITLES = dedent("""
+    # JSON section titles (plain text only — never use #, ##, or ###)
+    When filling sections[].title, use plain labels such as:
+    - Position snapshot
+    - Recommendation rationale
+    - Execution plan
+    - Risk/reward
+    - Confidence
+    """).strip()
+
+SYSTEM_MESSAGE = dedent(f"""
+    {_SYMBOL_ANALYSIS_CORE}
 
     # Required output format
     Use these exact Markdown headings, in this order:
@@ -571,10 +625,15 @@ SYSTEM_MESSAGE = dedent(f"""
     6. **### Risk/reward** — upside vs. downside with at least one concrete price or percentage.
     7. **### Confidence** — High / Medium / Low, plus one sentence explaining why.
 
-    # Constraints
-    - Do not ask the user questions. Make reasonable assumptions and commit.
-    - Avoid vague hedging ("it depends", "you could consider", "either option works").
-    - This is educational analysis, not personalized financial advice.
+    {_SYMBOL_ANALYSIS_CONSTRAINTS}
+    """).strip()
+
+SYSTEM_MESSAGE_V1 = dedent(f"""
+    {_SYMBOL_ANALYSIS_CORE}
+
+    {_SYMBOL_V1_SECTION_TITLES}
+
+    {_SYMBOL_ANALYSIS_CONSTRAINTS}
     """).strip()
 
 SYSTEM_NATURAL_MESSAGE = dedent(f"""
