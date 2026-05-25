@@ -19,6 +19,28 @@ class OpenAIAdapter(BaseLLM):
         self.client = client
 
     @staticmethod
+    def _extract_blocking_response_text(response: Any) -> str:
+        error = getattr(response, "error", None)
+        if error is not None:
+            message = getattr(error, "message", None) or str(error)
+            raise RuntimeError(f"OpenAI response failed: {message}")
+
+        text = getattr(response, "output_text", "") or ""
+        if text:
+            return text
+
+        status = getattr(response, "status", None)
+        output_items = getattr(response, "output", None) or []
+        output_types = [getattr(item, "type", "unknown") for item in output_items]
+        incomplete = getattr(response, "incomplete_details", None)
+        incomplete_reason = getattr(incomplete, "reason", None) if incomplete else None
+        raise RuntimeError(
+            "OpenAI response contained no output text "
+            f"(status={status!r}, output_types={output_types}, "
+            f"incomplete_reason={incomplete_reason!r})."
+        )
+
+    @staticmethod
     def _extract_text_delta(event: Any) -> str:
         event_type = getattr(event, "type", "")
         if event_type not in {
@@ -153,7 +175,7 @@ class OpenAIAdapter(BaseLLM):
             }
 
         response = self.client.responses.create(**kwargs)
-        return response.output[0].content[0].text
+        return self._extract_blocking_response_text(response)
 
     async def generate(
         self,
