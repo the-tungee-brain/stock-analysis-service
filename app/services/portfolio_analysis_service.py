@@ -88,7 +88,10 @@ class PortfolioAnalysisService:
 
     def _get_investment_profile(self, user_id: str) -> UserInvestmentProfile | None:
         try:
-            return self.profile_adapter.get_by_user_id(user_id)
+            profile = self.profile_adapter.get_by_user_id(user_id)
+            if not isinstance(profile, UserInvestmentProfile):
+                return None
+            return profile
         except Exception:
             logger.exception("Failed to load investment profile for %s", user_id)
             return None

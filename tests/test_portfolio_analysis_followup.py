@@ -76,7 +76,7 @@ def test_build_analysis_context_loads_market_data_when_requested():
         company_research_service=company_research_service,
         transaction_service=MagicMock(),
         portfolio_intelligence_service=MagicMock(),
-        profile_adapter=MagicMock(),
+        profile_adapter=MagicMock(get_by_user_id=MagicMock(return_value=None)),
     )
     service._build_research_bundle = MagicMock(return_value=("research", "intel", False))
     service._build_recent_transactions_block = MagicMock(return_value=None)
