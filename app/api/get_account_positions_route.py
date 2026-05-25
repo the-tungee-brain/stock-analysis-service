@@ -135,4 +135,5 @@ def get_account_positions(
         "recentActivity": recent_activity,
         "proactiveAlerts": proactive_alerts_payload,
         "portfolioBrief": portfolio_brief_payload,
+        "portfolioMetrics": account_map["portfolioMetrics"],
     }

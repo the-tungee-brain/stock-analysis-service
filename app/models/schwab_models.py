@@ -40,6 +40,22 @@ class Position(BaseModel):
     shortOpenProfitLoss: Optional[float] = None
     previousSessionShortQuantity: Optional[float] = None
     currentDayCost: float
+    costBasis: Optional[float] = Field(
+        default=None,
+        description="Computed cost basis in dollars",
+    )
+    openProfitLoss: Optional[float] = Field(
+        default=None,
+        description="Computed unrealized open P/L in dollars",
+    )
+    openProfitLossPct: Optional[float] = Field(
+        default=None,
+        description="Computed unrealized open P/L as % of cost basis",
+    )
+    portfolioWeightPct: Optional[float] = Field(
+        default=None,
+        description="Computed portfolio weight percentage",
+    )
 
 
 class InitialBalances(BaseModel):
@@ -141,6 +157,12 @@ class AggregatedBalance(BaseModel):
 class SchwabAccounts(BaseModel):
     securitiesAccount: SecuritiesAccount
     aggregatedBalance: AggregatedBalance
+
+
+class PortfolioMetrics(BaseModel):
+    totalOpenProfitLoss: Optional[float] = None
+    totalCostBasis: Optional[float] = None
+    openProfitLossPct: Optional[float] = None
 
 
 class SchwabAccessTokenResponse(BaseModel):

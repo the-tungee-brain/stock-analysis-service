@@ -6,7 +6,12 @@ from datetime import date, datetime, timezone
 
 from app.adapters.portfolio.alert_history_adapter import AlertHistoryAdapter
 from app.adapters.portfolio.portfolio_snapshot_adapter import PortfolioSnapshotAdapter
-from app.core.prompts import AnalysisAction, _position_pnl, _position_pnl_pct
+from app.broker.position_metrics import (
+    annotate_position_metrics,
+    portfolio_liquidation_value,
+    position_open_profit_loss,
+    position_open_profit_loss_pct,
+)
 from app.models.intelligence_models import PortfolioIntelligence, ProactiveAlert
 from app.models.portfolio_memory_models import (
     AttentionItem,
@@ -240,9 +245,17 @@ class PortfolioMemoryService:
                 symbol = instrument.symbol
 
             quantity = position.longQuantity - position.shortQuantity
-            pnl = _position_pnl(position)
-            pnl_pct = _position_pnl_pct(position)
-            weight_pct = (abs(position.marketValue) / liquidation_value) * 100.0
+            pnl = position.openProfitLoss
+            pnl_pct = position.openProfitLossPct
+            weight_pct = position.portfolioWeightPct
+            if pnl is None or pnl_pct is None or weight_pct is None:
+                annotated = annotate_position_metrics(
+                    position,
+                    portfolio_value=liquidation_value,
+                )
+                pnl = annotated.openProfitLoss
+                pnl_pct = annotated.openProfitLossPct
+                weight_pct = annotated.portfolioWeightPct
 
             compact.append(
                 SnapshotPosition(
@@ -250,7 +263,7 @@ class PortfolioMemoryService:
                     asset_type=instrument.assetType,
                     quantity=quantity,
                     market_value=position.marketValue,
-                    weight_pct=round(weight_pct, 2),
+                    weight_pct=round(weight_pct, 2) if weight_pct is not None else 0.0,
                     pnl=round(pnl, 2),
                     pnl_pct=round(pnl_pct, 2) if pnl_pct is not None else None,
                     option_strategy=position.optionStrategy,

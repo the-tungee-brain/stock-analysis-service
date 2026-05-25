@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
+from app.broker.position_metrics import position_open_profit_loss_pct
 from app.core.prompts import AnalysisAction
 from app.models.company_research_models import ResearchContext, SecRatioTrendPoint
 from app.models.intelligence_models import IntelligenceSignal
@@ -176,57 +177,40 @@ class SignalEngine:
         weight = (total_mv / liquidation) * 100.0
 
         for position in scoped:
-            cost_basis = None
-            if position.longQuantity > 0 and position.longOpenProfitLoss is not None:
-                derived = position.marketValue - position.longOpenProfitLoss
-                if derived > 0:
-                    cost_basis = derived
-            elif (
-                position.shortQuantity > 0 and position.shortOpenProfitLoss is not None
-            ):
-                derived = abs(position.marketValue) + position.shortOpenProfitLoss
-                if derived > 0:
-                    cost_basis = derived
+            if position.longQuantity <= 0:
+                continue
 
-            if cost_basis is None:
-                avg = position.averageLongPrice or position.taxLotAverageLongPrice
-                qty = position.longQuantity
-                if position.instrument.assetType == "OPTION":
-                    qty = qty * 100.0
-                if position.longQuantity > 0 and avg and avg > 0 and qty:
-                    cost_basis = avg * qty
+            pnl_pct = position.openProfitLossPct
+            if pnl_pct is None:
+                pnl_pct = position_open_profit_loss_pct(position)
 
-            if cost_basis and cost_basis > 0 and position.longQuantity > 0:
-                pnl = position.longOpenProfitLoss
-                if pnl is not None:
-                    pnl_pct = (pnl / cost_basis) * 100.0
-                else:
-                    pnl_pct = (position.marketValue / cost_basis - 1.0) * 100.0
+            if pnl_pct is None:
+                continue
 
-                if pnl_pct <= -30:
-                    signals.append(
-                        IntelligenceSignal(
-                            kind="drawdown",
-                            severity="critical",
-                            message=(
-                                f"Unrealized loss ~{pnl_pct:.0f}% on {symbol} — "
-                                "urgent risk review recommended."
-                            ),
-                            symbol=symbol,
-                        )
+            if pnl_pct <= -30:
+                signals.append(
+                    IntelligenceSignal(
+                        kind="drawdown",
+                        severity="critical",
+                        message=(
+                            f"Unrealized loss ~{pnl_pct:.0f}% on {symbol} — "
+                            "urgent risk review recommended."
+                        ),
+                        symbol=symbol,
                     )
-                elif pnl_pct <= -20:
-                    signals.append(
-                        IntelligenceSignal(
-                            kind="drawdown",
-                            severity="warning",
-                            message=(
-                                f"Unrealized loss ~{pnl_pct:.0f}% on {symbol} — "
-                                "thesis and sizing review recommended."
-                            ),
-                            symbol=symbol,
-                        )
+                )
+            elif pnl_pct <= -20:
+                signals.append(
+                    IntelligenceSignal(
+                        kind="drawdown",
+                        severity="warning",
+                        message=(
+                            f"Unrealized loss ~{pnl_pct:.0f}% on {symbol} — "
+                            "thesis and sizing review recommended."
+                        ),
+                        symbol=symbol,
                     )
+                )
 
         if weight >= 30:
             signals.append(

@@ -14,6 +14,13 @@ from app.broker.option_utils import (
     days_to_expiration,
     total_csp_reserved_cash,
 )
+from app.broker.position_metrics import (
+    portfolio_liquidation_value as _portfolio_liquidation_value,
+    position_cost_basis as _position_cost_basis,
+    position_open_profit_loss as _position_pnl,
+    position_open_profit_loss_pct as _position_pnl_pct,
+    position_portfolio_weight_pct as _position_weight_pct,
+)
 
 
 class AnalysisAction(str, Enum):
@@ -398,97 +405,6 @@ def _format_pct(value: float | None) -> str:
     return f"{value:+.1f}%"
 
 
-def _portfolio_liquidation_value(
-    account: SchwabAccounts | None,
-    positions: List[Position],
-) -> float | None:
-    if account is not None:
-        agg = account.aggregatedBalance
-        cur = account.securitiesAccount.currentBalances
-        for candidate in (
-            agg.currentLiquidationValue,
-            agg.liquidationValue,
-            cur.liquidationValue,
-            account.securitiesAccount.initialBalances.liquidationValue,
-            account.securitiesAccount.initialBalances.accountValue,
-        ):
-            if candidate and candidate > 0:
-                return candidate
-
-    total = sum(abs(p.marketValue) for p in positions)
-    return total if total > 0 else None
-
-
-OPTION_CONTRACT_MULTIPLIER = 100.0
-
-
-def _is_option_position(position: Position) -> bool:
-    return position.instrument.assetType == "OPTION"
-
-
-def _position_pnl(position: Position) -> float:
-    if position.longQuantity > 0:
-        return position.longOpenProfitLoss or 0.0
-    if position.shortQuantity > 0:
-        return position.shortOpenProfitLoss or 0.0
-    return 0.0
-
-
-def _position_cost_basis(position: Position) -> float | None:
-    """Cost basis in dollars. Options use a 100-share contract multiplier."""
-    if position.longQuantity > 0 and position.longOpenProfitLoss is not None:
-        derived = position.marketValue - position.longOpenProfitLoss
-        if derived > 0:
-            return derived
-
-    if position.shortQuantity > 0 and position.shortOpenProfitLoss is not None:
-        derived = abs(position.marketValue) + position.shortOpenProfitLoss
-        if derived > 0:
-            return derived
-
-    multiplier = (
-        OPTION_CONTRACT_MULTIPLIER if _is_option_position(position) else 1.0
-    )
-
-    if position.longQuantity > 0:
-        avg = (
-            position.averageLongPrice
-            or position.taxLotAverageLongPrice
-            or position.averagePrice
-        )
-        qty = position.longQuantity
-    elif position.shortQuantity > 0:
-        avg = (
-            position.averageShortPrice
-            or position.taxLotAverageShortPrice
-            or position.averagePrice
-        )
-        qty = position.shortQuantity
-    else:
-        return None
-
-    if avg is None or qty <= 0:
-        return None
-
-    basis = avg * qty * multiplier
-    return basis if basis > 0 else None
-
-
-def _position_pnl_pct(position: Position) -> float | None:
-    basis = _position_cost_basis(position)
-    if basis is None:
-        return None
-    return (_position_pnl(position) / basis) * 100
-
-
-def _position_weight_pct(
-    position: Position, portfolio_value: float | None
-) -> float | None:
-    if not portfolio_value or portfolio_value <= 0:
-        return None
-    return (abs(position.marketValue) / portfolio_value) * 100
-
-
 def _position_type_label(position: Position) -> str:
     instrument = position.instrument
     if instrument.assetType == "OPTION":
@@ -523,9 +439,15 @@ def _enrich_positions_table(
 
     for p in positions_sorted:
         symbol = getattr(p.instrument, "symbol", "UNKNOWN")
-        pnl = _position_pnl(p)
-        pnl_pct = _position_pnl_pct(p)
-        weight_pct = _position_weight_pct(p, portfolio_value)
+        pnl = p.openProfitLoss if p.openProfitLoss is not None else _position_pnl(p)
+        pnl_pct = (
+            p.openProfitLossPct if p.openProfitLossPct is not None else _position_pnl_pct(p)
+        )
+        weight_pct = (
+            p.portfolioWeightPct
+            if p.portfolioWeightPct is not None
+            else _position_weight_pct(p, portfolio_value)
+        )
         reserved_cash = cash_secured_put_reserved_cash(p)
 
         qty = p.longQuantity if p.longQuantity > 0 else -p.shortQuantity
@@ -550,7 +472,7 @@ def _enrich_positions_table(
                 "qty": round(qty, 2),
                 "avg": round(avg_price or 0, 2),
                 "mkt_val": round(p.marketValue, 2),
-                "pnl": round(pnl, 2),
+                "pnl": round(pnl, 2) if pnl is not None else "N/A",
                 "pnl_pct": _format_pct(pnl_pct),
                 "weight_pct": _format_pct(weight_pct),
                 "reserved_cash": round(reserved_cash, 2) if reserved_cash is not None else None,

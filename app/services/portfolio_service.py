@@ -1,12 +1,17 @@
 from typing import Dict, List
 
+from app.broker.position_metrics import (
+    annotate_position_metrics,
+    portfolio_liquidation_value,
+    summarize_portfolio_metrics,
+)
 from app.broker.option_utils import (
     summarize_assignment_risk_structural,
     summarize_csp_cash_reserves,
 )
 from app.broker.strategy_detector import detect_option_strategy
 from app.builders.schwab_trader_builder import SchwabTraderBuilder
-from app.models.schwab_models import Position, SchwabAccounts
+from app.models.schwab_models import PortfolioMetrics, Position, SchwabAccounts
 
 
 class PortfolioService:
@@ -21,6 +26,13 @@ class PortfolioService:
         positions = self._annotate_option_strategies(
             account.securitiesAccount.positions
         )
+        portfolio_value = portfolio_liquidation_value(
+            account=account, positions=positions
+        )
+        positions = [
+            annotate_position_metrics(p, portfolio_value=portfolio_value)
+            for p in positions
+        ]
         account = account.model_copy(
             update={
                 "securitiesAccount": account.securitiesAccount.model_copy(
@@ -39,6 +51,9 @@ class PortfolioService:
         return {
             "account": account,
             "positions": positions_by_symbol,
+            "portfolioMetrics": PortfolioMetrics(
+                **summarize_portfolio_metrics(positions)
+            ),
             "cashSecuredPutSummary": summarize_csp_cash_reserves(
                 positions=positions,
                 cash_balance=cash_balance,
