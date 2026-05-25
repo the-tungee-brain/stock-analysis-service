@@ -35,14 +35,15 @@ def test_finnhub_adapter_opens_circuit_after_timeout():
     adapter.finnhub_client = MagicMock()
     adapter.finnhub_client.quote.side_effect = _timeout_error()
 
-    with pytest.raises(requests.exceptions.ConnectTimeout):
-        adapter.get_quote("HOOD")
+    for _ in range(3):
+        with pytest.raises(requests.exceptions.ConnectTimeout):
+            adapter.get_quote("HOOD")
 
     with pytest.raises(FinnhubUnavailableError):
         adapter.get_quote("HOOD")
 
 
-def test_finnhub_adapter_opens_circuit_after_api_error():
+def test_finnhub_adapter_does_not_open_circuit_on_429():
     adapter = FinnhubAdapter(
         api_key="test-key",
         circuit_cooldown_seconds=60,
@@ -56,6 +57,26 @@ def test_finnhub_adapter_opens_circuit_after_api_error():
 
     with pytest.raises(FinnhubAPIException):
         adapter.get_quote("HOOD")
+
+    with pytest.raises(FinnhubAPIException):
+        adapter.get_quote("HOOD")
+
+
+def test_finnhub_adapter_opens_circuit_after_non_rate_limit_api_error():
+    adapter = FinnhubAdapter(
+        api_key="test-key",
+        circuit_cooldown_seconds=60,
+        rate_limiter=None,
+    )
+    adapter.finnhub_client = MagicMock()
+    response = MagicMock()
+    response.status_code = 500
+    response.json.return_value = {"error": "Internal error"}
+    adapter.finnhub_client.quote.side_effect = FinnhubAPIException(response)
+
+    for _ in range(3):
+        with pytest.raises(FinnhubAPIException):
+            adapter.get_quote("HOOD")
 
     with pytest.raises(FinnhubUnavailableError):
         adapter.get_quote("HOOD")

@@ -5,6 +5,7 @@ from datetime import date
 from operator import attrgetter
 
 from app.adapters.finnhub.finnhub_adapter import FinnhubAdapter
+from app.adapters.finnhub.finnhub_circuit import FinnhubUnavailableError
 from app.models.finnhub_company_profile_models import CompanyProfile
 from app.models.finnhub_news_models import NewsResponse
 from app.models.finnhub_quote_models import Quote
@@ -24,6 +25,13 @@ class FinnhubBuilder:
                 symbol=symbol, _from=_from_str, to=to_str
             )
             news_response = NewsResponse.model_validate(raw_news_response)
+        except FinnhubUnavailableError as exc:
+            logger.warning(
+                "Finnhub company news unavailable for %s: %s",
+                symbol,
+                exc,
+            )
+            return NewsResponse(root=[])
         except Exception:
             logger.warning(
                 "Finnhub company news unavailable for %s", symbol, exc_info=True

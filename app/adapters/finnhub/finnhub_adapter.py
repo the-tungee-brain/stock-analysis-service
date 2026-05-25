@@ -43,7 +43,7 @@ class FinnhubAdapter:
             if circuit_cooldown_seconds is not None
             else os.getenv("FINNHUB_CIRCUIT_COOLDOWN_SECONDS", "120")
         )
-        self._circuit = FinnhubCircuitBreaker(cooldown_seconds=cooldown)
+        self._circuit = FinnhubCircuitBreaker.from_env(cooldown_seconds=cooldown)
         self._cache = response_cache
         self._rate_limiter = (
             FinnhubRateLimiter.from_env()
@@ -85,10 +85,14 @@ class FinnhubAdapter:
 
         try:
             result = fn()
+        except FinnhubAPIException as exc:
+            if exc.status_code != 429:
+                self._circuit.record_failure()
+            logger.warning("Finnhub %s unavailable: %s", label, exc)
+            raise
         except (
             requests.exceptions.Timeout,
             requests.exceptions.ConnectionError,
-            FinnhubAPIException,
         ) as exc:
             self._circuit.record_failure()
             logger.warning("Finnhub %s unavailable: %s", label, exc)
