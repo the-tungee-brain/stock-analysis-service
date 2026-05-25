@@ -38,9 +38,13 @@ def test_create_and_verify_token_with_derived_key(monkeypatch):
 def test_verify_rejects_tampered_token(monkeypatch):
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", "short-20-byte-key!!")
     monkeypatch.setattr(settings, "_JWT_KEY_DERIVATION_LOGGED", False)
+    settings.clear_jwt_signing_key_cache()
 
     token = create_access_token("user-123")
-    tampered = token[:-1] + ("a" if token[-1] != "a" else "b")
+    header, payload, signature = token.split(".")
+    idx = len(payload) // 2
+    flipped = "A" if payload[idx] != "A" else "B"
+    tampered = f"{header}.{payload[:idx]}{flipped}{payload[idx + 1:]}.{signature}"
 
     with pytest.raises(jwt.InvalidTokenError):
         verify_jwt(tampered)
