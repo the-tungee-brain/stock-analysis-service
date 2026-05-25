@@ -95,7 +95,7 @@ def get_account_positions(
     proactive_alerts: list[ProactiveAlert] = []
     portfolio_brief: PortfolioIntelligence | None = None
     try:
-        portfolio_brief = portfolio_analysis_service.build_portfolio_brief(
+        portfolio_brief = portfolio_analysis_service.build_portfolio_brief_for_positions_load(
             user_id=user_id,
             account=account_map["account"],
             positions=account_map["account"].securitiesAccount.positions,
@@ -104,6 +104,7 @@ def get_account_positions(
                 recent_activity.suggested_actions if recent_activity else []
             ),
             assignment_risk_summary=account_map["assignmentRiskSummary"],
+            refresh=refresh,
         )
         proactive_alerts = portfolio_brief.alerts
     except Exception:

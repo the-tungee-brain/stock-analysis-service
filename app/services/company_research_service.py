@@ -184,6 +184,43 @@ class CompanyResearchService:
 
         return context
 
+    def build_lightweight_context(self, symbol: str) -> ResearchContext:
+        """Snapshot + cached enrichment only — no Finnhub news/earnings fetches."""
+        symbol_upper = symbol.strip().upper()
+
+        snapshot = None
+        try:
+            snapshot = self.company_profile_service.get_snapshot(symbol_upper)
+        except Exception:
+            pass
+
+        earnings = None
+        if self.research_context_cache is not None:
+            try:
+                cached = self.research_context_cache.get(symbol=symbol_upper)
+                if cached is not None:
+                    earnings = cached.earnings
+            except Exception:
+                pass
+
+        enriched_news = None
+        if self.enriched_news_service is not None:
+            enriched_news = self.enriched_news_service.get_cached_summary(
+                symbol_upper
+            )
+
+        data_gaps: list[str] = []
+        if snapshot is None:
+            data_gaps.append("snapshot")
+
+        return ResearchContext(
+            symbol=symbol_upper,
+            snapshot=snapshot,
+            enriched_news=enriched_news,
+            earnings=earnings,
+            data_gaps=data_gaps,
+        )
+
     def _attach_enriched_news(self, context: ResearchContext) -> ResearchContext:
         if self.enriched_news_service is None or context.enriched_news is not None:
             return context

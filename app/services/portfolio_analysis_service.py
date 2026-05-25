@@ -77,6 +77,7 @@ class PortfolioAnalysisService:
         transaction_service: TransactionService,
         portfolio_intelligence_service: PortfolioIntelligenceService,
         profile_adapter: UserInvestmentProfileAdapter,
+        portfolio_brief_cache: "PortfolioBriefCache | None" = None,
     ):
         self.market_service = market_service
         self.schwab_auth_service = schwab_auth_service
@@ -85,6 +86,7 @@ class PortfolioAnalysisService:
         self.transaction_service = transaction_service
         self.portfolio_intelligence_service = portfolio_intelligence_service
         self.profile_adapter = profile_adapter
+        self.portfolio_brief_cache = portfolio_brief_cache
 
     def _get_investment_profile(self, user_id: str) -> UserInvestmentProfile | None:
         try:
@@ -542,6 +544,7 @@ class PortfolioAnalysisService:
         access_token: str,
         suggested_actions: list | None = None,
         assignment_risk_summary: dict[str, object] | None = None,
+        lightweight: bool = False,
     ) -> PortfolioIntelligence | None:
         try:
             top_symbols = self._top_position_symbols(
@@ -552,7 +555,12 @@ class PortfolioAnalysisService:
 
             for sym in top_symbols:
                 try:
-                    ctx = self.company_research_service.build_context(symbol=sym)
+                    if lightweight:
+                        ctx = self.company_research_service.build_lightweight_context(
+                            sym
+                        )
+                    else:
+                        ctx = self.company_research_service.build_context(symbol=sym)
                     ctx = self.portfolio_intelligence_service.attach_enriched_news(ctx)
                     research_contexts.append(ctx)
                     if ctx.snapshot and ctx.snapshot.sector:
@@ -607,6 +615,7 @@ class PortfolioAnalysisService:
         access_token: str,
         suggested_actions: list | None = None,
         assignment_risk_summary: dict[str, object] | None = None,
+        lightweight: bool = False,
     ) -> PortfolioIntelligence:
         intelligence = self._load_portfolio_intelligence(
             user_id=user_id,
@@ -615,10 +624,54 @@ class PortfolioAnalysisService:
             access_token=access_token,
             suggested_actions=suggested_actions,
             assignment_risk_summary=assignment_risk_summary,
+            lightweight=lightweight,
         )
         if intelligence is None:
             return PortfolioIntelligence()
         return intelligence
+
+    def build_portfolio_brief_for_positions_load(
+        self,
+        *,
+        user_id: str,
+        account: SchwabAccounts,
+        positions: List[Position],
+        access_token: str,
+        suggested_actions: list | None = None,
+        assignment_risk_summary: dict[str, object] | None = None,
+        refresh: bool = False,
+    ) -> PortfolioIntelligence:
+        fingerprint: str | None = None
+        cache = self.portfolio_brief_cache
+
+        if cache is not None and not refresh:
+            fingerprint = cache.fingerprint(positions, account)
+            try:
+                cached = cache.get(user_id=user_id, fingerprint=fingerprint)
+            except Exception:
+                cached = None
+            if cached is not None:
+                return cached
+
+        brief = self.build_portfolio_brief(
+            user_id=user_id,
+            account=account,
+            positions=positions,
+            access_token=access_token,
+            suggested_actions=suggested_actions,
+            assignment_risk_summary=assignment_risk_summary,
+            lightweight=True,
+        )
+
+        if cache is not None:
+            if fingerprint is None:
+                fingerprint = cache.fingerprint(positions, account)
+            try:
+                cache.put(user_id=user_id, fingerprint=fingerprint, brief=brief)
+            except Exception:
+                pass
+
+        return brief
 
     def build_symbol_intelligence(
         self,

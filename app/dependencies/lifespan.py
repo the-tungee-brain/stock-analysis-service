@@ -9,6 +9,7 @@ from openai import OpenAI
 
 from app.adapters.cache.enriched_news_cache import EnrichedNewsCache
 from app.adapters.cache.finnhub_response_cache import FinnhubResponseCache
+from app.adapters.cache.portfolio_brief_cache import PortfolioBriefCache
 from app.adapters.cache.research_context_cache import ResearchContextCache
 
 from app.adapters.chat.chat_messages_adapter import ChatMessagesAdapter
@@ -159,6 +160,7 @@ async def lifespan(app: FastAPI):
     )
     schwab_redis_token_manager = SchwabRedisTokenManager(redis_client=redis_client)
     research_context_cache = ResearchContextCache(redis_client=redis_client)
+    portfolio_brief_cache = PortfolioBriefCache(redis_client=redis_client)
     enriched_news_cache = EnrichedNewsCache(redis_client=redis_client)
     recent_orders_cache = RecentOrdersCache(redis_client=redis_client)
     llm_output_cache = LLMOutputCache(redis_client=redis_client)
@@ -280,6 +282,7 @@ async def lifespan(app: FastAPI):
         transaction_service=transaction_service,
         portfolio_intelligence_service=portfolio_intelligence_service,
         profile_adapter=user_investment_profile_adapter,
+        portfolio_brief_cache=portfolio_brief_cache,
     )
     ticker_service = TickerService(ticker_symbol_builder=ticker_symbol_builder)
     portfolio_memory_service = PortfolioMemoryService(
