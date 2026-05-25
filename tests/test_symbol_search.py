@@ -1,70 +1,39 @@
 from unittest.mock import MagicMock
 
-from app.builders.symbol_search_builder import SymbolSearchBuilder
+from app.adapters.market.ticker_symbol_adapter import TickerSymbolAdapter
 from app.builders.ticker_symbol_builder import TickerSymbolBuilder
 
 
-def _sample_sec_tickers() -> dict[str, dict]:
-    return {
-        "0": {"cik_str": "320193", "ticker": "AAPL", "title": "Apple Inc."},
-        "1": {"cik_str": "789019", "ticker": "MSFT", "title": "MICROSOFT CORP"},
-        "2": {"cik_str": "1018724", "ticker": "AMZN", "title": "AMAZON COM INC"},
-        "3": {"cik_str": "884394", "ticker": "SPY", "title": "SPDR S&P 500 ETF TRUST"},
-    }
+def _mock_adapter_rows(rows: list[tuple[str, str | None]]) -> TickerSymbolAdapter:
+    adapter = TickerSymbolAdapter(client=MagicMock())
+    mock_con = MagicMock()
+    mock_cur = MagicMock()
+    adapter.client.acquire.return_value = mock_con
+    mock_con.cursor.return_value = mock_cur
+    mock_cur.description = [("SYMBOL",), ("TITLE",)]
+    mock_cur.fetchall.return_value = rows
+    return adapter
 
 
-def test_symbol_search_finds_ticker_prefix():
-    adapter = MagicMock()
-    adapter.get_company_tickers.return_value = _sample_sec_tickers()
-    builder = SymbolSearchBuilder(sec_edgar_adapter=adapter)
-
-    results = builder.search("AA", limit=5)
-
-    assert [entry.symbol for entry in results] == ["AAPL"]
+def test_dict_to_item_maps_title():
+    adapter = TickerSymbolAdapter(client=MagicMock())
+    item = adapter.dict_to_item({"SYMBOL": "AAPL", "TITLE": "Apple Inc."})
+    assert item.symbol == "AAPL"
+    assert item.title == "Apple Inc."
 
 
-def test_symbol_search_finds_company_name():
-    adapter = MagicMock()
-    adapter.get_company_tickers.return_value = _sample_sec_tickers()
-    builder = SymbolSearchBuilder(sec_edgar_adapter=adapter)
+def test_get_by_keyword_empty_query_returns_empty_list():
+    adapter = TickerSymbolAdapter(client=MagicMock())
+    assert adapter.get_by_keyword("   ") == []
 
-    results = builder.search("apple", limit=5)
 
+def test_ticker_symbol_builder_returns_title_from_adapter():
+    adapter = _mock_adapter_rows([("AAPL", "Apple Inc.")])
+    builder = TickerSymbolBuilder(ticker_symbol_adapter=adapter)
+
+    results = builder.get_symbols_by_keyword("apple", limit=5)
+
+    assert len(results) == 1
     assert results[0].symbol == "AAPL"
-    assert "Apple" in results[0].name
-
-
-def test_symbol_search_includes_supplemental_etfs():
-    adapter = MagicMock()
-    adapter.get_company_tickers.return_value = _sample_sec_tickers()
-    builder = SymbolSearchBuilder(sec_edgar_adapter=adapter)
-
-    results = builder.search("VTI", limit=5)
-
-    assert results[0].symbol == "VTI"
-    assert "Vanguard Total Stock Market ETF" in results[0].name
-
-
-def test_symbol_search_exact_ticker_ranks_before_prefix():
-    adapter = MagicMock()
-    adapter.get_company_tickers.return_value = {
-        "0": {"cik_str": "1", "ticker": "AA", "title": "ALCOHOLICS ANONYMOUS TEST CO"},
-        "1": {"cik_str": "320193", "ticker": "AAPL", "title": "Apple Inc."},
-    }
-    builder = SymbolSearchBuilder(sec_edgar_adapter=adapter)
-
-    results = builder.search("AA", limit=5)
-
-    assert [entry.symbol for entry in results] == ["AA", "AAPL"]
-
-
-def test_ticker_symbol_builder_maps_name():
-    adapter = MagicMock()
-    adapter.get_company_tickers.return_value = _sample_sec_tickers()
-    search_builder = SymbolSearchBuilder(sec_edgar_adapter=adapter)
-    builder = TickerSymbolBuilder(symbol_search_builder=search_builder)
-
-    results = builder.get_symbols_by_keyword("apple", limit=3)
-
-    assert results[0].symbol == "AAPL"
-    assert results[0].name == "Apple Inc."
+    assert results[0].title == "Apple Inc."
+    adapter.client.acquire.assert_called_once()

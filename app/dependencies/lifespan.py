@@ -28,6 +28,7 @@ from app.adapters.user.user_investment_profile_adapter import (
     UserInvestmentProfileAdapter,
 )
 from app.adapters.user.user_strategy_journey_adapter import UserStrategyJourneyAdapter
+from app.adapters.market.ticker_symbol_adapter import TickerSymbolAdapter
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.adapters.email.email_adapter import EmailAdapter
 from app.adapters.portfolio.alert_history_adapter import AlertHistoryAdapter
@@ -47,7 +48,6 @@ from app.builders.schwab_market_builder import SchwabMarketBuilder
 from app.builders.schwab_trader_builder import SchwabTraderBuilder
 from app.builders.performance_builder import PerformanceBuilder
 from app.builders.earnings_builder import EarningsBuilder
-from app.builders.symbol_search_builder import SymbolSearchBuilder
 from app.builders.ticker_symbol_builder import TickerSymbolBuilder
 from app.builders.fundamentals_builder import FundamentalsBuilder
 
@@ -161,6 +161,7 @@ async def lifespan(app: FastAPI):
     chat_messages_adapter = ChatMessagesAdapter(client=powerpocketdb_client)
     chat_sessions_adapter = ChatSessionsAdapter(client=powerpocketdb_client)
     yfinance_adapter = YFinanceAdapter()
+    ticker_symbol_adapter = TickerSymbolAdapter(client=powerpocketdb_client)
     portfolio_snapshot_adapter = PortfolioSnapshotAdapter(client=powerpocketdb_client)
     alert_history_adapter = AlertHistoryAdapter(client=powerpocketdb_client)
     morning_brief_delivery_adapter = MorningBriefDeliveryAdapter(
@@ -201,10 +202,8 @@ async def lifespan(app: FastAPI):
         sec_ratios_builder=sec_ratios_builder,
     )
     sec_cik_builder._load_ticker_map()
-    symbol_search_builder = SymbolSearchBuilder(sec_edgar_adapter=sec_edgar_adapter)
-    symbol_search_builder._load_entries()
     ticker_symbol_builder = TickerSymbolBuilder(
-        symbol_search_builder=symbol_search_builder
+        ticker_symbol_adapter=ticker_symbol_adapter
     )
 
     news_service = NewsService(finnhub_builder=finnhub_builder)
