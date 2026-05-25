@@ -24,6 +24,10 @@ from app.adapters.cache.recent_orders_cache import RecentOrdersCache
 from app.adapters.cache.llm_output_cache import LLMOutputCache
 from app.adapters.schwab.schwab_trader_adapter import SchwabTraderAdapter
 from app.adapters.user.app_user_adapter import AppUserAdapter
+from app.adapters.user.user_investment_profile_adapter import (
+    UserInvestmentProfileAdapter,
+)
+from app.adapters.user.user_strategy_journey_adapter import UserStrategyJourneyAdapter
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.adapters.market.ticker_symbol_adapter import TickerSymbolAdapter
 from app.adapters.email.email_adapter import EmailAdapter
@@ -75,6 +79,7 @@ from app.services.intelligence.portfolio_intelligence_service import (
 )
 from app.services.morning_brief_delivery_service import MorningBriefDeliveryService
 from app.services.portfolio_memory_service import PortfolioMemoryService
+from app.services.strategy.strategy_journey_service import StrategyJourneyService
 
 
 def get_redis_client() -> redis.Redis:
@@ -133,6 +138,12 @@ async def lifespan(app: FastAPI):
         client=powerpocketdb_client
     )
     app_user_adapter = AppUserAdapter(client=powerpocketdb_client)
+    user_investment_profile_adapter = UserInvestmentProfileAdapter(
+        client=powerpocketdb_client
+    )
+    user_strategy_journey_adapter = UserStrategyJourneyAdapter(
+        client=powerpocketdb_client
+    )
     schwab_auth = SchwabAuth(
         client_id=schwab_client_id,
         client_secret=schwab_client_secret,
@@ -273,6 +284,10 @@ async def lifespan(app: FastAPI):
         schwab_auth_service=schwab_auth_service,
         portfolio_memory_service=portfolio_memory_service,
     )
+    strategy_journey_service = StrategyJourneyService(
+        profile_adapter=user_investment_profile_adapter,
+        journey_adapter=user_strategy_journey_adapter,
+    )
 
     app.state.http_session = session
     app.state.redis_client = redis_client
@@ -297,6 +312,7 @@ async def lifespan(app: FastAPI):
     app.state.recent_orders_cache = recent_orders_cache
     app.state.portfolio_memory_service = portfolio_memory_service
     app.state.morning_brief_delivery_service = morning_brief_delivery_service
+    app.state.strategy_journey_service = strategy_journey_service
 
     try:
         yield

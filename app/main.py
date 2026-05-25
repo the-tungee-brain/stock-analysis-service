@@ -35,6 +35,7 @@ from app.api.get_symbol_intelligence_route import (
 from app.api.get_option_chain_debug_route import router as get_option_chain_debug_router
 from app.api.internal_morning_brief_route import router as internal_morning_brief_router
 from app.api.portfolio_memory_routes import router as portfolio_memory_router
+from app.api.strategy_routes import router as strategy_router
 
 API_PREFIX = "/api/v1"
 AUTH_SCHWAB_PREFIX = f"{API_PREFIX}/auth/schwab"
@@ -82,6 +83,7 @@ protected_api = APIRouter(
 protected_api.include_router(get_account_positions_router)
 protected_api.include_router(get_portfolio_brief_router)
 protected_api.include_router(portfolio_memory_router)
+protected_api.include_router(strategy_router)
 protected_api.include_router(get_symbol_intelligence_router)
 protected_api.include_router(get_option_chain_debug_router)
 protected_api.include_router(get_recent_orders_router)

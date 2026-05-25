@@ -20,6 +20,7 @@ from app.services.intelligence.portfolio_intelligence_service import (
 )
 from app.services.morning_brief_delivery_service import MorningBriefDeliveryService
 from app.services.portfolio_memory_service import PortfolioMemoryService
+from app.services.strategy.strategy_journey_service import StrategyJourneyService
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -98,3 +99,7 @@ def get_morning_brief_delivery_service(
     request: Request,
 ) -> MorningBriefDeliveryService:
     return request.app.state.morning_brief_delivery_service
+
+
+def get_strategy_journey_service(request: Request) -> StrategyJourneyService:
+    return request.app.state.strategy_journey_service
