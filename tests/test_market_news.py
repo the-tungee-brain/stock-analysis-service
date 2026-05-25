@@ -68,7 +68,11 @@ def test_portfolio_digest_includes_macro_news_from_single_finnhub_call():
 
     assert intelligence.digest is not None
     assert intelligence.digest.macro_news == [
-        MarketNewsItem(headline="Fed holds rates steady", source="Reuters")
+        MarketNewsItem(
+            headline="Fed holds rates steady",
+            source="Reuters",
+            url="https://example.com/news",
+        )
     ]
     news_service.get_market_news.assert_called_once()
 

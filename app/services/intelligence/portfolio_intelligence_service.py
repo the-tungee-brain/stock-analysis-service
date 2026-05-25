@@ -364,6 +364,7 @@ class PortfolioIntelligenceService:
             MarketNewsItem(
                 headline=item.headline,
                 source=item.source or None,
+                url=str(item.url) if item.url else None,
             )
             for item in response.root
             if item.headline

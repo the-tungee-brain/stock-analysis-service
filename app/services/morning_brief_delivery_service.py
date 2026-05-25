@@ -196,7 +196,8 @@ class MorningBriefDeliveryService:
             lines.append("Market headlines")
             for item in brief.digest.macro_news:
                 source = f" ({item.source})" if item.source else ""
-                lines.append(f"- {item.headline}{source}")
+                link = f" {item.url}" if item.url else ""
+                lines.append(f"- {item.headline}{source}{link}")
             lines.append("")
 
         if brief.changes and brief.changes.summary:
@@ -237,9 +238,13 @@ class MorningBriefDeliveryService:
         if brief.digest and brief.digest.macro_news:
             items = "".join(
                 "<li>"
-                f"{html.escape(item.headline)}"
-                f"{f' <em>({html.escape(item.source)})</em>' if item.source else ''}"
-                "</li>"
+                + (
+                    f'<a href="{html.escape(item.url)}">{html.escape(item.headline)}</a>'
+                    if item.url
+                    else html.escape(item.headline)
+                )
+                + f"{f' <em>({html.escape(item.source)})</em>' if item.source else ''}"
+                + "</li>"
                 for item in brief.digest.macro_news
             )
             html_sections.append(f"<h3>Market headlines</h3><ul>{items}</ul>")

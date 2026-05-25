@@ -1016,6 +1016,7 @@ class PromptEnrichmentService:
                 macro_lines = [
                     f"- {item.headline}"
                     + (f" ({item.source})" if item.source else "")
+                    + (f" {item.url}" if item.url else "")
                     for item in digest.macro_news[:MARKET_NEWS_PROMPT_LIMIT]
                 ]
                 sections.append("## Market headlines\n" + "\n".join(macro_lines))

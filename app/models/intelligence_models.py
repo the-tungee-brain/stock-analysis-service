@@ -171,6 +171,7 @@ class MarketNewsItem(BaseModel):
 
     headline: str
     source: str | None = None
+    url: str | None = None
 
 
 class PortfolioDigest(BaseModel):

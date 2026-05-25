@@ -26,7 +26,11 @@ def test_render_email_includes_macro_and_changes():
         digest=PortfolioDigest(
             sector_weights=[],
             macro_news=[
-                MarketNewsItem(headline="Fed holds rates steady", source="Reuters"),
+                MarketNewsItem(
+                    headline="Fed holds rates steady",
+                    source="Reuters",
+                    url="https://example.com/fed-rates",
+                ),
             ],
             top_news=[],
             earnings_this_week=["AAPL"],
@@ -55,7 +59,9 @@ def test_render_email_includes_macro_and_changes():
     assert "VIX at 18.0" in text_body
     assert "Fed holds rates steady" in text_body
     assert "Reuters" in text_body
+    assert "https://example.com/fed-rates" in text_body
     assert "portfolio value +1.20%" in text_body
     assert "AAPL" in text_body
     assert "assignment risk" in text_body
     assert "VIX at 18.0" in html_body
+    assert 'href="https://example.com/fed-rates"' in html_body
