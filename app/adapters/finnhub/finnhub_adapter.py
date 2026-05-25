@@ -225,5 +225,5 @@ class FinnhubAdapter:
             "stock_peers",
             cache_key,
             "stock_peers",
-            lambda: self.finnhub_client.stock_peers(symbol=symbol),
+            lambda: self.finnhub_client.company_peers(symbol=symbol),
         )

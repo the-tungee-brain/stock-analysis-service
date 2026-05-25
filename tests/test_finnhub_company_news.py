@@ -46,3 +46,11 @@ def test_finnhub_builder_formats_company_news_dates_as_yyyy_mm_dd():
         _from="2026-05-18",
         to="2026-05-25",
     )
+
+
+def test_finnhub_adapter_uses_company_peers_client_method():
+    adapter = FinnhubAdapter(api_key="test-key")
+    adapter.finnhub_client.company_peers = MagicMock(return_value=["MSFT", "GOOGL"])
+
+    assert adapter.get_stock_peers("AAPL") == ["MSFT", "GOOGL"]
+    adapter.finnhub_client.company_peers.assert_called_once_with(symbol="AAPL")
