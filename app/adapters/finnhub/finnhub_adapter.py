@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import logging
 import os
+import types
 from collections.abc import Callable
 from typing import TypeVar
 
 import finnhub
 import requests
 from finnhub.exceptions import FinnhubAPIException
+from requests.adapters import HTTPAdapter
 
 from app.adapters.cache.finnhub_response_cache import FinnhubResponseCache
 from app.adapters.finnhub.finnhub_circuit import (
@@ -20,6 +22,16 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 DEFAULT_TIMEOUT_SECONDS = 15.0
+DEFAULT_API_URL = "https://finnhub.io/api/v1"
+
+
+def _normalized_request(self, method: str, path: str, **kwargs):
+    uri = f"{self.API_URL.rstrip('/')}/{path.lstrip('/')}"
+    kwargs["timeout"] = kwargs.get("timeout", self.DEFAULT_TIMEOUT)
+    kwargs["params"] = self._format_params(kwargs.get("params", {}))
+
+    response = getattr(self._session, method)(uri, **kwargs)
+    return self._handle_response(response)
 
 
 class FinnhubAdapter:
@@ -44,7 +56,17 @@ class FinnhubAdapter:
         self._circuit = FinnhubCircuitBreaker.from_env(cooldown_seconds=cooldown)
         self._cache = response_cache
         self.finnhub_client = finnhub.Client(api_key=api_key)
+        self.finnhub_client.API_URL = os.getenv(
+            "FINNHUB_API_URL", DEFAULT_API_URL
+        ).rstrip("/")
         self.finnhub_client.DEFAULT_TIMEOUT = timeout
+        self.finnhub_client._request = types.MethodType(
+            _normalized_request,
+            self.finnhub_client,
+        )
+        no_retry = HTTPAdapter(max_retries=0)
+        self.finnhub_client._session.mount("https://", no_retry)
+        self.finnhub_client._session.mount("http://", no_retry)
 
     @staticmethod
     def _cache_key(*parts: str) -> str:

@@ -4,6 +4,8 @@ import logging
 from datetime import date
 from operator import attrgetter
 
+import requests
+
 from app.adapters.finnhub.finnhub_adapter import FinnhubAdapter
 from app.adapters.finnhub.finnhub_circuit import FinnhubUnavailableError
 from app.models.finnhub_company_profile_models import CompanyProfile
@@ -25,7 +27,7 @@ class FinnhubBuilder:
                 symbol=symbol, _from=_from_str, to=to_str
             )
             news_response = NewsResponse.model_validate(raw_news_response)
-        except FinnhubUnavailableError as exc:
+        except (FinnhubUnavailableError, requests.exceptions.RequestException) as exc:
             logger.warning(
                 "Finnhub company news unavailable for %s: %s",
                 symbol,

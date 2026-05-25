@@ -1,7 +1,7 @@
 from datetime import date
 from unittest.mock import MagicMock
 
-from app.adapters.finnhub.finnhub_adapter import FinnhubAdapter
+from app.adapters.finnhub.finnhub_adapter import DEFAULT_API_URL, FinnhubAdapter
 from app.builders.finnhub_builder import FinnhubBuilder
 
 
@@ -21,7 +21,8 @@ def test_finnhub_adapter_company_news_query_params_match_curl_format():
     adapter.finnhub_client._session.get = fake_get
     adapter.get_company_news("AMZN", _from="2026-05-18", to="2026-05-25")
 
-    assert "/company-news" in str(captured["url"])
+    assert captured["url"] == f"{DEFAULT_API_URL}/company-news"
+    assert "//" not in str(captured["url"]).removeprefix("https://")
     params = captured["params"]
     assert params["symbol"] == "AMZN"
     assert params["from"] == "2026-05-18"
