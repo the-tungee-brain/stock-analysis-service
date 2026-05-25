@@ -67,8 +67,9 @@ def test_finnhub_adapter_skips_upstream_when_circuit_open():
         request=MagicMock(),
     )
 
-    with pytest.raises(requests.exceptions.ConnectTimeout):
-        adapter.get_quote("AAPL")
+    for _ in range(3):
+        with pytest.raises(requests.exceptions.ConnectTimeout):
+            adapter.get_quote("AAPL")
 
     adapter.finnhub_client.quote.reset_mock()
 
