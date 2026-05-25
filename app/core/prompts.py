@@ -190,6 +190,18 @@ _STRUCTURED_V1_JSON_RULES = dedent("""
     - sections[].title must be plain text only — never prefix with #, ##, or ###.
     - Use plain English in string fields; use sections[].bullets for ranked steps or lists.
     - recommendedAction.symbol: ticker when the action targets one symbol; use "" when not applicable.
+    - Be decisive — this is a portfolio action plan, not a research memo or bullet diary.
+    - summary: max 3 sentences; sentence 1 must state the biggest problem AND your #1 recommended move
+      with a dollar amount or share count (e.g., "Deploy $4,367: ~$3,060 SCHD and ~$1,310 BND to close your
+      ETF core gap; trim HOOD next if it stays above 15%.").
+    - recommendedAction.title: imperative and specific ("Deploy $4,367 into SCHD and BND", not
+      "Consider improving diversification").
+    - recommendedAction.reason: 1-2 sentences tying numbers from the data to impact — no hedging.
+    - When deployable cash and ETF allocation gap are both shown, recommendedAction must allocate that
+      cash with a per-ticker dollar split. Do not leave cash undeployed without an explicit hold-cash reason.
+    - Rank 2-4 bullets in "Action plan (ranked)" with timing (this week / this month) and expected impact.
+    - Limit off-list commentary (e.g., TSM OK to hold) to one short bullet — never make it the lead action
+      unless concentration requires a trim.
     """).strip()
 
 
@@ -260,24 +272,28 @@ def _structured_portfolio_analysis_task() -> str:
 def _structured_portfolio_analysis_v1_task() -> str:
     return dedent("""
         Analyze this portfolio for diversification, concentration risk, and smarter capital deployment.
+        Deliver a decisive action plan — not a list of observations.
 
         Populate the JSON schema:
-        - summary: 2-3 sentence overall diversification read.
-        - recommendedAction: the single highest-impact next step (title, reason, symbol if one name).
-        - sections: 2-5 sections with plain-text titles such as "Diversification diagnosis",
-          "Gaps vs targets", "Where to put money smarter", "Risk if you do nothing",
-          "Action plan (ranked)" — never use # or ### in titles.
-          Use bullets for ranked actions (2-4 steps ranked by diversification impact).
+        - summary: max 3 sentences; lead with the #1 move and dollar amounts from deployable cash / trims.
+        - recommendedAction: the single highest-impact next step — imperative title, concrete reason,
+          symbol when one name (use "" for multi-ETF deploys).
+        - sections: include "Gaps vs targets", "Where to put money smarter", and "Action plan (ranked)".
+          Plain-text titles only — never use # or ###.
+          Use bullets for ranked steps (2-4) with timing and dollar amounts.
 
-        Priorities (in order):
-        1. Diagnose concentration across single names, sectors, themes, cash, and options overlay.
-        2. Compare current weights to prudent targets and the investor's saved preferences.
-        3. Recommend specific trims, adds, or cash holds with dollar amounts and target weights.
-        4. Rank actions by diversification impact — trim overweight names before suggesting new buys.
+        Decision order:
+        1. If ETF core allocation gap data exists and deployable cash > 0 → recommendedAction should deploy
+           cash into the largest underweights first (exact $ per ticker).
+        2. If a single name exceeds profile max or 20% → rank a trim with $ or shares; do not bury it
+           behind off-list commentary.
+        3. Off-list names that are fine to hold (e.g., TSM) → one brief bullet only; suggest adding to
+           the working list if relevant — not the headline action.
+        4. Wheel list names not held → mention only if they fit a ranked deploy/trim step (e.g., SPY for
+           diversification) — do not list them without a concrete recommendation.
 
         Use WEIGHT_% in the positions table and precomputed blocks in DIVERSIFICATION SUMMARY /
         PORTFOLIO INTELLIGENCE as authoritative. Do not recalculate weights unless WEIGHT_% is N/A.
-        If deployable cash is shown, include a clear deploy-$X plan in the relevant section.
         """).strip()
 
 
@@ -396,9 +412,13 @@ PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
 
     ## Step 4 — Cash and deployment
     - Start from deployable cash in DIVERSIFICATION SUMMARY (after CSP reserves and a 5% buffer).
-    - If any name is above 20%, prioritize trims before new buys.
+    - If ETF core allocation gap data is present, use it — deploy cash toward the largest underweights first
+      with exact dollar amounts (e.g., "$3,058 into SCHD, $1,309 into BND").
+    - If any name is above 20%, prioritize trims before new buys — unless deployable cash is small vs
+      the concentration; then say both: trim X this week AND deploy remaining cash into core ETFs.
     - Every trim/add recommendation must include **dollar amount** and **target weight %** when possible.
     - If fully invested, give a ranked "next dollar" priority list instead of vague advice.
+    - Never end with observations only — always commit to a ranked deploy/trim plan.
 
     ## Step 5 — Respect saved investor preferences (strategy list is NOT a whitelist)
     - The strategy symbol list is a working set — not an exclusive whitelist.
@@ -409,7 +429,8 @@ PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
       to the strategy symbol list — do NOT recommend trimming/closing solely because it is off-list.
     - If an off-list name is a poor fit (concentration, weak thesis, illiquid options): explain
       the real reason — not "it's not on your list."
-    - ETF core → allocation drift vs target weights is the primary lens.
+    - Off-list names that are fine to hold: one brief mention max — do not let them dominate the response.
+    - ETF core → allocation drift vs target weights is the primary lens when ETF gap data is present.
     - Dividend → avoid yield chasing; note concentration in dividend names.
     - Wheel / CSP / covered call → honor max single-name %; do not sell puts on overweight underlyings.
     - Conservative → favor broad ETFs and higher cash buffer; aggressive → allow higher single names but still flag >30%.
@@ -517,6 +538,7 @@ _PORTFOLIO_ALLOCATION_CORE = dedent(f"""
     - Diagnose concentration (names, sectors, themes, cash, options overlay).
     - Recommend specific trims, adds, or cash holds with dollar amounts and target weights.
     - Rank 2–4 actions by diversification impact — not a single speculative trade.
+    - Lead with the highest-impact move; avoid observational bullet lists without a commit.
     - Respect saved investor preferences when provided.
     - For holdings outside the strategy symbol list: evaluate fit on merits; if strong, suggest
       adding to the list — never treat off-list as a risk by itself.

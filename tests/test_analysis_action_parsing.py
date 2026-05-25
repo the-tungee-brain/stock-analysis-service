@@ -175,6 +175,7 @@ def test_portfolio_analysis_v1_prompt_uses_json_task_not_markdown_headings():
     prompt = build_portfolio_prompt(ctx, json_response=True)
     system_prompt = system_message_for_structured_v1_analysis(symbol=None)
     assert "Populate the JSON schema" in prompt
+    assert "decisive action plan" in prompt
     assert "recommendedAction" in prompt
     assert "### Portfolio snapshot" not in prompt
     assert "### Portfolio snapshot" not in system_prompt

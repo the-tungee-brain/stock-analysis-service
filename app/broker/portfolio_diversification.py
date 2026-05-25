@@ -146,8 +146,32 @@ def format_diversification_summary_block(
 
     if profile and profile.etf_core and profile.etf_core.target_allocation:
         alloc = profile.etf_core.target_allocation
-        alloc_text = ", ".join(f"{sym} {pct:.0f}%" for sym, pct in alloc.items())
-        lines.append(f"\n## ETF core target allocation\n{alloc_text}")
+        weight_by_symbol = {symbol: weight for symbol, _, weight in ranked}
+        lines.append("\n## ETF core allocation gap (current vs target)")
+        total_buy_gap = 0.0
+        for symbol, target_pct in alloc.items():
+            symbol_upper = symbol.upper()
+            current_pct = weight_by_symbol.get(symbol_upper, 0.0)
+            gap_pct = target_pct - current_pct
+            buy_dollars = max((gap_pct / 100.0) * liquidation, 0.0)
+            total_buy_gap += buy_dollars
+            status = "UNDERWEIGHT" if gap_pct > 1.0 else "on target" if abs(gap_pct) <= 1.0 else "OVERWEIGHT"
+            lines.append(
+                f"- {symbol_upper}: {current_pct:.1f}% now vs {target_pct:.0f}% target "
+                f"({gap_pct:+.1f} pp) — {status}"
+                + (f", ~${buy_dollars:,.0f} to buy" if buy_dollars >= 1.0 else "")
+            )
+        if deployable_cash > 0 and total_buy_gap > 0:
+            deploy_pct = min(deployable_cash / total_buy_gap, 1.0) * 100.0
+            lines.append(
+                f"- Deployable cash ${deployable_cash:,.0f} covers "
+                f"{deploy_pct:.0f}% of total ETF underweight gap (~${total_buy_gap:,.0f})"
+            )
+            if deployable_cash < total_buy_gap:
+                lines.append(
+                    "- Prioritize closing the largest ETF gaps first with available deployable cash; "
+                    "note remaining gap for future contributions."
+                )
 
     if profile and profile.primary_strategy == InvestmentStrategy.DIVIDEND:
         symbols = profile.dividend.dividend_symbols if profile.dividend else []

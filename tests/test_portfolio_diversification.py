@@ -78,3 +78,32 @@ def test_diversification_summary_includes_sector_weights():
     assert block is not None
     assert "Sector weights" in block
     assert "SECTOR CRITICAL (>30%)" in block
+
+
+def test_diversification_summary_includes_etf_core_gap():
+    from app.models.strategy_models import EtfCoreStrategyConfig
+
+    account = _account_with_cash(liquidation=100_000, cash=10_000)
+    positions = [
+        _make_position(symbol="HOOD", market_value=25_000),
+        _make_position(symbol="SCHD", market_value=100),
+    ]
+    profile = UserInvestmentProfile(
+        user_id="user-1",
+        primary_strategy=InvestmentStrategy.WHEEL,
+        etf_core=EtfCoreStrategyConfig(
+            target_allocation={"SCHD": 70.0, "BND": 30.0},
+        ),
+    )
+
+    block = format_diversification_summary_block(
+        positions=positions,
+        account=account,
+        profile=profile,
+    )
+
+    assert block is not None
+    assert "ETF core allocation gap" in block
+    assert "SCHD:" in block and "70% target" in block
+    assert "BND:" in block and "30% target" in block
+    assert "Deployable cash" in block
