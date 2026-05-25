@@ -107,3 +107,4 @@ def test_diversification_summary_includes_etf_core_gap():
     assert "SCHD:" in block and "70% target" in block
     assert "BND:" in block and "30% target" in block
     assert "Deployable cash" in block
+    assert "Suggested deploy plan (precomputed" in block

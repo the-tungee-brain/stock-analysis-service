@@ -149,6 +149,7 @@ def format_diversification_summary_block(
         weight_by_symbol = {symbol: weight for symbol, _, weight in ranked}
         lines.append("\n## ETF core allocation gap (current vs target)")
         total_buy_gap = 0.0
+        underweight_gaps: list[tuple[str, float]] = []
         for symbol, target_pct in alloc.items():
             symbol_upper = symbol.upper()
             current_pct = weight_by_symbol.get(symbol_upper, 0.0)
@@ -161,6 +162,8 @@ def format_diversification_summary_block(
                 f"({gap_pct:+.1f} pp) — {status}"
                 + (f", ~${buy_dollars:,.0f} to buy" if buy_dollars >= 1.0 else "")
             )
+            if gap_pct > 1.0 and buy_dollars >= 1.0:
+                underweight_gaps.append((symbol_upper, buy_dollars))
         if deployable_cash > 0 and total_buy_gap > 0:
             deploy_pct = min(deployable_cash / total_buy_gap, 1.0) * 100.0
             lines.append(
@@ -172,6 +175,17 @@ def format_diversification_summary_block(
                     "- Prioritize closing the largest ETF gaps first with available deployable cash; "
                     "use only the tickers listed above. Note any remaining gap for future contributions."
                 )
+            if underweight_gaps:
+                total_underweight_gap = sum(gap for _, gap in underweight_gaps)
+                lines.append(
+                    "\n## Suggested deploy plan (precomputed from deployable cash + ETF gaps)"
+                )
+                for symbol_upper, gap_dollars in underweight_gaps:
+                    deploy_amount = deployable_cash * (gap_dollars / total_underweight_gap)
+                    lines.append(
+                        f"- {symbol_upper}: ${deploy_amount:,.0f} "
+                        f"(of ${deployable_cash:,.0f} deployable cash)"
+                    )
 
     if profile and profile.primary_strategy == InvestmentStrategy.DIVIDEND:
         symbols = profile.dividend.dividend_symbols if profile.dividend else []

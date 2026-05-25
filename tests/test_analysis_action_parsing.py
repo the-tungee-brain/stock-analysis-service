@@ -264,9 +264,11 @@ def test_portfolio_allocation_prompts_do_not_hardcode_example_etfs():
 
     assert "SCHD and ~$1,310 BND" not in _STRUCTURED_V1_JSON_RULES
     assert "into SCHD and BND" not in _STRUCTURED_V1_JSON_RULES
-    assert "Format example only" in _STRUCTURED_V1_JSON_RULES
+    assert "$4,367" not in _STRUCTURED_V1_JSON_RULES
+    assert "$4,367" not in AMOUNT_SOURCING_RULES
+    assert "Suggested deploy plan" in _STRUCTURED_V1_JSON_RULES
+    assert "Suggested deploy plan" in AMOUNT_SOURCING_RULES
     assert "Ticker sourcing" in TICKER_SOURCING_RULES
     assert "Do NOT default to popular ETFs" in TICKER_SOURCING_RULES
-    assert "format examples only" in AMOUNT_SOURCING_RULES.lower()
     assert TICKER_SOURCING_RULES in SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE
     assert AMOUNT_SOURCING_RULES in SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE
