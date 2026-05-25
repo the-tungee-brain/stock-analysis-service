@@ -4,6 +4,7 @@ from app.core.prompts import (
     _position_pnl_pct,
     _position_weight_pct,
 )
+import pytest
 from app.models.schwab_models import (
     AggregatedBalance,
     CurrentBalances,
@@ -153,6 +154,61 @@ def _make_account(liquidation_value: float = 100_000.0) -> SchwabAccounts:
 def test_position_pnl_pct_from_cost_basis():
     position = _make_position(long_qty=100, avg=170.0, pnl=3000.0)
     assert _position_pnl_pct(position) == 3000 / 17000 * 100
+
+
+def test_option_pnl_pct_uses_contract_multiplier():
+    """Regression: avg $10 × 1 contract without ×100 inflated loss to ~-784%."""
+    position = Position(
+        shortQuantity=0.0,
+        averagePrice=10.0,
+        currentDayProfitLoss=0.0,
+        currentDayProfitLossPercentage=0.0,
+        longQuantity=1.0,
+        settledLongQuantity=1.0,
+        settledShortQuantity=0.0,
+        instrument=Instrument(
+            assetType="OPTION",
+            cusip="",
+            symbol="AAPL  260620C00200000",
+            putCall="CALL",
+            underlyingSymbol="AAPL",
+            strikePrice=200.0,
+            expirationDate="2026-06-20",
+        ),
+        marketValue=970.0,
+        maintenanceRequirement=0.0,
+        averageLongPrice=10.0,
+        longOpenProfitLoss=-30.0,
+        currentDayCost=0.0,
+    )
+
+    assert _position_pnl_pct(position) == pytest.approx(-3.0, abs=0.01)
+
+
+def test_option_pnl_pct_derives_basis_from_market_value_and_open_pl():
+    position = Position(
+        shortQuantity=0.0,
+        averagePrice=130.53,
+        currentDayProfitLoss=0.0,
+        currentDayProfitLossPercentage=0.0,
+        longQuantity=1.0,
+        settledLongQuantity=1.0,
+        settledShortQuantity=0.0,
+        instrument=Instrument(
+            assetType="OPTION",
+            cusip="",
+            symbol="MSFT",
+            putCall="CALL",
+        ),
+        marketValue=37.80,
+        maintenanceRequirement=0.0,
+        longOpenProfitLoss=-12.0,
+        currentDayCost=0.0,
+    )
+
+    assert _position_pnl_pct(position) == pytest.approx(
+        -12.0 / (37.80 + 12.0) * 100, abs=0.01
+    )
 
 
 def test_position_weight_pct_uses_portfolio_liquidation_value():

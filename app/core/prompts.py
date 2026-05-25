@@ -419,6 +419,13 @@ def _portfolio_liquidation_value(
     return total if total > 0 else None
 
 
+OPTION_CONTRACT_MULTIPLIER = 100.0
+
+
+def _is_option_position(position: Position) -> bool:
+    return position.instrument.assetType == "OPTION"
+
+
 def _position_pnl(position: Position) -> float:
     if position.longQuantity > 0:
         return position.longOpenProfitLoss or 0.0
@@ -428,15 +435,42 @@ def _position_pnl(position: Position) -> float:
 
 
 def _position_cost_basis(position: Position) -> float | None:
+    """Cost basis in dollars. Options use a 100-share contract multiplier."""
+    if position.longQuantity > 0 and position.longOpenProfitLoss is not None:
+        derived = position.marketValue - position.longOpenProfitLoss
+        if derived > 0:
+            return derived
+
+    if position.shortQuantity > 0 and position.shortOpenProfitLoss is not None:
+        derived = abs(position.marketValue) + position.shortOpenProfitLoss
+        if derived > 0:
+            return derived
+
+    multiplier = (
+        OPTION_CONTRACT_MULTIPLIER if _is_option_position(position) else 1.0
+    )
+
     if position.longQuantity > 0:
-        avg = position.averageLongPrice or position.averagePrice
-        basis = avg * position.longQuantity
+        avg = (
+            position.averageLongPrice
+            or position.taxLotAverageLongPrice
+            or position.averagePrice
+        )
+        qty = position.longQuantity
     elif position.shortQuantity > 0:
-        avg = position.averageShortPrice or position.averagePrice
-        basis = avg * position.shortQuantity
+        avg = (
+            position.averageShortPrice
+            or position.taxLotAverageShortPrice
+            or position.averagePrice
+        )
+        qty = position.shortQuantity
     else:
         return None
 
+    if avg is None or qty <= 0:
+        return None
+
+    basis = avg * qty * multiplier
     return basis if basis > 0 else None
 
 
@@ -561,7 +595,8 @@ def _enrich_positions_table(
         f"\nTABLE_TOTAL_ABS_MKT_VAL: {round(total_value, 2)}"
         f"\nTOTAL_DAY_PnL: {round(total_day_pnl, 2)}"
         f"\nNUM_POSITIONS: {len(positions_sorted)}"
-        f"\nNOTE: PNL_% = unrealized P/L vs cost basis. WEIGHT_% = abs(market value) / portfolio liquidation value."
+        f"\nNOTE: PNL_% = unrealized P/L vs cost basis (options use 100-share contract sizing). "
+        f"WEIGHT_% = abs(market value) / portfolio liquidation value."
         f"\nNOTE: RESERVED_CASH = strike × 100 × contracts for short cash-secured puts; — for other positions."
     )
 

@@ -176,37 +176,57 @@ class SignalEngine:
         weight = (total_mv / liquidation) * 100.0
 
         for position in scoped:
-            cost = position.averageLongPrice or position.taxLotAverageLongPrice
-            if position.longQuantity > 0 and cost and cost > 0:
-                # Approximate using market value / quantity for current price
+            cost_basis = None
+            if position.longQuantity > 0 and position.longOpenProfitLoss is not None:
+                derived = position.marketValue - position.longOpenProfitLoss
+                if derived > 0:
+                    cost_basis = derived
+            elif (
+                position.shortQuantity > 0 and position.shortOpenProfitLoss is not None
+            ):
+                derived = abs(position.marketValue) + position.shortOpenProfitLoss
+                if derived > 0:
+                    cost_basis = derived
+
+            if cost_basis is None:
+                avg = position.averageLongPrice or position.taxLotAverageLongPrice
                 qty = position.longQuantity
-                current = abs(position.marketValue) / qty if qty else None
-                if current:
-                    pnl_pct = (current / cost - 1.0) * 100.0
-                    if pnl_pct <= -30:
-                        signals.append(
-                            IntelligenceSignal(
-                                kind="drawdown",
-                                severity="critical",
-                                message=(
-                                    f"Unrealized loss ~{pnl_pct:.0f}% on {symbol} — "
-                                    "urgent risk review recommended."
-                                ),
-                                symbol=symbol,
-                            )
+                if position.instrument.assetType == "OPTION":
+                    qty = qty * 100.0
+                if position.longQuantity > 0 and avg and avg > 0 and qty:
+                    cost_basis = avg * qty
+
+            if cost_basis and cost_basis > 0 and position.longQuantity > 0:
+                pnl = position.longOpenProfitLoss
+                if pnl is not None:
+                    pnl_pct = (pnl / cost_basis) * 100.0
+                else:
+                    pnl_pct = (position.marketValue / cost_basis - 1.0) * 100.0
+
+                if pnl_pct <= -30:
+                    signals.append(
+                        IntelligenceSignal(
+                            kind="drawdown",
+                            severity="critical",
+                            message=(
+                                f"Unrealized loss ~{pnl_pct:.0f}% on {symbol} — "
+                                "urgent risk review recommended."
+                            ),
+                            symbol=symbol,
                         )
-                    elif pnl_pct <= -20:
-                        signals.append(
-                            IntelligenceSignal(
-                                kind="drawdown",
-                                severity="warning",
-                                message=(
-                                    f"Unrealized loss ~{pnl_pct:.0f}% on {symbol} — "
-                                    "thesis and sizing review recommended."
-                                ),
-                                symbol=symbol,
-                            )
+                    )
+                elif pnl_pct <= -20:
+                    signals.append(
+                        IntelligenceSignal(
+                            kind="drawdown",
+                            severity="warning",
+                            message=(
+                                f"Unrealized loss ~{pnl_pct:.0f}% on {symbol} — "
+                                "thesis and sizing review recommended."
+                            ),
+                            symbol=symbol,
                         )
+                    )
 
         if weight >= 30:
             signals.append(
