@@ -106,3 +106,54 @@ def test_prompt_uses_fewer_headlines_than_email_display():
     assert block is not None
     assert block.count("Headline") == MARKET_NEWS_PROMPT_LIMIT
     assert "Headline 4" not in block
+    assert "Market headlines (general, last 24h)" in block
+
+
+def test_format_macro_market_block_standalone():
+    block = PromptEnrichmentService.format_macro_market_block(
+        macro_regime="VIX at 18.0",
+        macro_news=[
+            MarketNewsItem(
+                headline="Fed holds rates steady",
+                source="Reuters",
+                url="https://example.com/fed",
+            )
+        ],
+    )
+
+    assert block is not None
+    assert "## Macro regime" in block
+    assert "VIX at 18.0" in block
+    assert "Market headlines (general, last 24h)" in block
+    assert "Fed holds rates steady" in block
+    assert "https://example.com/fed" in block
+
+
+def test_build_macro_market_context_block_uses_news_service():
+    news_service = MagicMock()
+    news_service.get_market_news.return_value = NewsResponse(
+        root=[
+            NewsItem(
+                category="general",
+                datetime=datetime.now(timezone.utc),
+                headline="Oil prices slip",
+                id=1,
+                related="",
+                source="Bloomberg",
+                summary="Energy markets",
+                url="https://example.com/oil",
+            )
+        ]
+    )
+
+    service = PortfolioIntelligenceService(
+        peer_comparison_service=MagicMock(),
+        enriched_news_service=MagicMock(),
+        news_service=news_service,
+    )
+
+    block = service.build_macro_market_context_block(macro_snapshots={})
+
+    assert block is not None
+    assert "Oil prices slip" in block
+    news_service.get_market_news.assert_called_once()

@@ -73,7 +73,7 @@ def test_signal_engine_flags_earnings_and_concentration():
     assert "position_size" in kinds or "concentration" in kinds
 
 
-def test_event_timeline_includes_earnings_and_enriched_news_context():
+def test_event_timeline_skips_news_when_enriched_summary_present():
     ctx = _research_context(
         news=[
             NewsHeadline(
@@ -88,11 +88,12 @@ def test_event_timeline_includes_earnings_and_enriched_news_context():
     timeline = EventTimelineBuilder.build(research=ctx, orders=[])
 
     assert any(entry.kind == "earnings" for entry in timeline)
-    assert any(entry.kind == "news" for entry in timeline)
+    assert not any(entry.kind == "news" for entry in timeline)
 
 
-def test_event_timeline_includes_news_url_for_external_link():
+def test_event_timeline_includes_news_url_when_enriched_summary_missing():
     ctx = _research_context(
+        enriched_news=None,
         news=[
             NewsHeadline(
                 headline="NVIDIA raises guidance",
@@ -101,7 +102,7 @@ def test_event_timeline_includes_news_url_for_external_link():
                 datetime=datetime.now(timezone.utc).isoformat(),
                 url="https://example.com/nvda-news",
             )
-        ]
+        ],
     )
 
     timeline = EventTimelineBuilder.build(research=ctx, orders=[])
@@ -239,6 +240,28 @@ def test_research_context_block_includes_enriched_news():
 
     assert "AI news analysis" in block
     assert "iPhone demand" in block
+    assert "Recent news headlines" not in block
+
+
+def test_research_context_block_uses_raw_news_without_enriched_summary():
+    ctx = _research_context(
+        enriched_news=None,
+        news=[
+            NewsHeadline(
+                headline="Apple supplier update",
+                summary="Supply chain note.",
+                source="Reuters",
+                datetime="2026-05-20",
+            )
+        ],
+    )
+    block = PromptEnrichmentService()._format_research_context_block(
+        ctx, action=AnalysisAction.DAILY_SUMMARY
+    )
+
+    assert "Recent news headlines" in block
+    assert "Apple supplier update" in block
+    assert "AI news analysis" not in block
 
 
 def test_build_symbol_prompt_includes_intelligence_section():

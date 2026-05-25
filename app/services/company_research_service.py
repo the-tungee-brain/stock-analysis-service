@@ -121,6 +121,7 @@ class CompanyResearchService:
     def _load_news(
         self, symbol: str, *, lookback_days: int = 7
     ) -> list[NewsHeadline]:
+        # Finnhub /company-news is scoped to the requested symbol.
         news_response = self.news_service.get_company_news(
             symbol=symbol, lookback_days=lookback_days
         )

@@ -176,6 +176,17 @@ class MarketNewsItem(BaseModel):
     image: str | None = None
 
 
+class HoldingCompanyNewsItem(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
+    symbol: str
+    headline: str
+    source: str | None = None
+    summary: str | None = None
+    url: str | None = None
+    weight_pct: float | None = Field(default=None, serialization_alias="weightPct")
+
+
 class PortfolioDigest(BaseModel):
     model_config = _INTELLIGENCE_MODEL_CONFIG
 
@@ -188,6 +199,9 @@ class PortfolioDigest(BaseModel):
     )
     top_news: list[PortfolioNewsItem] = Field(
         default_factory=list, serialization_alias="topNews"
+    )
+    top_holdings_company_news: list[HoldingCompanyNewsItem] = Field(
+        default_factory=list, serialization_alias="topHoldingsCompanyNews"
     )
     earnings_this_week: list[str] = Field(
         default_factory=list, serialization_alias="earningsThisWeek"

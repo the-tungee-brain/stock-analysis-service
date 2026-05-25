@@ -31,6 +31,7 @@ from typing import List, Tuple, Dict, Any, Optional
 from app.models.finnhub_news_models import NewsResponse
 from app.models.company_research_models import ResearchContext, FundamentalMetric, SecRatioTrendPoint, NewsHeadline
 from app.models.intelligence_models import (
+    MarketNewsItem,
     OptionsScorecard,
     PeerComparison,
     PortfolioDigest,
@@ -93,6 +94,8 @@ RESEARCH_CHAT_SYSTEM_MESSAGE = dedent(f"""
     - Answer directly in friendly, flowing prose — not a rigid report template.
     - Start with a direct response to the user's question, then add supporting detail.
     - Ground claims in the company data provided (price, performance, news, SEC, fundamentals).
+    - When precomputed intelligence includes **Market headlines (general, last 24h)**, use them for
+      macro backdrop and sector-wide catalysts — not as confirmed company-specific facts unless named.
     - Use "you" naturally. Short paragraphs are easier to read than long walls of text.
     - Explain jargon briefly when needed (e.g., "free cash flow = cash left after running the business").
     - If the user asks whether to buy or sell, explain bull case, bear case, and key risks —
@@ -262,11 +265,17 @@ class PromptEnrichmentService:
             AnalysisAction.TAX_ANGLE,
             AnalysisAction.ASSIGNMENT_RISK,
         }
+        prefer_raw_news = (
+            since is not None and action is AnalysisAction.WHAT_CHANGED
+        )
+        has_enriched_news = bool(
+            include_enriched_news and ctx.enriched_news and not prefer_raw_news
+        )
         include_press_releases = include_news and action not in {
             AnalysisAction.TAX_ANGLE,
             AnalysisAction.ASSIGNMENT_RISK,
             AnalysisAction.RISK_CHECK,
-        }
+        } and not has_enriched_news
 
         sections: list[str] = [f"Symbol: {ctx.symbol}"]
 
@@ -320,7 +329,9 @@ class PromptEnrichmentService:
             else:
                 sections.append("## Price performance\nNo performance data available.")
 
-        if include_news:
+        include_raw_news = include_news and not has_enriched_news
+
+        if include_raw_news:
             news_items = ctx.news or []
             news_heading = "## Recent news headlines (past 7 days)"
             if since is not None and action is AnalysisAction.WHAT_CHANGED:
@@ -345,7 +356,7 @@ class PromptEnrichmentService:
             else:
                 sections.append("## Recent news headlines\nNo recent headlines available.")
 
-        if include_enriched_news and ctx.enriched_news:
+        if has_enriched_news and ctx.enriched_news:
             enriched = ctx.enriched_news
             insight_lines = "\n".join(f"- {item}" for item in enriched.insights[:4])
             risk_lines = "\n".join(f"- {item}" for item in enriched.risks[:3])
@@ -990,6 +1001,30 @@ class PromptEnrichmentService:
         return "\n\n".join(sections)
 
     @staticmethod
+    def format_macro_market_block(
+        *,
+        macro_regime: str | None,
+        macro_news: list[MarketNewsItem] | None,
+    ) -> str | None:
+        sections: list[str] = []
+
+        if macro_regime:
+            sections.append(f"## Macro regime\n{macro_regime}")
+
+        if macro_news:
+            macro_lines = [
+                f"- {item.headline}"
+                + (f" ({item.source})" if item.source else "")
+                + (f" {item.url}" if item.url else "")
+                for item in macro_news[:MARKET_NEWS_PROMPT_LIMIT]
+            ]
+            sections.append(
+                "## Market headlines (general, last 24h)\n" + "\n".join(macro_lines)
+            )
+
+        return "\n\n".join(sections) if sections else None
+
+    @staticmethod
     def format_portfolio_intelligence_block(
         intelligence: PortfolioIntelligence | None,
     ) -> str | None:
@@ -1009,17 +1044,12 @@ class PromptEnrichmentService:
 
         digest = intelligence.digest
         if digest:
-            if digest.macro_regime:
-                sections.append(f"## Macro regime\n{digest.macro_regime}")
-
-            if digest.macro_news:
-                macro_lines = [
-                    f"- {item.headline}"
-                    + (f" ({item.source})" if item.source else "")
-                    + (f" {item.url}" if item.url else "")
-                    for item in digest.macro_news[:MARKET_NEWS_PROMPT_LIMIT]
-                ]
-                sections.append("## Market headlines\n" + "\n".join(macro_lines))
+            macro_block = PromptEnrichmentService.format_macro_market_block(
+                macro_regime=digest.macro_regime,
+                macro_news=digest.macro_news,
+            )
+            if macro_block:
+                sections.append(macro_block)
 
             if digest.sector_weights:
                 sector_lines = [

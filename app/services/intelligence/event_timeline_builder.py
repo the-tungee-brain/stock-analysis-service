@@ -116,44 +116,46 @@ class EventTimelineBuilder:
                 )
 
         news_items = list(research.news)
-        if research.enriched_news and research.enriched_news.dominant_driver:
-            pass
+        skip_headline_events = bool(
+            research.enriched_news and research.enriched_news.dominant_driver
+        )
 
-        for item in news_items[:5]:
-            published = EventTimelineBuilder._parse_datetime(item.datetime)
-            if published is None:
-                continue
-            if since is not None and published < since:
-                continue
-            entries.append(
-                (
-                    published,
-                    EventTimelineEntry(
-                        date=published.strftime("%Y-%m-%d"),
-                        kind="news",
-                        title=item.headline[:120],
-                        detail=item.source or None,
-                        url=item.url,
-                    ),
+        if not skip_headline_events:
+            for item in news_items[:5]:
+                published = EventTimelineBuilder._parse_datetime(item.datetime)
+                if published is None:
+                    continue
+                if since is not None and published < since:
+                    continue
+                entries.append(
+                    (
+                        published,
+                        EventTimelineEntry(
+                            date=published.strftime("%Y-%m-%d"),
+                            kind="news",
+                            title=item.headline[:120],
+                            detail=item.source or None,
+                            url=item.url,
+                        ),
+                    )
                 )
-            )
 
-        for item in research.press_releases[:3]:
-            published = EventTimelineBuilder._parse_datetime(item.datetime)
-            if published is None:
-                continue
-            entries.append(
-                (
-                    published,
-                    EventTimelineEntry(
-                        date=published.strftime("%Y-%m-%d"),
-                        kind="press_release",
-                        title=item.headline[:120],
-                        detail=item.source or None,
-                        url=item.url,
-                    ),
+            for item in research.press_releases[:3]:
+                published = EventTimelineBuilder._parse_datetime(item.datetime)
+                if published is None:
+                    continue
+                entries.append(
+                    (
+                        published,
+                        EventTimelineEntry(
+                            date=published.strftime("%Y-%m-%d"),
+                            kind="press_release",
+                            title=item.headline[:120],
+                            detail=item.source or None,
+                            url=item.url,
+                        ),
+                    )
                 )
-            )
 
         entries.sort(key=lambda pair: pair[0], reverse=True)
         return [entry for _, entry in entries[: EventTimelineBuilder.MAX_ENTRIES]]

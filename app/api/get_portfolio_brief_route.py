@@ -34,7 +34,7 @@ async def get_portfolio_brief(
     ),
     refresh: bool = Query(
         default=False,
-        description="Bypass cached order history when loading suggested actions",
+        description="Bypass cached order history and portfolio brief when refreshing",
     ),
 ) -> PortfolioIntelligence:
     try:
@@ -68,11 +68,12 @@ async def get_portfolio_brief(
         suggested_actions = []
 
     return await asyncio.to_thread(
-        portfolio_analysis_service.build_portfolio_brief,
+        portfolio_analysis_service.build_portfolio_brief_with_cache,
         user_id=user_id,
         account=account,
         positions=positions,
         access_token=schwab_token.access_token,
         suggested_actions=suggested_actions,
         assignment_risk_summary=assignment_risk_summary,
+        refresh=refresh,
     )

@@ -2,7 +2,7 @@ import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
-from typing import List, Optional, Set
+from typing import TYPE_CHECKING, List, Optional, Set
 
 from app.broker.option_utils import (
     DEFAULT_OPTION_CHAIN_LOOKAHEAD_DAYS,
@@ -44,6 +44,9 @@ from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.schwab_auth_service import SchwabAuthService
 from app.broker.order_utils import is_order_within_days
 from app.services.transaction_service import RECENT_ACTIVITY_DAYS, TransactionService
+
+if TYPE_CHECKING:
+    from app.adapters.cache.portfolio_brief_cache import PortfolioBriefCache
 
 BENCHMARK_SYMBOLS = ["$SPX", "$DJI", "$VIX", "TLT"]
 TRANSACTION_ACTIONS = frozenset(
@@ -87,6 +90,50 @@ class PortfolioAnalysisService:
         self.portfolio_intelligence_service = portfolio_intelligence_service
         self.profile_adapter = profile_adapter
         self.portfolio_brief_cache = portfolio_brief_cache
+
+    def _portfolio_brief_fingerprint(
+        self,
+        positions: List[Position],
+        account,
+    ) -> str | None:
+        cache = self.portfolio_brief_cache
+        if cache is None:
+            return None
+        return cache.fingerprint(positions, account)
+
+    def _get_cached_portfolio_brief(
+        self,
+        *,
+        user_id: str,
+        fingerprint: str,
+        variant: str,
+    ) -> PortfolioIntelligence | None:
+        cache = self.portfolio_brief_cache
+        if cache is None:
+            return None
+        return cache.get(
+            user_id=user_id,
+            fingerprint=fingerprint,
+            variant=variant,
+        )
+
+    def _put_cached_portfolio_brief(
+        self,
+        *,
+        user_id: str,
+        fingerprint: str,
+        brief: PortfolioIntelligence,
+        variant: str,
+    ) -> None:
+        cache = self.portfolio_brief_cache
+        if cache is None or not fingerprint:
+            return
+        cache.put(
+            user_id=user_id,
+            fingerprint=fingerprint,
+            brief=brief,
+            variant=variant,
+        )
 
     def _get_investment_profile(self, user_id: str) -> UserInvestmentProfile | None:
         try:
@@ -242,7 +289,7 @@ class PortfolioAnalysisService:
                     )
 
                 intelligence = await asyncio.to_thread(
-                    self._load_portfolio_intelligence,
+                    self.build_portfolio_brief_with_cache,
                     user_id=user_id,
                     account=account,
                     positions=positions,
@@ -399,6 +446,17 @@ class PortfolioAnalysisService:
                 snapshots=market_context_snapshots
             )
         )
+        macro_market_block = await asyncio.to_thread(
+            self._build_macro_market_context_block,
+            macro_snapshots=market_context_snapshots,
+        )
+        if macro_market_block:
+            if market_context_snapshots_markdown:
+                market_context_snapshots_markdown = (
+                    f"{market_context_snapshots_markdown}\n\n{macro_market_block}"
+                )
+            else:
+                market_context_snapshots_markdown = macro_market_block
         option_chains_markdown = (
             self.prompt_enrichment_service.resolve_option_chain_block(
                 chain=option_chains,
@@ -535,6 +593,18 @@ class PortfolioAnalysisService:
 
         return research_context_block, intelligence_block, has_options_scorecard
 
+    def _build_macro_market_context_block(
+        self,
+        *,
+        macro_snapshots: dict | None = None,
+    ) -> str | None:
+        try:
+            return self.portfolio_intelligence_service.build_macro_market_context_block(
+                macro_snapshots=macro_snapshots,
+            )
+        except Exception:
+            return None
+
     def _load_portfolio_intelligence(
         self,
         *,
@@ -630,6 +700,46 @@ class PortfolioAnalysisService:
             return PortfolioIntelligence()
         return intelligence
 
+    def build_portfolio_brief_with_cache(
+        self,
+        *,
+        user_id: str,
+        account: SchwabAccounts,
+        positions: List[Position],
+        access_token: str,
+        suggested_actions: list | None = None,
+        assignment_risk_summary: dict[str, object] | None = None,
+        refresh: bool = False,
+    ) -> PortfolioIntelligence:
+        from app.adapters.cache.portfolio_brief_cache import PortfolioBriefCache
+
+        fingerprint = self._portfolio_brief_fingerprint(positions, account)
+        if not refresh and fingerprint is not None:
+            cached = self._get_cached_portfolio_brief(
+                user_id=user_id,
+                fingerprint=fingerprint,
+                variant=PortfolioBriefCache.VARIANT_FULL,
+            )
+            if cached is not None:
+                return cached
+
+        brief = self.build_portfolio_brief(
+            user_id=user_id,
+            account=account,
+            positions=positions,
+            access_token=access_token,
+            suggested_actions=suggested_actions,
+            assignment_risk_summary=assignment_risk_summary,
+            lightweight=False,
+        )
+        self._put_cached_portfolio_brief(
+            user_id=user_id,
+            fingerprint=fingerprint,
+            brief=brief,
+            variant=PortfolioBriefCache.VARIANT_FULL,
+        )
+        return brief
+
     def build_portfolio_brief_for_positions_load(
         self,
         *,
@@ -641,15 +751,15 @@ class PortfolioAnalysisService:
         assignment_risk_summary: dict[str, object] | None = None,
         refresh: bool = False,
     ) -> PortfolioIntelligence:
-        fingerprint: str | None = None
-        cache = self.portfolio_brief_cache
+        from app.adapters.cache.portfolio_brief_cache import PortfolioBriefCache
 
-        if cache is not None and not refresh:
-            fingerprint = cache.fingerprint(positions, account)
-            try:
-                cached = cache.get(user_id=user_id, fingerprint=fingerprint)
-            except Exception:
-                cached = None
+        fingerprint = self._portfolio_brief_fingerprint(positions, account)
+        if not refresh and fingerprint is not None:
+            cached = self._get_cached_portfolio_brief(
+                user_id=user_id,
+                fingerprint=fingerprint,
+                variant=PortfolioBriefCache.VARIANT_LIGHT,
+            )
             if cached is not None:
                 return cached
 
@@ -662,15 +772,12 @@ class PortfolioAnalysisService:
             assignment_risk_summary=assignment_risk_summary,
             lightweight=True,
         )
-
-        if cache is not None:
-            if fingerprint is None:
-                fingerprint = cache.fingerprint(positions, account)
-            try:
-                cache.put(user_id=user_id, fingerprint=fingerprint, brief=brief)
-            except Exception:
-                pass
-
+        self._put_cached_portfolio_brief(
+            user_id=user_id,
+            fingerprint=fingerprint,
+            brief=brief,
+            variant=PortfolioBriefCache.VARIANT_LIGHT,
+        )
         return brief
 
     def build_symbol_intelligence(
@@ -882,6 +989,24 @@ class PortfolioAnalysisService:
         except Exception:
             intelligence_block = None
 
+        if access_token:
+            try:
+                macro_snapshots = self.market_service.get_enriched_quote_snapshot(
+                    access_token=access_token,
+                    symbols=BENCHMARK_SYMBOLS,
+                )
+                macro_block = self._build_macro_market_context_block(
+                    macro_snapshots=macro_snapshots,
+                )
+                if macro_block:
+                    intelligence_block = (
+                        f"{macro_block}\n\n{intelligence_block}"
+                        if intelligence_block
+                        else macro_block
+                    )
+            except Exception:
+                pass
+
         return holdings_block, intelligence_block
 
     def _build_portfolio_intelligence_block(
@@ -894,7 +1019,7 @@ class PortfolioAnalysisService:
         action: AnalysisAction,
     ) -> str | None:
         _ = action
-        intelligence = self._load_portfolio_intelligence(
+        intelligence = self.build_portfolio_brief_with_cache(
             user_id=user_id,
             account=account,
             positions=positions,
@@ -940,7 +1065,7 @@ class PortfolioAnalysisService:
         access_token: str,
         suggested_actions: list | None = None,
     ) -> list[ProactiveAlert]:
-        intelligence = self._load_portfolio_intelligence(
+        intelligence = self.build_portfolio_brief_with_cache(
             user_id=user_id,
             account=account,
             positions=positions,

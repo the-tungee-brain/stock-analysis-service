@@ -13,6 +13,8 @@ from app.models.schwab_models import Position, SchwabAccounts
 
 class PortfolioBriefCache:
     DEFAULT_TTL_SECONDS = 900
+    VARIANT_FULL = "full"
+    VARIANT_LIGHT = "light"
 
     def __init__(
         self,
@@ -56,12 +58,28 @@ class PortfolioBriefCache:
         digest = hashlib.sha256("|".join(parts).encode()).hexdigest()
         return digest[:20]
 
-    def _redis_key(self, *, user_id: str, fingerprint: str) -> str:
-        return f"{self.key_prefix}:{user_id}:{fingerprint}"
+    def _redis_key(
+        self,
+        *,
+        user_id: str,
+        fingerprint: str,
+        variant: str = VARIANT_FULL,
+    ) -> str:
+        return f"{self.key_prefix}:{variant}:{user_id}:{fingerprint}"
 
-    def get(self, *, user_id: str, fingerprint: str) -> Optional[PortfolioIntelligence]:
+    def get(
+        self,
+        *,
+        user_id: str,
+        fingerprint: str,
+        variant: str = VARIANT_FULL,
+    ) -> Optional[PortfolioIntelligence]:
         raw = self.redis_client.get(
-            self._redis_key(user_id=user_id, fingerprint=fingerprint)
+            self._redis_key(
+                user_id=user_id,
+                fingerprint=fingerprint,
+                variant=variant,
+            )
         )
         if not raw:
             return None
@@ -77,11 +95,16 @@ class PortfolioBriefCache:
         user_id: str,
         fingerprint: str,
         brief: PortfolioIntelligence,
+        variant: str = VARIANT_FULL,
     ) -> None:
         if self.ttl_seconds <= 0:
             return
         self.redis_client.setex(
-            self._redis_key(user_id=user_id, fingerprint=fingerprint),
+            self._redis_key(
+                user_id=user_id,
+                fingerprint=fingerprint,
+                variant=variant,
+            ),
             self.ttl_seconds,
             brief.model_dump_json(by_alias=True),
         )

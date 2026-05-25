@@ -24,7 +24,7 @@ def test_portfolio_brief_cache_roundtrip():
 
     redis_client.setex.assert_called_once()
     key, ttl, payload = redis_client.setex.call_args[0]
-    assert key == f"portfolio:brief:user-1:{fingerprint}"
+    assert key == f"portfolio:brief:full:user-1:{fingerprint}"
     assert ttl == cache.ttl_seconds
     assert "signals" in payload
 
@@ -98,5 +98,48 @@ def test_build_portfolio_brief_for_positions_load_uses_cache():
     )
 
     assert brief is cached_brief
+    cache.get.assert_called_once_with(
+        user_id="user-1",
+        fingerprint="fp123",
+        variant=PortfolioBriefCache.VARIANT_LIGHT,
+    )
     company_research_service.build_lightweight_context.assert_not_called()
+    company_research_service.build_context.assert_not_called()
+
+
+def test_build_portfolio_brief_with_cache_uses_full_variant():
+    cache = MagicMock()
+    cached_brief = PortfolioIntelligence(signals=[], digest=None, alerts=[])
+    cache.fingerprint.return_value = "fp456"
+    cache.get.return_value = cached_brief
+
+    company_research_service = MagicMock()
+
+    service = PortfolioAnalysisService(
+        market_service=MagicMock(),
+        schwab_auth_service=MagicMock(),
+        prompt_enrichment_service=MagicMock(),
+        company_research_service=company_research_service,
+        transaction_service=MagicMock(),
+        portfolio_intelligence_service=MagicMock(),
+        profile_adapter=MagicMock(),
+        portfolio_brief_cache=cache,
+    )
+
+    account = _make_account()
+    positions = [_make_position(symbol="AAPL", market_value=50_000)]
+
+    brief = service.build_portfolio_brief_with_cache(
+        user_id="user-1",
+        account=account,
+        positions=positions,
+        access_token="token",
+    )
+
+    assert brief is cached_brief
+    cache.get.assert_called_once_with(
+        user_id="user-1",
+        fingerprint="fp456",
+        variant=PortfolioBriefCache.VARIANT_FULL,
+    )
     company_research_service.build_context.assert_not_called()

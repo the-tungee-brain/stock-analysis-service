@@ -9,6 +9,7 @@ from app.broker.option_chain_table import build_option_chain_table
 from app.broker.sector_labels import normalize_sector_label
 from app.models.intelligence_models import (
     CachedResearchSnippet,
+    HoldingCompanyNewsItem,
     MarketNewsItem,
     OptionChainPreview,
     OptionChainSideQuote,
@@ -26,6 +27,7 @@ from app.models.schwab_order_models import SchwabOrder
 from app.services.company_research_service import CompanyResearchService
 from app.services.enriched_news_service import EnrichedNewsService
 from app.services.news_service import NewsService
+from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.intelligence.event_timeline_builder import EventTimelineBuilder
 from app.services.intelligence.option_roll_planner_service import OptionRollPlannerService
 from app.services.intelligence.options_scoring_service import OptionsScoringService
@@ -33,6 +35,9 @@ from app.services.intelligence.peer_comparison_service import PeerComparisonServ
 from app.services.intelligence.signal_engine import SignalEngine, build_proactive_alerts
 
 INTELLIGENCE_OPTION_STRIKE_COUNT = 5
+TOP_HOLDINGS_COMPANY_NEWS_SYMBOL_LIMIT = 5
+TOP_HOLDINGS_COMPANY_NEWS_HEADLINES_PER_SYMBOL = 2
+COMPANY_NEWS_SUMMARY_MAX_LEN = 120
 
 
 def _map_option_chain_side_quote(
@@ -225,6 +230,11 @@ class PortfolioIntelligenceService:
                 positions=positions,
                 account=account,
             ),
+            top_holdings_company_news=self._top_holdings_company_news(
+                research_contexts=top_holdings_research or [],
+                positions=positions,
+                account=account,
+            ),
             earnings_this_week=self._earnings_this_week(
                 research_contexts=top_holdings_research or []
             ),
@@ -368,6 +378,81 @@ class PortfolioIntelligenceService:
 
         return "; ".join(parts) if parts else None
 
+    @staticmethod
+    def _portfolio_weight_by_symbol(
+        positions: list[Position],
+    ) -> dict[str, float]:
+        weight_by_symbol: dict[str, float] = {}
+        for position in positions:
+            symbol = PortfolioIntelligenceService._position_symbol(position).upper()
+            weight_by_symbol[symbol] = weight_by_symbol.get(symbol, 0.0) + abs(
+                position.marketValue
+            )
+        return weight_by_symbol
+
+    @staticmethod
+    def _truncate_company_news_summary(summary: str | None) -> str | None:
+        if not summary:
+            return None
+        trimmed = summary.strip()
+        if len(trimmed) <= COMPANY_NEWS_SUMMARY_MAX_LEN:
+            return trimmed
+        return f"{trimmed[: COMPANY_NEWS_SUMMARY_MAX_LEN - 1].rstrip()}…"
+
+    def _top_holdings_company_news(
+        self,
+        *,
+        research_contexts: list[ResearchContext],
+        positions: list[Position],
+        account: SchwabAccounts,
+    ) -> list[HoldingCompanyNewsItem]:
+        """Headlines from each holding's Finnhub company-news feed (per-symbol API)."""
+        liquidation = account.securitiesAccount.currentBalances.liquidationValue
+        if liquidation <= 0 or not research_contexts:
+            return []
+
+        weight_by_symbol = self._portfolio_weight_by_symbol(positions)
+        ranked_contexts = sorted(
+            research_contexts,
+            key=lambda ctx: weight_by_symbol.get(ctx.symbol.upper(), 0.0),
+            reverse=True,
+        )
+
+        items: list[HoldingCompanyNewsItem] = []
+        symbols_included = 0
+
+        for ctx in ranked_contexts:
+            if symbols_included >= TOP_HOLDINGS_COMPANY_NEWS_SYMBOL_LIMIT:
+                break
+            if not ctx.news:
+                continue
+
+            weight = weight_by_symbol.get(ctx.symbol.upper(), 0.0)
+            weight_pct = (weight / liquidation) * 100.0 if weight else None
+            headlines_added = 0
+
+            for headline in ctx.news:
+                if headlines_added >= TOP_HOLDINGS_COMPANY_NEWS_HEADLINES_PER_SYMBOL:
+                    break
+                if not headline.headline:
+                    continue
+                items.append(
+                    HoldingCompanyNewsItem(
+                        symbol=ctx.symbol,
+                        headline=headline.headline[:160],
+                        source=headline.source or None,
+                        summary=self._truncate_company_news_summary(headline.summary),
+                        url=headline.url or None,
+                        weight_pct=weight_pct,
+                    )
+                )
+                headlines_added += 1
+
+            if headlines_added:
+                symbols_included += 1
+
+        return items
+
     def _macro_market_news(self) -> list[MarketNewsItem]:
         if self.news_service is None:
             return []
@@ -387,6 +472,16 @@ class PortfolioIntelligenceService:
             if item.headline
         ]
 
+    def build_macro_market_context_block(
+        self,
+        *,
+        macro_snapshots: dict[str, PromptQuoteSnapshot] | None = None,
+    ) -> str | None:
+        return PromptEnrichmentService.format_macro_market_block(
+            macro_regime=self._macro_regime(macro_snapshots or {}),
+            macro_news=self._macro_market_news(),
+        )
+
     def _portfolio_news_digest(
         self,
         *,
@@ -398,12 +493,7 @@ class PortfolioIntelligenceService:
         if liquidation <= 0:
             return []
 
-        weight_by_symbol: dict[str, float] = {}
-        for position in positions:
-            symbol = self._position_symbol(position).upper()
-            weight_by_symbol[symbol] = weight_by_symbol.get(symbol, 0.0) + abs(
-                position.marketValue
-            )
+        weight_by_symbol = self._portfolio_weight_by_symbol(positions)
 
         items: list[tuple[float, PortfolioNewsItem]] = []
         for ctx in research_contexts:

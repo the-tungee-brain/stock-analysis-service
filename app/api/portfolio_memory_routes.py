@@ -109,13 +109,14 @@ async def get_attention_queue(
         suggested_actions = []
 
     portfolio_brief = await asyncio.to_thread(
-        portfolio_analysis_service.build_portfolio_brief,
+        portfolio_analysis_service.build_portfolio_brief_with_cache,
         user_id=user_id,
         account=account,
         positions=positions,
         access_token=schwab_token.access_token,
         suggested_actions=suggested_actions,
         assignment_risk_summary=account_map["assignmentRiskSummary"],
+        refresh=refresh,
     )
 
     queue = await asyncio.to_thread(

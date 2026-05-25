@@ -435,7 +435,7 @@ PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
 
     ## Step 1 — Read precomputed concentration data
     - Use **WEIGHT_%** in the positions table and **DIVERSIFICATION SUMMARY** — do not recalculate unless N/A.
-    - Use **Sector allocation** from PORTFOLIO INTELLIGENCE when present.
+    - Use **Sector allocation** and **Market headlines (general, last 24h)** from PORTFOLIO INTELLIGENCE when present.
     - Treat short-put underlyings as intentional concentration (options overlay).
 
     ## Step 2 — Single-name concentration
@@ -569,6 +569,11 @@ DATA_INTEGRITY_RULES = dedent("""
     - For probability or target-move questions on options, use held-contract delta/IV/mark and the
       precomputed profit scenarios when provided. If broker greeks are missing (-999 placeholders),
       use estimated delta/IV values labeled in the feed and give rough move/probability ranges.
+    - When **Market headlines (general, last 24h)** appear in PORTFOLIO INTELLIGENCE or MACRO CONTEXT,
+      use them as broad-market catalysts — tie to sector/theme risk, timing, and confidence when relevant.
+      Do not treat them as company-specific news unless the headline clearly names a held symbol.
+    - When **Top holdings news digest** appears in PORTFOLIO INTELLIGENCE, treat it as the main
+      symbol-specific catalyst summary for top positions — do not invent additional headlines.
     """).strip()
 
 _PORTFOLIO_ALLOCATION_CORE = dedent(f"""
