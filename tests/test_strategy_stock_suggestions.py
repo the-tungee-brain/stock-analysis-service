@@ -6,6 +6,7 @@ from app.models.strategy_models import (
     DividendStrategyConfig,
     InvestmentStrategy,
     StrategyStockPick,
+    StrategyStockPickLLM,
     StrategyStockSuggestionsLLMResponse,
     UserInvestmentProfile,
     WheelStrategyConfig,
@@ -64,6 +65,16 @@ def test_profile_fingerprint_changes_with_preferences():
     assert fp_a != fp_b
 
 
+def test_openai_schema_marks_all_properties_required():
+    from app.core.llm_json import openai_response_schema
+
+    schema = openai_response_schema(StrategyStockSuggestionsLLMResponse)
+    assert set(schema["required"]) == set(schema["properties"].keys())
+
+    pick_schema = schema["$defs"]["StrategyStockPickLLM"]
+    assert set(pick_schema["required"]) == set(pick_schema["properties"].keys())
+
+
 def test_build_strategy_stock_suggestions_prompt_includes_preferences():
     profile = UserInvestmentProfile(
         user_id="user-1",
@@ -94,18 +105,18 @@ async def test_suggest_stocks_returns_ranked_picks():
     llm_service.generate_from_prompts = AsyncMock(
         return_value=StrategyStockSuggestionsLLMResponse(
             picks=[
-                StrategyStockPick(
+                StrategyStockPickLLM(
                     symbol="ko",
-                    company_name="Coca-Cola",
+                    companyName="Coca-Cola",
                     rationale="Stable dividend payer.",
-                    fit_score=0.91,
+                    fitScore=0.91,
                     tags=["dividend"],
                 ),
-                StrategyStockPick(
+                StrategyStockPickLLM(
                     symbol="JNJ",
-                    company_name="Johnson & Johnson",
+                    companyName="Johnson & Johnson",
                     rationale="Defensive income name.",
-                    fit_score=0.88,
+                    fitScore=0.88,
                     tags=["healthcare"],
                 ),
             ],
@@ -138,15 +149,19 @@ async def test_suggest_stocks_excludes_existing_symbols():
     llm_service.generate_from_prompts = AsyncMock(
         return_value=StrategyStockSuggestionsLLMResponse(
             picks=[
-                StrategyStockPick(
+                StrategyStockPickLLM(
                     symbol="AAPL",
+                    companyName="Apple Inc.",
                     rationale="Already held.",
-                    fit_score=0.95,
+                    fitScore=0.95,
+                    tags=[],
                 ),
-                StrategyStockPick(
+                StrategyStockPickLLM(
                     symbol="MSFT",
+                    companyName="Microsoft",
                     rationale="Similar quality mega-cap.",
-                    fit_score=0.9,
+                    fitScore=0.9,
+                    tags=[],
                 ),
             ],
             summary="Additional ideas beyond your current list.",

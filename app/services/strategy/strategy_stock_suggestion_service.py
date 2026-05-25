@@ -9,6 +9,7 @@ from app.core.llm_routes import LLMRoute
 from app.models.strategy_models import (
     InvestmentStrategy,
     StrategyStockPick,
+    StrategyStockPickLLM,
     StrategyStockSuggestions,
     StrategyStockSuggestionsLLMResponse,
     UserInvestmentProfile,
@@ -120,6 +121,17 @@ class StrategyStockSuggestionService:
 
         return normalized
 
+    @staticmethod
+    def _map_llm_pick(pick: StrategyStockPickLLM) -> StrategyStockPick:
+        company_name = pick.companyName.strip() or None
+        return StrategyStockPick(
+            symbol=pick.symbol.strip().upper(),
+            company_name=company_name,
+            rationale=pick.rationale.strip(),
+            fit_score=pick.fitScore,
+            tags=list(pick.tags),
+        )
+
     async def suggest_stocks(
         self,
         *,
@@ -162,7 +174,7 @@ class StrategyStockSuggestionService:
             return None
 
         picks = self._normalize_picks(
-            llm_response.picks,
+            [self._map_llm_pick(pick) for pick in llm_response.picks],
             limit=resolved_limit,
             exclude_symbols=exclude_symbols,
         )

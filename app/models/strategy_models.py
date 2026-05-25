@@ -223,9 +223,23 @@ class StrategyStockSuggestions(BaseModel):
     generated_at: datetime | None = Field(default=None, alias="generatedAt")
 
 
+class StrategyStockPickLLM(BaseModel):
+    """Strict-schema LLM output shape (every field required for OpenAI json_schema)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    companyName: str
+    rationale: str
+    fitScore: float = Field(ge=0.0, le=1.0)
+    tags: list[str]
+
+
 class StrategyStockSuggestionsLLMResponse(BaseModel):
-    picks: list[StrategyStockPick]
-    summary: str = ""
+    model_config = ConfigDict(extra="forbid")
+
+    picks: list[StrategyStockPickLLM]
+    summary: str
 
 
 class StrategyRecommendations(BaseModel):
