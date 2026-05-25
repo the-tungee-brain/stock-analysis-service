@@ -8,6 +8,7 @@ from textwrap import dedent
 from typing import List, Optional
 
 from app.models.schwab_models import Position, SchwabAccounts
+from app.models.strategy_models import InvestmentStrategy
 from app.broker.option_utils import (
     cash_secured_put_reserved_cash,
     position_expiration_date,
@@ -133,6 +134,8 @@ class PortfolioContext(BaseAnalysisContext):
     diversification_block: Optional[str] = None
     investment_profile_block: Optional[str] = None
     strategy_alignment_block: Optional[str] = None
+    strategy_guidance_block: Optional[str] = None
+    primary_strategy: Optional[InvestmentStrategy] = None
 
 
 @dataclass(kw_only=True)
@@ -257,10 +260,78 @@ def _structured_symbol_analysis_task(symbol: str) -> str:
         """).strip()
 
 
-def _structured_portfolio_analysis_task() -> str:
+def _portfolio_v1_decision_order(
+    primary_strategy: InvestmentStrategy | None,
+) -> str:
+    if primary_strategy in {
+        InvestmentStrategy.WHEEL,
+        InvestmentStrategy.CSP_INCOME,
+        InvestmentStrategy.COVERED_CALL,
+    }:
+        return dedent("""
+        Decision order (wheel / CSP / covered call):
+        1. Read **STRATEGY ANALYSIS FRAMEWORK** and CSP reserves / deployable cash in DIVERSIFICATION SUMMARY.
+        2. If any name is at/above profile max single-name % → rank a trim or risk-reducing covered call first.
+        3. If deployable cash is low vs CSP reserves → hold buffer and pause new cash-secured puts unless an
+           underweight, on-list name clearly qualifies.
+        4. If deployable cash is available and an on-list name is underweight → staged CSP or share add (with $).
+        5. Off-list holdings (e.g., TSM): one brief bullet only — evaluate on merits, not list membership.
+        6. Do NOT recommend ETF core deploys — ETF allocation gap and precomputed deploy plan do not apply.
+        """).strip()
+
+    if primary_strategy == InvestmentStrategy.ETF_CORE:
+        return dedent("""
+        Decision order (ETF core):
+        1. State total **ETF core weight %** and per-ETF current vs target from DIVERSIFICATION SUMMARY.
+        2. If **Suggested deploy plan (precomputed)** exists → recommendedAction must follow it exactly.
+        3. Else if deployable cash > 0 and ETF gap table exists → deploy into largest underweights using "~$X to buy".
+        4. Cite **dividend yield** and **expense ratio** for each recommended ETF from ETF fund metrics.
+        5. Trim single-name positions above profile limits before unrelated option-income trades.
+        """).strip()
+
+    if primary_strategy == InvestmentStrategy.DIVIDEND:
+        return dedent("""
+        Decision order (dividend):
+        1. Lead with concentration across dividend holdings and watchlist alignment.
+        2. Deploy cash into underweight watchlist names when single-name limits allow (cite $ and weight).
+        3. Flag yield chasing and payout-risk concentration — do not add off-list high-yield names by default.
+        4. Trim names above profile max before adding new dividend exposure.
+        """).strip()
+
+    return dedent("""
+        Decision order (general):
+        1. Diagnose concentration, cash, and options overlay from DIVERSIFICATION SUMMARY.
+        2. If **Suggested deploy plan (precomputed)** exists → follow it for ETF core targets.
+        3. If a single name exceeds 20% or profile max → rank a trim with $ and target weight.
+        4. Rank 2–4 actions with timing and dollar amounts from the provided data.
+        """).strip()
+
+
+def _structured_portfolio_analysis_task(
+    primary_strategy: InvestmentStrategy | None = None,
+) -> str:
+    strategy_note = ""
+    if primary_strategy in {
+        InvestmentStrategy.WHEEL,
+        InvestmentStrategy.CSP_INCOME,
+        InvestmentStrategy.COVERED_CALL,
+    }:
+        strategy_note = (
+            "\nFollow **STRATEGY ANALYSIS FRAMEWORK** for wheel/options-income priorities "
+            "(CSP reserves, deployable cash, strategy list — not ETF deploys).\n"
+        )
+    elif primary_strategy == InvestmentStrategy.ETF_CORE:
+        strategy_note = (
+            "\nFollow **STRATEGY ANALYSIS FRAMEWORK** and ETF gap / deploy plan in DIVERSIFICATION SUMMARY.\n"
+        )
+    elif primary_strategy == InvestmentStrategy.DIVIDEND:
+        strategy_note = (
+            "\nFollow **STRATEGY ANALYSIS FRAMEWORK** for dividend watchlist and concentration.\n"
+        )
+
     return dedent(f"""
         Analyze this portfolio for diversification, concentration risk, and smarter capital deployment.
-
+        {strategy_note}
         Priorities (in order):
         1. Diagnose concentration across single names, sectors, themes, cash, and options overlay.
         2. Compare current weights to prudent targets and the investor's saved preferences.
@@ -268,50 +339,52 @@ def _structured_portfolio_analysis_task() -> str:
         4. Rank 2–4 actions by diversification impact — trim overweight names before suggesting new buys.
 
         Use WEIGHT_% in the positions table and precomputed blocks in DIVERSIFICATION SUMMARY /
-        PORTFOLIO INTELLIGENCE as authoritative. Do not recalculate weights unless WEIGHT_% is N/A.
-        If deployable cash is shown, end ### Where to put money smarter with a clear deploy plan using
-        that exact deployable cash figure and per-ticker gap $ from DIVERSIFICATION SUMMARY.
+        STRATEGY ANALYSIS FRAMEWORK / PORTFOLIO INTELLIGENCE as authoritative. Do not recalculate weights unless WEIGHT_% is N/A.
+        If deployable cash is shown, end ### Where to put money smarter with a clear plan using
+        that exact deployable cash figure and strategy-appropriate targets from the data blocks.
 
         {_STRUCTURED_PORTFOLIO_OUTPUT_HEADINGS}
         """).strip()
 
 
-def _structured_portfolio_analysis_v1_task() -> str:
+def _structured_portfolio_analysis_v1_task(
+    primary_strategy: InvestmentStrategy | None = None,
+) -> str:
+    decision_order = _portfolio_v1_decision_order(primary_strategy)
+    summary_hint = "Lead with the #1 move appropriate for the investor's **primary strategy** in STRATEGY ANALYSIS FRAMEWORK."
+    if primary_strategy == InvestmentStrategy.ETF_CORE:
+        summary_hint += (
+            " Include total **ETF core weight %** when ETF data is shown."
+        )
+    elif primary_strategy in {
+        InvestmentStrategy.WHEEL,
+        InvestmentStrategy.CSP_INCOME,
+        InvestmentStrategy.COVERED_CALL,
+    }:
+        summary_hint += (
+            " Mention CSP reserved cash vs deployable cash when recommending holds or new puts."
+        )
+
     return dedent(f"""
         Analyze this portfolio for diversification, concentration risk, and smarter capital deployment.
         Deliver a decisive action plan — not a list of observations.
 
         Populate the JSON schema:
-        - summary: max 3 sentences; lead with the #1 move using deployable cash and the precomputed
-          deploy plan from DIVERSIFICATION SUMMARY when present. Include total **ETF core weight %**
-          in the portfolio when ETF data is shown.
+        - summary: max 3 sentences; {summary_hint}
         - recommendedAction: the single highest-impact next step — imperative title, concrete reason,
-          symbol when one name (use "" for multi-ETF deploys). For ETF deploys, mention dividend yield
-          and expense ratio from **ETF fund metrics** when available.
+          symbol when one name (use "" for multi-symbol or cash-hold actions).
         - sections: include "Gaps vs targets", "Where to put money smarter", and "Action plan (ranked)".
           Plain-text titles only — never use # or ###.
           Use bullets for ranked steps (2-4) with timing and $ amounts from the data.
 
-        Decision order:
-        1. If **Suggested deploy plan (precomputed)** exists and primary strategy is ETF core →
-           recommendedAction must follow it exactly.
-        2. Else if primary strategy is ETF core, ETF allocation gap data exists, and deployable cash > 0 →
-           deploy into the largest underweights using each ticker's "~$X to buy" from the gap table.
-        3. If primary strategy is wheel / CSP / covered call → prioritize concentration, CSP reserves,
-           and strategy-list alignment — do not recommend ETF core deploys unless primary strategy is ETF core.
-        4. If a single name exceeds profile max or 20% → rank a trim with $ or shares from position data;
-           do not bury it behind off-list commentary.
-        5. Off-list names that are fine to hold (e.g., TSM) → one brief bullet only; suggest adding to
-           the working list if relevant — not the headline action.
-        6. Wheel list names not held → mention only if they fit a ranked deploy/trim step from the
-           provided strategy / allocation data — do not list them without a concrete recommendation.
+        {decision_order}
 
         {TICKER_SOURCING_RULES}
 
         {AMOUNT_SOURCING_RULES}
 
         Use WEIGHT_% in the positions table and precomputed blocks in DIVERSIFICATION SUMMARY /
-        PORTFOLIO INTELLIGENCE as authoritative. Do not recalculate weights unless WEIGHT_% is N/A.
+        STRATEGY ANALYSIS FRAMEWORK / PORTFOLIO INTELLIGENCE as authoritative. Do not recalculate weights unless WEIGHT_% is N/A.
         """).strip()
 
 
@@ -1285,9 +1358,9 @@ def build_portfolio_prompt(
             """).strip()
     else:
         task_block = (
-            _structured_portfolio_analysis_v1_task()
+            _structured_portfolio_analysis_v1_task(ctx.primary_strategy)
             if json_response
-            else _structured_portfolio_analysis_task()
+            else _structured_portfolio_analysis_task(ctx.primary_strategy)
         )
 
     if not include_context:
@@ -1345,6 +1418,14 @@ def build_portfolio_prompt(
         {ctx.strategy_alignment_block}
         """).strip()
 
+    strategy_guidance_section = ""
+    if ctx.strategy_guidance_block:
+        strategy_guidance_section = dedent(f"""
+
+        === STRATEGY ANALYSIS FRAMEWORK (PRIMARY STRATEGY) ===
+        {ctx.strategy_guidance_block}
+        """).strip()
+
     return dedent(f"""
         Today is {now_iso}.
 
@@ -1353,7 +1434,7 @@ def build_portfolio_prompt(
 
         === PORTFOLIO POSITIONS (TOP HOLDINGS) ===
         {positions_table}
-        {assignment_section}{diversification_section}{profile_section}{alignment_section}{intelligence_section}
+        {assignment_section}{strategy_guidance_section}{diversification_section}{profile_section}{alignment_section}{intelligence_section}
 
         === YOUR TASK ===
         {task_block}

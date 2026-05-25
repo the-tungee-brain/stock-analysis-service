@@ -15,6 +15,7 @@ from app.broker.option_utils import (
 )
 from app.adapters.user.user_investment_profile_adapter import UserInvestmentProfileAdapter
 from app.broker.portfolio_diversification import format_diversification_summary_block
+from app.broker.strategy_portfolio_guidance import format_strategy_portfolio_guidance_block
 from app.broker.strategy_symbol_alignment import (
     format_strategy_symbol_alignment_block,
     format_symbol_strategy_fit_note,
@@ -298,6 +299,8 @@ class PortfolioAnalysisService:
             diversification_block = None
             investment_profile_block = None
             strategy_alignment_block = None
+            strategy_guidance_block = None
+            profile = None
 
             if include_market_data:
                 schwab_token = self.schwab_auth_service.get_valid_token_by_user_id(
@@ -359,6 +362,11 @@ class PortfolioAnalysisService:
                     account=account,
                     profile=profile,
                 )
+                strategy_guidance_block = format_strategy_portfolio_guidance_block(
+                    profile=profile,
+                    positions=positions,
+                    account=account,
+                )
 
             return PortfolioContext(
                 account=account,
@@ -371,6 +379,8 @@ class PortfolioAnalysisService:
                 diversification_block=diversification_block,
                 investment_profile_block=investment_profile_block,
                 strategy_alignment_block=strategy_alignment_block,
+                strategy_guidance_block=strategy_guidance_block,
+                primary_strategy=profile.primary_strategy if profile else None,
             )
 
         if not include_market_data:
