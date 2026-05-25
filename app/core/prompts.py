@@ -341,10 +341,14 @@ OPTIONS_STRATEGY_RULES = dedent("""
 
 DATA_INTEGRITY_RULES = dedent("""
     # How to use the data you receive
-    - Base analysis on the account, position, market, macro, and option-chain data provided.
+    - Base analysis on the account, position, market, macro, and option data provided.
+    - Before saying current price, delta, IV, bid/ask, or greeks are unavailable, check:
+      MARKET SNAPSHOT, HELD OPTION CONTRACTS, and OPTION CHAIN sections in the user message.
     - If a data block is missing or says "No ... provided", state what is missing and lower confidence.
     - Do NOT invent prices, strikes, dates, news, or volatility figures that were not supplied.
     - When exact numbers are unavailable, use ranges or qualitative language and note the gap.
+    - For probability or target-move questions on options, use held-contract delta/IV/mark and the
+      underlying price from the provided data to estimate scenarios — do not ask the user to supply them.
     """).strip()
 
 SYSTEM_MESSAGE = dedent(f"""
@@ -643,6 +647,9 @@ def _build_action_prompt(
                 Instructions:
                 - Answer their question directly and conversationally first.
                 - Ground your answer in the position, account, market, and option data above.
+                - For options probability, profit-target, or required-move questions, use MARKET SNAPSHOT
+                  (underlying last price), HELD OPTION CONTRACTS (delta, IV, mark/bid/ask), and OPTION CHAIN
+                  data above. Estimate scenarios from those numbers — do not claim they were not provided.
                 - Walk through size → P&L → thesis → action when a decision is needed.
                 - If they asked something informational, answer it — don't force a trade unless appropriate.
                 - If a trade is warranted, give ONE clear recommendation with specific numbers and timing.
@@ -860,7 +867,7 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
       === PRECOMPUTED INTELLIGENCE (SIGNALS, PEERS, TIMELINE) ===
       {intelligence_block or "No precomputed intelligence signals provided."}
 
-      {transactions_section}{assignment_section}=== OPTION CHAIN ===
+      {transactions_section}{assignment_section}=== OPTION DATA (HELD CONTRACTS + CHAIN) ===
       {option_block}
 
       === YOUR TASK ===

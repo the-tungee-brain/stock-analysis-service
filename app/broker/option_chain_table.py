@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
-from app.broker.option_utils import select_strikes_around_spot
+from app.broker.option_utils import (
+    parse_put_call_from_option_symbol,
+    position_expiration_date,
+    position_strike_price,
+    select_strikes_around_spot,
+)
+from app.models.schwab_models import Position
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
 
 
@@ -207,3 +213,242 @@ def build_option_chain_table(
         strike_count=strike_count,
         rows=rows,
     )
+
+
+def expiration_key_for_date(chain: OptionChain, expiration: date) -> str | None:
+    target = expiration.isoformat()
+    keys = set(chain.callExpDateMap.keys()) | set(chain.putExpDateMap.keys())
+    for key in keys:
+        if key.split(":")[0] == target:
+            return key
+    return None
+
+
+def lookup_option_contract(
+    chain: OptionChain,
+    *,
+    expiration: date,
+    strike: float,
+    put_call: str,
+) -> OptionContract | None:
+    key = expiration_key_for_date(chain, expiration)
+    if key is None:
+        return None
+
+    exp_map = (
+        chain.callExpDateMap if put_call.upper() == "CALL" else chain.putExpDateMap
+    )
+    strikes_map = exp_map.get(key, {})
+    for strike_str, contract_list in strikes_map.items():
+        try:
+            strike_value = float(strike_str)
+        except ValueError:
+            continue
+        if abs(strike_value - strike) < 0.001 and contract_list:
+            return contract_list[0]
+    return None
+
+
+def build_option_chain_table_for_expiration(
+    chain: OptionChain,
+    expiration_key: str,
+    *,
+    strike_count: int = 5,
+    focus_strikes: list[float] | None = None,
+) -> OptionChainTable | None:
+    underlying_price = chain.underlyingPrice or (
+        chain.underlying.last if chain.underlying and chain.underlying.last else None
+    )
+    calls = _contracts_by_float_strike(chain.callExpDateMap.get(expiration_key, {}))
+    puts = _contracts_by_float_strike(chain.putExpDateMap.get(expiration_key, {}))
+    all_strikes = sorted(set(calls.keys()) | set(puts.keys()))
+    if not all_strikes:
+        return None
+
+    if focus_strikes:
+        selected_strikes = sorted(set(focus_strikes))
+        for strike in focus_strikes:
+            selected_strikes = sorted(
+                set(selected_strikes)
+                | set(
+                    select_strikes_around_spot(
+                        all_strikes,
+                        strike,
+                        max(1, strike_count // 2),
+                    )
+                )
+            )
+    else:
+        selected_strikes = select_strikes_around_spot(
+            all_strikes,
+            underlying_price,
+            strike_count,
+        )
+
+    rows: list[OptionChainTableRow] = []
+    for strike in selected_strikes:
+        call = _side_quote(calls.get(strike))
+        put = _side_quote(puts.get(strike))
+        if call is None and put is None:
+            continue
+        rows.append(OptionChainTableRow(strike=strike, call=call, put=put))
+
+    if not rows:
+        return None
+
+    expiration_date = expiration_key.split(":")[0] if expiration_key else None
+    days_to_expiration: int | None = None
+    if expiration_key and ":" in expiration_key:
+        try:
+            days_to_expiration = int(expiration_key.split(":")[1])
+        except ValueError:
+            days_to_expiration = None
+
+    quote_time_ms = chain.underlying.quoteTime if chain.underlying else None
+    sample_contracts = [
+        *(chain.callExpDateMap.get(expiration_key, {}) or {}).values(),
+        *(chain.putExpDateMap.get(expiration_key, {}) or {}).values(),
+    ]
+    for contract_list in sample_contracts:
+        if not contract_list:
+            continue
+        contract = contract_list[0]
+        if days_to_expiration is None:
+            days_to_expiration = contract.daysToExpiration
+        if contract.quoteTimeInLong:
+            quote_time_ms = contract.quoteTimeInLong
+            break
+
+    return OptionChainTable(
+        symbol=chain.symbol,
+        expiration=expiration_date,
+        days_to_expiration=days_to_expiration,
+        underlying_price=underlying_price,
+        quote_time_ms=quote_time_ms,
+        strike_count=strike_count,
+        rows=rows,
+    )
+
+
+def _position_underlying_symbol(position: Position) -> str | None:
+    instrument = position.instrument
+    if instrument.assetType != "OPTION":
+        return None
+    underlying = instrument.underlyingSymbol or instrument.symbol
+    if not underlying:
+        return None
+    return underlying.strip().upper().split()[0]
+
+
+def format_held_option_contracts_markdown(
+    chain: OptionChain | None,
+    positions: list[Position],
+    symbol: str,
+) -> str:
+    if chain is None:
+        return "No option chain data available for held-contract greeks."
+
+    symbol_upper = symbol.strip().upper()
+    underlying_price = chain.underlyingPrice or (
+        chain.underlying.last if chain.underlying and chain.underlying.last else None
+    )
+    lines: list[str] = []
+
+    for position in positions:
+        if position.instrument.assetType != "OPTION":
+            continue
+        underlying = _position_underlying_symbol(position)
+        if underlying != symbol_upper:
+            continue
+
+        expiration = position_expiration_date(position)
+        strike = position_strike_price(position)
+        put_call = parse_put_call_from_option_symbol(position.instrument.symbol or "")
+        if expiration is None or strike is None or put_call is None:
+            continue
+
+        contract = lookup_option_contract(
+            chain,
+            expiration=expiration,
+            strike=strike,
+            put_call=put_call,
+        )
+        qty = position.longQuantity if position.longQuantity > 0 else position.shortQuantity
+        side = "long" if position.longQuantity > 0 else "short"
+        mkt_val = position.marketValue
+        pnl = position.openProfitLoss
+
+        if contract is None:
+            lines.append(
+                f"- {put_call} ${strike:g} exp {expiration.isoformat()} ({side} {qty:g}): "
+                f"position MKT_VAL ${mkt_val:,.2f}, P/L ${pnl:,.2f} if available — "
+                "contract greeks not found in chain response."
+            )
+            continue
+
+        mark = fair_option_price(contract)
+        bid = quoted_bid(contract)
+        ask = quoted_ask(contract)
+        underlying_label = (
+            f"${underlying_price:.2f}" if underlying_price is not None else "N/A"
+        )
+        lines.append(
+            f"- {put_call} ${strike:g} exp {expiration.isoformat()} ({side} {qty:g}): "
+            f"underlying {underlying_label} | bid/ask/mark "
+            f"{bid or '—'}/{ask or '—'}/{mark or '—'} | "
+            f"delta {contract.delta if contract.delta is not None else '—'} | "
+            f"theta {contract.theta if contract.theta is not None else '—'} | "
+            f"IV {contract.volatility if contract.volatility is not None else '—'}% | "
+            f"position MKT_VAL ${mkt_val:,.2f}"
+        )
+
+    if not lines:
+        return "No held option contracts for this symbol."
+
+    return (
+        "Held option contracts for this symbol (use these exact greeks and marks):\n"
+        + "\n".join(lines)
+        + "\n"
+    )
+
+
+def build_option_chain_tables_for_positions(
+    chain: OptionChain,
+    positions: list[Position],
+    symbol: str,
+    *,
+    strike_count: int = 5,
+) -> list[OptionChainTable]:
+    symbol_upper = symbol.strip().upper()
+    expirations: dict[date, set[float]] = {}
+
+    for position in positions:
+        if position.instrument.assetType != "OPTION":
+            continue
+        if _position_underlying_symbol(position) != symbol_upper:
+            continue
+        expiration = position_expiration_date(position)
+        strike = position_strike_price(position)
+        if expiration is None or strike is None:
+            continue
+        expirations.setdefault(expiration, set()).add(strike)
+
+    tables: list[OptionChainTable] = []
+    for expiration in sorted(expirations):
+        key = expiration_key_for_date(chain, expiration)
+        if key is None:
+            continue
+        table = build_option_chain_table_for_expiration(
+            chain,
+            key,
+            strike_count=strike_count,
+            focus_strikes=sorted(expirations[expiration]),
+        )
+        if table is not None:
+            tables.append(table)
+
+    if tables:
+        return tables
+
+    nearest = build_option_chain_table(chain, strike_count=strike_count)
+    return [nearest] if nearest is not None else []

@@ -96,6 +96,33 @@ class PortfolioAnalysisService:
         }
 
     @staticmethod
+    def _option_chain_window(
+        positions: List[Position],
+        symbol: str,
+    ) -> tuple[str, str]:
+        today = date.today()
+        symbol_upper = symbol.strip().upper()
+        expirations: list[date] = []
+
+        for position in positions:
+            if position.instrument.assetType != "OPTION":
+                continue
+            underlying = position.instrument.underlyingSymbol or position.instrument.symbol
+            if not underlying:
+                continue
+            if underlying.strip().upper().split()[0] != symbol_upper:
+                continue
+            expiration = position_expiration_date(position)
+            if expiration is not None:
+                expirations.append(expiration)
+
+        if not expirations:
+            end = today + timedelta(days=ASSIGNMENT_RISK_WINDOW_DAYS)
+            return today.isoformat(), end.isoformat()
+
+        return today.isoformat(), max(expirations).isoformat()
+
+    @staticmethod
     def _should_auto_enrich_news(action: AnalysisAction) -> bool:
         return action in NEWS_ENRICH_ACTIONS
 
@@ -228,6 +255,7 @@ class PortfolioAnalysisService:
         )
         access_token = schwab_token.access_token
         account_number = account.securitiesAccount.accountNumber
+        from_date, to_date = self._option_chain_window(positions, symbol)
 
         orders_for_analysis = None
         analysis_since = None
@@ -264,7 +292,9 @@ class PortfolioAnalysisService:
                 self.market_service.get_option_chains,
                 access_token=access_token,
                 symbol=symbol,
-                strike_count=10,
+                strike_count=20,
+                from_date=from_date,
+                to_date=to_date,
             ),
             asyncio.to_thread(
                 self._build_recent_transactions_block,
@@ -319,6 +349,8 @@ class PortfolioAnalysisService:
                 action=action,
                 has_options_scorecard=has_options_scorecard,
                 strike_count=10,
+                positions=positions,
+                symbol=symbol,
             )
         )
 

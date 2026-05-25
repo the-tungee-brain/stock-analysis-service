@@ -4,7 +4,7 @@ from uuid import UUID
 from app.builders.chat_sessions_builder import ChatSessionsBuilder
 from app.builders.chat_messages_builder import ChatMessagesBuilder
 from app.models.chat_sessions_models import ChatSession, ChatMessage
-from app.core.prompts import SYSTEM_NATURAL_MESSAGE, AnalysisAction, should_use_natural_response
+from app.core.prompts import SYSTEM_NATURAL_MESSAGE, AnalysisAction, is_follow_up_affirmation, should_use_natural_response
 from app.services.prompt_enrichment_service import RESEARCH_CHAT_SYSTEM_MESSAGE
 from openai.types.shared import ResponsesModel
 
@@ -42,14 +42,16 @@ class ChatService:
         if not should_use_natural_response(user_prompt, action=action):
             return True
 
+        if action is not AnalysisAction.FREE_FORM:
+            return True
+
         has_assistant_history = any(
             message["role"] == "assistant" for message in recent_messages
         )
-        return (
-            is_first_chat
-            or action is not AnalysisAction.FREE_FORM
-            or not has_assistant_history
-        )
+        if user_prompt and is_follow_up_affirmation(user_prompt):
+            return not has_assistant_history
+
+        return True
 
     def get_portfolio_analysis_session_id(
         self,

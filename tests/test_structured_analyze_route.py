@@ -16,5 +16,5 @@ def test_followup_free_form_can_omit_context_after_assistant_history():
         is_first_chat=False,
         action=AnalysisAction.FREE_FORM,
         recent_messages=[{"role": "assistant", "content": "prior natural reply"}],
-        user_prompt="Should I trim HOOD?",
+        user_prompt="let's do that",
     )

@@ -1,6 +1,12 @@
-from app.broker.option_chain_table import build_option_chain_table
+from app.broker.option_chain_table import (
+    OptionChainTable,
+    build_option_chain_table,
+    build_option_chain_tables_for_positions,
+    format_held_option_contracts_markdown,
+)
 from app.broker.sector_labels import normalize_sector_label
 from app.models.schwab_market_models import PromptQuoteSnapshot
+from app.models.schwab_models import Position
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
 from app.broker.order_grouping import (
     detect_roll_groups,
@@ -683,7 +689,9 @@ class PromptEnrichmentService:
         table = build_option_chain_table(chain, strike_count=strike_count)
         if table is None or not table.rows:
             return "No option chain data available."
+        return self.render_option_chain_table(table)
 
+    def render_option_chain_table(self, table: OptionChainTable) -> str:
         meta_lines = self._format_option_chain_metadata(table)
         header = (
             "| Strike | Call Bid | Call Ask | Call Mark | Call Last | Call Delta | Call Theta | Call OI | Call IV | "
@@ -759,23 +767,56 @@ class PromptEnrichmentService:
         *,
         has_options_scorecard: bool = False,
         strike_count: int = 10,
+        positions: list[Position] | None = None,
+        symbol: str | None = None,
     ) -> str:
+        sections: list[str] = []
+
+        if positions and symbol:
+            sections.append(
+                format_held_option_contracts_markdown(
+                    chain=chain,
+                    positions=positions,
+                    symbol=symbol,
+                )
+            )
+
         if chain is None:
+            if sections:
+                return "\n\n".join(sections)
             return "No option chain data available."
 
         if action in _NO_OPTION_CHAIN_TABLE_ACTIONS:
-            return (
+            sections.append(
                 "Option chain table omitted for this analysis type. "
-                "Use position data and other sections above."
+                "Use held option contracts and position data above."
             )
+            return "\n\n".join(sections)
 
         if action in _SCORECARD_ONLY_OPTION_CHAIN_ACTIONS and has_options_scorecard:
-            return (
+            sections.append(
                 "Full strike table omitted — use the ranked options scorecard in "
                 "PRECOMPUTED INTELLIGENCE above for covered call and cash-secured put "
-                "candidates (strike, delta, OI, rationale). Request a free-form follow-up "
-                "if you need a full bid/ask chain for rolls or custom strikes."
+                "candidates (strike, delta, OI, rationale). Held option contracts above "
+                "include greeks for options you already own."
             )
+            return "\n\n".join(sections)
+
+        if positions and symbol:
+            tables = build_option_chain_tables_for_positions(
+                chain,
+                positions,
+                symbol,
+                strike_count=strike_count,
+            )
+            for index, table in enumerate(tables):
+                label = (
+                    f"Option chain near held expiration {table.expiration}"
+                    if len(tables) > 1
+                    else "Option chain"
+                )
+                sections.append(f"{label}:\n{self.render_option_chain_table(table)}")
+            return "\n\n".join(sections)
 
         return self.build_option_chain_markdown(chain, strike_count=strike_count)
 
