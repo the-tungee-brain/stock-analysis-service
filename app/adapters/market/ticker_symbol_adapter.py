@@ -12,7 +12,7 @@ class TickerSymbolAdapter:
     def dict_to_item(self, row: dict) -> TickerSymbolItem:
         return TickerSymbolItem(
             symbol=row["SYMBOL"],
-            created_at=row["CREATED_AT"],
+            name=row.get("NAME"),
         )
 
     def get_by_keyword(self, keyword: str, limit: int = 10) -> List[TickerSymbolItem]:
