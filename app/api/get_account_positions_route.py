@@ -42,6 +42,13 @@ def _persist_portfolio_memory(
     )
 
 
+def _serialize_positions(positions_by_symbol: dict) -> dict:
+    return {
+        symbol: [position.model_dump(mode="json") for position in positions]
+        for symbol, positions in positions_by_symbol.items()
+    }
+
+
 @router.get("/get-account-positions")
 def get_account_positions(
     background_tasks: BackgroundTasks,
@@ -127,13 +134,15 @@ def get_account_positions(
         proactive_alerts=proactive_alerts,
     )
 
+    portfolio_metrics = account_map["portfolioMetrics"]
+
     return {
-        "schwab_positions": account_map["positions"],
+        "schwab_positions": _serialize_positions(account_map["positions"]),
         "account": account_map["account"],
         "cashSecuredPutSummary": account_map["cashSecuredPutSummary"],
         "assignmentRiskSummary": account_map["assignmentRiskSummary"],
         "recentActivity": recent_activity,
         "proactiveAlerts": proactive_alerts_payload,
         "portfolioBrief": portfolio_brief_payload,
-        "portfolioMetrics": account_map["portfolioMetrics"],
+        "portfolioMetrics": portfolio_metrics.model_dump(mode="json"),
     }
