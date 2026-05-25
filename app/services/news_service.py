@@ -33,6 +33,17 @@ class NewsService:
         news_response.root = news_response.root[:10]
         return news_response
 
+    def invalidate_company_news_cache(
+        self, symbol: str, lookback_days: int = 7
+    ) -> None:
+        today = date.today()
+        start = today - timedelta(days=lookback_days)
+        self.finnhub_builder.invalidate_company_news_cache(
+            symbol=symbol,
+            _from=start,
+            to=today,
+        )
+
     def get_press_releases(self, symbol: str, lookback_days: int = 30) -> NewsResponse:
         if not finnhub_press_releases_enabled():
             return NewsResponse(root=[])

@@ -43,6 +43,15 @@ class FinnhubBuilder:
         news_response.root.sort(key=attrgetter("datetime"), reverse=True)
         return news_response
 
+    def invalidate_company_news_cache(
+        self, symbol: str, *, _from: date, to: date
+    ) -> None:
+        self.finnhub_adapter.invalidate_company_news(
+            symbol=symbol,
+            _from=_from.strftime("%Y-%m-%d"),
+            to=to.strftime("%Y-%m-%d"),
+        )
+
     def get_company_profile(self, symbol: str) -> CompanyProfile | None:
         try:
             raw_company_profile = self.finnhub_adapter.get_company_profile(

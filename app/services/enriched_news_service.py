@@ -54,6 +54,14 @@ class EnrichedNewsService:
         except Exception:
             pass
 
+    def invalidate(self, symbol: str) -> None:
+        if self.enriched_news_cache is None:
+            return
+        try:
+            self.enriched_news_cache.delete(symbol=symbol)
+        except Exception:
+            pass
+
     async def ensure_enriched(
         self,
         symbol: str,

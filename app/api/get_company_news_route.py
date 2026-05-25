@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from app.services.news_service import NewsService
 from app.dependencies.service_dependencies import (
     get_news_service,
@@ -18,6 +18,10 @@ router = APIRouter()
 @router.get("/get-company-news", response_model=StockNewsView)
 async def get_company_news(
     symbol: str,
+    refresh: bool = Query(
+        default=False,
+        description="Bypass cached news and re-fetch from Finnhub",
+    ),
     news_service: NewsService = Depends(get_news_service),
     prompt_enrichment_service: PromptEnrichmentService = Depends(
         get_prompt_enrichment_service
@@ -25,9 +29,13 @@ async def get_company_news(
     llm_service: LLMService = Depends(get_llm_service),
     enriched_news_service: EnrichedNewsService = Depends(get_enriched_news_service),
 ) -> StockNewsView:
-    cached_view = enriched_news_service.get_cached_view(symbol=symbol)
-    if cached_view is not None:
-        return cached_view
+    if refresh:
+        enriched_news_service.invalidate(symbol=symbol)
+        news_service.invalidate_company_news_cache(symbol=symbol, lookback_days=7)
+    else:
+        cached_view = enriched_news_service.get_cached_view(symbol=symbol)
+        if cached_view is not None:
+            return cached_view
 
     try:
         news = news_service.get_company_news(symbol=symbol, lookback_days=7)

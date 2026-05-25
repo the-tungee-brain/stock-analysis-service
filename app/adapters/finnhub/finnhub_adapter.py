@@ -124,6 +124,14 @@ class FinnhubAdapter:
             ),
         )
 
+    def invalidate_company_news(self, symbol: str, _from: str, to: str) -> None:
+        if self._cache is None:
+            return
+        self._cache.delete(
+            "company_news",
+            self._cache_key(symbol, _from, to),
+        )
+
     def get_company_profile(self, symbol: str):
         cache_key = self._cache_key(symbol)
         return self._cached_call(

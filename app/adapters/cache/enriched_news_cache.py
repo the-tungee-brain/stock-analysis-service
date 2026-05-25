@@ -39,3 +39,6 @@ class EnrichedNewsCache:
             self.ttl_seconds,
             view.model_dump_json(),
         )
+
+    def delete(self, symbol: str) -> None:
+        self.redis_client.delete(self._redis_key(symbol=symbol))

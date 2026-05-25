@@ -60,3 +60,6 @@ class FinnhubResponseCache:
             ttl,
             json.dumps(value),
         )
+
+    def delete(self, endpoint: str, cache_key: str) -> None:
+        self.redis_client.delete(self._redis_key(endpoint, cache_key))
