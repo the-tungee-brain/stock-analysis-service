@@ -64,21 +64,29 @@ async def analyze_positions_by_symbol(
 ):
     positions = PortfolioService._annotate_option_strategies(request.positions)
 
-    session_prompt = chat_service.user_message_for_storage(
-        prompt=request.user_display_message or request.prompt,
-        action=request.action,
-    )
-    session_id, is_first_chat = chat_service.get_portfolio_analysis_session_id(
-        user_id=user_id,
-        symbol=request.symbol,
-        prompt=session_prompt,
-        model=request.model,
-    )
-    recent_messages = chat_service.get_chat_messages_by_session(session_id=session_id)
     structured = uses_structured_system_message(
         request.prompt,
         action=request.action,
     )
+
+    session_id: Optional[str] = None
+    is_first_chat = True
+    recent_messages: list = []
+
+    if not structured:
+        session_prompt = chat_service.user_message_for_storage(
+            prompt=request.user_display_message or request.prompt,
+            action=request.action,
+        )
+        resolved_session_id, is_first_chat = chat_service.get_portfolio_analysis_session_id(
+            user_id=user_id,
+            symbol=request.symbol,
+            prompt=session_prompt,
+            model=request.model,
+        )
+        session_id = str(resolved_session_id) if resolved_session_id else None
+        recent_messages = chat_service.get_chat_messages_by_session(session_id=session_id)
+
     include_context = chat_service.should_include_portfolio_context(
         is_first_chat=is_first_chat,
         action=request.action,
