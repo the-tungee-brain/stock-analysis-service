@@ -97,6 +97,7 @@ def test_request_model_rejects_invalid_action():
         (AnalysisAction.ASSIGNMENT_RISK, None, True),
         (AnalysisAction.FREE_FORM, "Should I trim?", True),
         (AnalysisAction.FREE_FORM, None, False),
+        (AnalysisAction.FREE_FORM, "", False),
         (AnalysisAction.FREE_FORM, "   ", False),
     ],
 )
@@ -106,3 +107,16 @@ def test_should_use_natural_response_for_preset_actions(
     expected: bool,
 ):
     assert should_use_natural_response(prompt, action=action) is expected
+
+
+def test_structured_analyze_uses_system_message_prompt_path():
+    from app.core.prompts import build_portfolio_prompt, PortfolioContext
+
+    ctx = PortfolioContext(
+        account=_make_account(),
+        positions=[_make_position()],
+        action=AnalysisAction.FREE_FORM,
+        user_prompt=None,
+    )
+    prompt = build_portfolio_prompt(ctx)
+    assert "Analyze the overall portfolio" in prompt

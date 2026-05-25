@@ -156,7 +156,11 @@ def should_use_natural_response(
     user_prompt: Optional[str],
     action: AnalysisAction = AnalysisAction.FREE_FORM,
 ) -> bool:
-    """Use conversational output for preset actions and typed user questions."""
+    """Use conversational output for preset actions and typed user questions.
+
+    Structured portfolio/position analysis (FREE_FORM with no user prompt) uses
+    SYSTEM_MESSAGE instead.
+    """
     if action is not AnalysisAction.FREE_FORM:
         return True
     return bool(user_prompt and user_prompt.strip())
