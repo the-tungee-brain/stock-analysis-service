@@ -15,6 +15,31 @@ from app.services.prompt_enrichment_service import PromptEnrichmentService
 from tests.test_position_prompt_metrics import _make_account, _make_position
 
 
+def test_research_context_cache_uses_lookback_in_key():
+    redis_client = MagicMock()
+    stored: dict[str, str] = {}
+
+    def setex(key, ttl, value):
+        stored[key] = value
+
+    def get(key):
+        return stored.get(key)
+
+    redis_client.setex = setex
+    redis_client.get = get
+
+    cache = ResearchContextCache(redis_client=redis_client, ttl_seconds=900)
+    context = ResearchContext(symbol="AAPL", peers=["MSFT"])
+
+    cache.put(symbol="AAPL", context=context, lookback_days=14)
+    loaded = cache.get(symbol="AAPL", lookback_days=14)
+
+    assert loaded is not None
+    assert loaded.symbol == "AAPL"
+    assert "research:context:AAPL:14" in stored
+    assert cache.get(symbol="AAPL", lookback_days=7) is None
+
+
 def test_research_context_cache_roundtrip():
     redis_client = MagicMock()
     stored: dict[str, str] = {}

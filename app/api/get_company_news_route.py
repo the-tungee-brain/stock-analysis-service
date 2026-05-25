@@ -25,6 +25,10 @@ async def get_company_news(
     llm_service: LLMService = Depends(get_llm_service),
     enriched_news_service: EnrichedNewsService = Depends(get_enriched_news_service),
 ) -> StockNewsView:
+    cached_view = enriched_news_service.get_cached_view(symbol=symbol)
+    if cached_view is not None:
+        return cached_view
+
     try:
         news = news_service.get_company_news(symbol=symbol, lookback_days=7)
     except Exception:

@@ -17,7 +17,11 @@ def _timeout_error() -> requests.exceptions.ConnectTimeout:
 
 
 def test_finnhub_adapter_uses_short_timeout():
-    adapter = FinnhubAdapter(api_key="test-key", timeout_seconds=2.5)
+    adapter = FinnhubAdapter(
+        api_key="test-key",
+        timeout_seconds=2.5,
+        rate_limiter=None,
+    )
     assert adapter.finnhub_client.DEFAULT_TIMEOUT == 2.5
 
 
@@ -26,6 +30,7 @@ def test_finnhub_adapter_opens_circuit_after_timeout():
         api_key="test-key",
         timeout_seconds=1,
         circuit_cooldown_seconds=60,
+        rate_limiter=None,
     )
     adapter.finnhub_client = MagicMock()
     adapter.finnhub_client.quote.side_effect = _timeout_error()
@@ -41,6 +46,7 @@ def test_finnhub_adapter_opens_circuit_after_api_error():
     adapter = FinnhubAdapter(
         api_key="test-key",
         circuit_cooldown_seconds=60,
+        rate_limiter=None,
     )
     adapter.finnhub_client = MagicMock()
     response = MagicMock()
@@ -91,4 +97,5 @@ def test_snapshot_skips_quote_when_finnhub_profile_unavailable():
             snapshot = service.get_snapshot("HOOD")
 
     assert snapshot.symbol == "HOOD"
+    finnhub_builder.get_company_profile.assert_not_called()
     finnhub_builder.get_quote.assert_not_called()

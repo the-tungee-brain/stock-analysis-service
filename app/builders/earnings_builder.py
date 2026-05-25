@@ -45,10 +45,18 @@ class EarningsBuilder:
         ]
         report_dates = [d for d in report_dates if d]
 
+        today = date.today()
+        history_start = (
+            min(report_dates) if report_dates else today - timedelta(days=365)
+        )
+        history_end = max(report_dates) if report_dates else today
+        calendar_start = min(history_start, today)
+        calendar_end = max(history_end, today + timedelta(days=120))
+
         calendar_by_date = self._load_calendar_by_date(
             symbol=symbol,
-            start=min(report_dates) if report_dates else date.today() - timedelta(days=365),
-            end=max(report_dates) if report_dates else date.today(),
+            start=calendar_start,
+            end=calendar_end,
         )
 
         history: list[EarningsEvent] = []
@@ -67,7 +75,7 @@ class EarningsBuilder:
             )
             history.append(event)
 
-        upcoming = self._load_upcoming(
+        upcoming = self._pick_upcoming(
             symbol=symbol,
             calendar_by_date=calendar_by_date,
         )
@@ -192,19 +200,12 @@ class EarningsBuilder:
             )
         return headlines
 
-    def _load_upcoming(
+    def _pick_upcoming(
         self,
         symbol: str,
         calendar_by_date: dict[str, dict[str, Any]],
     ) -> EarningsEvent | None:
         today = date.today()
-        future_calendar = self._load_calendar_by_date(
-            symbol=symbol,
-            start=today,
-            end=today + timedelta(days=120),
-        )
-        calendar_by_date.update(future_calendar)
-
         upcoming_dates = sorted(
             d for d in calendar_by_date if date.fromisoformat(d) >= today
         )
@@ -221,6 +222,19 @@ class EarningsBuilder:
             transcript_id=None,
             is_upcoming=True,
         )
+
+    def _load_upcoming(
+        self,
+        symbol: str,
+        calendar_by_date: dict[str, dict[str, Any]],
+    ) -> EarningsEvent | None:
+        future_calendar = self._load_calendar_by_date(
+            symbol=symbol,
+            start=date.today(),
+            end=date.today() + timedelta(days=120),
+        )
+        calendar_by_date.update(future_calendar)
+        return self._pick_upcoming(symbol=symbol, calendar_by_date=calendar_by_date)
 
     def _load_calendar_by_date(
         self,

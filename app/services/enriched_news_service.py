@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from app.adapters.cache.enriched_news_cache import EnrichedNewsCache
 from app.models.company_research_models import EnrichedNewsSummary
+from app.models.finnhub_news_models import NewsResponse
 from app.models.news_analytics_models import StockNewsView
 
 if TYPE_CHECKING:
@@ -26,6 +27,14 @@ class EnrichedNewsService:
         self.prompt_enrichment_service = prompt_enrichment_service
         self.llm_service = llm_service
 
+    def get_cached_view(self, symbol: str) -> StockNewsView | None:
+        if self.enriched_news_cache is None:
+            return None
+        try:
+            return self.enriched_news_cache.get(symbol=symbol)
+        except Exception:
+            return None
+
     def get_cached_summary(self, symbol: str) -> EnrichedNewsSummary | None:
         if self.enriched_news_cache is None:
             return None
@@ -45,7 +54,12 @@ class EnrichedNewsService:
         except Exception:
             pass
 
-    async def ensure_enriched(self, symbol: str) -> EnrichedNewsSummary | None:
+    async def ensure_enriched(
+        self,
+        symbol: str,
+        *,
+        news: NewsResponse | None = None,
+    ) -> EnrichedNewsSummary | None:
         cached = self.get_cached_summary(symbol=symbol)
         if cached is not None:
             return cached
@@ -58,11 +72,12 @@ class EnrichedNewsService:
             return None
 
         try:
-            news = await asyncio.to_thread(
-                self.news_service.get_company_news,
-                symbol=symbol,
-                lookback_days=7,
-            )
+            if news is None:
+                news = await asyncio.to_thread(
+                    self.news_service.get_company_news,
+                    symbol=symbol,
+                    lookback_days=7,
+                )
             prompts = self.prompt_enrichment_service.enrich_news_prompt(
                 symbol=symbol,
                 news=news,

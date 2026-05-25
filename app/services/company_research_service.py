@@ -15,7 +15,7 @@ from app.services.company_profile_service import CompanyProfileService
 from app.services.earnings_service import EarningsService
 from app.services.enriched_news_service import EnrichedNewsService
 from app.services.market_service import MarketService
-from app.services.news_service import NewsService
+from app.services.news_service import NewsService, finnhub_press_releases_enabled
 from app.services.sec_research_service import SecResearchService
 
 
@@ -155,9 +155,12 @@ class CompanyResearchService:
     ) -> ResearchContext:
         symbol_upper = symbol.strip().upper()
 
-        if news_lookback_days == 7 and self.research_context_cache is not None:
+        if self.research_context_cache is not None:
             try:
-                cached = self.research_context_cache.get(symbol=symbol_upper)
+                cached = self.research_context_cache.get(
+                    symbol=symbol_upper,
+                    lookback_days=news_lookback_days,
+                )
                 if cached is not None:
                     return self._attach_enriched_news(cached)
             except Exception:
@@ -169,9 +172,13 @@ class CompanyResearchService:
         )
         context = self._attach_enriched_news(context)
 
-        if news_lookback_days == 7 and self.research_context_cache is not None:
+        if self.research_context_cache is not None:
             try:
-                self.research_context_cache.put(symbol=symbol_upper, context=context)
+                self.research_context_cache.put(
+                    symbol=symbol_upper,
+                    context=context,
+                    lookback_days=news_lookback_days,
+                )
             except Exception:
                 pass
 
@@ -215,11 +222,14 @@ class CompanyResearchService:
                     symbol=symbol, lookback_days=news_lookback_days
                 ),
             )
-            future_press = executor.submit(
-                self._run_loader,
-                "press_releases",
-                lambda: self._load_press_releases(symbol=symbol),
-            )
+            if finnhub_press_releases_enabled():
+                future_press = executor.submit(
+                    self._run_loader,
+                    "press_releases",
+                    lambda: self._load_press_releases(symbol=symbol),
+                )
+            else:
+                future_press = None
             future_fundamentals = executor.submit(
                 self._run_loader,
                 "fundamentals",
@@ -254,10 +264,12 @@ class CompanyResearchService:
                 data_gaps.append(gap)
             news = news or []
 
-            press_releases, gap = future_press.result()
-            if gap:
-                data_gaps.append(gap)
-            press_releases = press_releases or []
+            press_releases: list[NewsHeadline] = []
+            if future_press is not None:
+                press_releases, gap = future_press.result()
+                if gap:
+                    data_gaps.append(gap)
+                press_releases = press_releases or []
 
             fundamentals, gap = future_fundamentals.result()
             if gap:

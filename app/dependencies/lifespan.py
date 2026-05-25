@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from openai import OpenAI
 
 from app.adapters.cache.enriched_news_cache import EnrichedNewsCache
+from app.adapters.cache.finnhub_response_cache import FinnhubResponseCache
 from app.adapters.cache.research_context_cache import ResearchContextCache
 
 from app.adapters.chat.chat_messages_adapter import ChatMessagesAdapter
@@ -133,7 +134,11 @@ async def lifespan(app: FastAPI):
     settings.validate()
     openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
-    finnhub_adapter = FinnhubAdapter(api_key=finnhub_api_key)
+    finnhub_response_cache = FinnhubResponseCache(redis_client=redis_client)
+    finnhub_adapter = FinnhubAdapter(
+        api_key=finnhub_api_key,
+        response_cache=finnhub_response_cache,
+    )
     schwab_market_adapter = SchwabMarketAdapter(
         session=session, base_uri=schwab_market_uri
     )
@@ -234,7 +239,10 @@ async def lifespan(app: FastAPI):
         chat_sessions_builder=chat_sessions_builder,
         chat_messages_builder=chat_messages_builder,
     )
-    company_profile_service = CompanyProfileService(finnhub_builder=finnhub_builder)
+    company_profile_service = CompanyProfileService(
+        finnhub_builder=finnhub_builder,
+        yfinance_adapter=yfinance_adapter,
+    )
     enriched_news_service = EnrichedNewsService(
         enriched_news_cache=enriched_news_cache,
         news_service=news_service,

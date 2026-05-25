@@ -50,6 +50,47 @@ def test_ensure_enriched_returns_cache_without_llm():
     llm_service.analyze_news.assert_not_called()
 
 
+def test_ensure_enriched_uses_provided_news_without_refetch():
+    cache = MagicMock()
+    cache.get.return_value = None
+
+    news_service = MagicMock()
+    news = MagicMock()
+    news.root = [MagicMock()]
+
+    prompt_enrichment_service = MagicMock()
+    prompt_enrichment_service.enrich_news_prompt.return_value = ["system", "user"]
+
+    llm_service = MagicMock()
+    llm_service.analyze_news = AsyncMock(
+        return_value=StockNewsView(
+            symbol="AAPL",
+            overall_sentiment="bullish",
+            summary="Fresh summary",
+            insights=[],
+            risks=[],
+            dominant_driver="Earnings beat",
+            market_impact_horizon="immediate",
+            actionability_score=4,
+            investorTakeaway="Watch guidance.",
+            deepAnalysis="Fresh.",
+            items=[],
+        )
+    )
+
+    service = EnrichedNewsService(
+        enriched_news_cache=cache,
+        news_service=news_service,
+        prompt_enrichment_service=prompt_enrichment_service,
+        llm_service=llm_service,
+    )
+
+    summary = asyncio.run(service.ensure_enriched("AAPL", news=news))
+
+    assert summary is not None
+    news_service.get_company_news.assert_not_called()
+
+
 def test_ensure_enriched_fetches_on_cache_miss():
     cache = MagicMock()
     cache.get.return_value = None

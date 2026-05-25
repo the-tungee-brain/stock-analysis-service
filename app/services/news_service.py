@@ -1,7 +1,16 @@
 from datetime import date, timedelta
+import os
 
 from app.builders.finnhub_builder import FinnhubBuilder
 from app.models.finnhub_news_models import NewsResponse
+
+
+def finnhub_press_releases_enabled() -> bool:
+    return os.getenv("FINNHUB_PRESS_RELEASES", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 class NewsService:
@@ -25,6 +34,9 @@ class NewsService:
         return news_response
 
     def get_press_releases(self, symbol: str, lookback_days: int = 30) -> NewsResponse:
+        if not finnhub_press_releases_enabled():
+            return NewsResponse(root=[])
+
         today = date.today()
         start = today - timedelta(days=lookback_days)
 

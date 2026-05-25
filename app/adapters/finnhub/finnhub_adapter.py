@@ -9,14 +9,18 @@ import finnhub
 import requests
 from finnhub.exceptions import FinnhubAPIException
 
+from app.adapters.cache.finnhub_response_cache import FinnhubResponseCache
 from app.adapters.finnhub.finnhub_circuit import (
     FinnhubCircuitBreaker,
     FinnhubUnavailableError,
 )
+from app.adapters.finnhub.finnhub_rate_limiter import FinnhubRateLimiter
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+_UNSET = object()
 
 
 class FinnhubAdapter:
@@ -26,6 +30,8 @@ class FinnhubAdapter:
         *,
         timeout_seconds: float | None = None,
         circuit_cooldown_seconds: float | None = None,
+        response_cache: FinnhubResponseCache | None = None,
+        rate_limiter: FinnhubRateLimiter | None | object = _UNSET,
     ):
         timeout = float(
             timeout_seconds
@@ -38,12 +44,44 @@ class FinnhubAdapter:
             else os.getenv("FINNHUB_CIRCUIT_COOLDOWN_SECONDS", "120")
         )
         self._circuit = FinnhubCircuitBreaker(cooldown_seconds=cooldown)
+        self._cache = response_cache
+        self._rate_limiter = (
+            FinnhubRateLimiter.from_env()
+            if rate_limiter is _UNSET
+            else rate_limiter
+        )
         self.finnhub_client = finnhub.Client(api_key=api_key)
         self.finnhub_client.DEFAULT_TIMEOUT = timeout
+
+    @staticmethod
+    def _cache_key(*parts: str) -> str:
+        return ":".join(part.strip().upper() for part in parts if part)
+
+    def _cached_call(
+        self,
+        endpoint: str,
+        cache_key: str,
+        label: str,
+        fn: Callable[[], T],
+    ) -> T:
+        if self._cache is not None:
+            cached = self._cache.get(endpoint=endpoint, cache_key=cache_key)
+            if cached is not None:
+                return cached
+
+        result = self._call(label, fn)
+
+        if self._cache is not None:
+            self._cache.put(endpoint=endpoint, cache_key=cache_key, value=result)
+
+        return result
 
     def _call(self, label: str, fn: Callable[[], T]) -> T:
         if not self._circuit.allow_request():
             raise FinnhubUnavailableError("Finnhub circuit open")
+
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
 
         try:
             result = fn()
@@ -60,7 +98,10 @@ class FinnhubAdapter:
             return result
 
     def get_company_news(self, symbol: str, _from: str, to: str):
-        return self._call(
+        cache_key = self._cache_key(symbol, _from, to)
+        return self._cached_call(
+            "company_news",
+            cache_key,
             "company_news",
             lambda: self.finnhub_client.company_news(
                 symbol=symbol, _from=_from, to=to
@@ -68,19 +109,28 @@ class FinnhubAdapter:
         )
 
     def get_company_profile(self, symbol: str):
-        return self._call(
+        cache_key = self._cache_key(symbol)
+        return self._cached_call(
+            "company_profile",
+            cache_key,
             "company_profile",
             lambda: self.finnhub_client.company_profile2(symbol=symbol),
         )
 
     def get_quote(self, symbol: str):
-        return self._call(
+        cache_key = self._cache_key(symbol)
+        return self._cached_call(
+            "quote",
+            cache_key,
             "quote",
             lambda: self.finnhub_client.quote(symbol=symbol),
         )
 
     def get_company_earnings(self, symbol: str, limit: int | None = None):
-        return self._call(
+        cache_key = self._cache_key(symbol, str(limit or ""))
+        return self._cached_call(
+            "company_earnings",
+            cache_key,
             "company_earnings",
             lambda: self.finnhub_client.company_earnings(
                 symbol=symbol, limit=limit
@@ -94,7 +144,10 @@ class FinnhubAdapter:
         symbol: str = "",
         international: bool = False,
     ):
-        return self._call(
+        cache_key = self._cache_key(symbol, _from, to, str(international))
+        return self._cached_call(
+            "earnings_calendar",
+            cache_key,
             "earnings_calendar",
             lambda: self.finnhub_client.earnings_calendar(
                 _from=_from,
@@ -105,19 +158,28 @@ class FinnhubAdapter:
         )
 
     def get_transcripts_list(self, symbol: str):
-        return self._call(
+        cache_key = self._cache_key(symbol)
+        return self._cached_call(
+            "transcripts_list",
+            cache_key,
             "transcripts_list",
             lambda: self.finnhub_client.transcripts_list(symbol=symbol),
         )
 
     def get_transcript(self, transcript_id: str):
-        return self._call(
+        cache_key = self._cache_key(transcript_id)
+        return self._cached_call(
+            "transcript",
+            cache_key,
             "transcript",
             lambda: self.finnhub_client.transcripts(_id=transcript_id),
         )
 
     def get_press_releases(self, symbol: str, _from: str, to: str):
-        return self._call(
+        cache_key = self._cache_key(symbol, _from, to)
+        return self._cached_call(
+            "press_releases",
+            cache_key,
             "press_releases",
             lambda: self.finnhub_client.press_releases(
                 symbol=symbol, _from=_from, to=to
@@ -125,7 +187,10 @@ class FinnhubAdapter:
         )
 
     def get_stock_peers(self, symbol: str) -> list[str]:
-        return self._call(
+        cache_key = self._cache_key(symbol)
+        return self._cached_call(
+            "stock_peers",
+            cache_key,
             "stock_peers",
             lambda: self.finnhub_client.stock_peers(symbol=symbol),
         )

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import os
 
 import yfinance as yf
 
+from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.builders.finnhub_builder import FinnhubBuilder
 from app.models.company_research_models import ResearchSnapshot
 
@@ -11,28 +13,54 @@ logger = logging.getLogger(__name__)
 
 
 class CompanyProfileService:
-    def __init__(self, finnhub_builder: FinnhubBuilder):
+    def __init__(
+        self,
+        finnhub_builder: FinnhubBuilder,
+        yfinance_adapter: YFinanceAdapter | None = None,
+    ):
         self.finnhub_builder = finnhub_builder
+        self.yfinance_adapter = yfinance_adapter
 
     def get_snapshot(self, symbol: str) -> ResearchSnapshot:
         symbol_upper = symbol.strip().upper()
 
-        snapshot = self._snapshot_from_finnhub(symbol_upper)
+        snapshot = self._snapshot_from_yfinance(symbol_upper)
         if snapshot is not None:
             return snapshot
 
-        snapshot = self._snapshot_from_yfinance(symbol_upper)
+        snapshot = self._snapshot_from_finnhub(symbol_upper)
         if snapshot is not None:
             return snapshot
 
         raise ValueError(f"Unable to load company snapshot for {symbol_upper}")
 
     def get_peers(self, symbol: str) -> list[str]:
+        symbol_upper = symbol.strip().upper()
+
+        peers = self._peers_from_yfinance(symbol_upper)
+        if peers:
+            return peers
+
         try:
             peers = self.finnhub_builder.get_peers(symbol=symbol)
         except Exception:
             logger.warning("Finnhub peers unavailable for %s", symbol, exc_info=True)
             return []
+
+        return [peer for peer in peers if peer != symbol_upper]
+
+    def _peers_from_yfinance(self, symbol: str) -> list[str]:
+        if self.yfinance_adapter is None:
+            return []
+
+        try:
+            peers = self.yfinance_adapter.get_recommended_peers(symbol=symbol)
+        except Exception:
+            logger.warning(
+                "Yahoo Finance peers unavailable for %s", symbol, exc_info=True
+            )
+            return []
+
         symbol_upper = symbol.upper()
         return [peer for peer in peers if peer != symbol_upper]
 
