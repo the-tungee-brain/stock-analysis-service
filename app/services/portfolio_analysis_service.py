@@ -34,7 +34,7 @@ from app.models.intelligence_models import (
     SymbolIntelligence,
 )
 from app.models.schwab_models import Position, SchwabAccounts
-from app.models.strategy_models import UserInvestmentProfile
+from app.models.strategy_models import InvestmentStrategy, UserInvestmentProfile
 from app.services.company_research_service import CompanyResearchService
 from app.services.intelligence.portfolio_intelligence_service import (
     PortfolioIntelligenceService,
@@ -149,7 +149,10 @@ class PortfolioAnalysisService:
         self,
         profile: UserInvestmentProfile | None,
     ) -> dict[str, dict[str, str | None]]:
-        if profile is None or not profile.etf_core or not profile.etf_core.target_allocation:
+        if profile is None or profile.primary_strategy != InvestmentStrategy.ETF_CORE:
+            return {}
+
+        if not profile.etf_core or not profile.etf_core.target_allocation:
             return {}
 
         builder = self.company_research_service.fundamentals_builder

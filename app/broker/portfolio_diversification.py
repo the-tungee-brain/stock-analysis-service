@@ -158,7 +158,12 @@ def format_diversification_summary_block(
             "\nTreat these as intentional concentration — avoid adding size unless underweight."
         )
 
-    if profile and profile.etf_core and profile.etf_core.target_allocation:
+    if (
+        profile
+        and profile.primary_strategy == InvestmentStrategy.ETF_CORE
+        and profile.etf_core
+        and profile.etf_core.target_allocation
+    ):
         alloc = profile.etf_core.target_allocation
         weight_by_symbol = {symbol: weight for symbol, _, weight in ranked}
         value_by_symbol = _market_value_by_symbol(ranked)

@@ -35,6 +35,31 @@ class UserInvestmentProfileAdapter:
             return {}
 
     @staticmethod
+    def _active_strategy_configs(
+        primary_strategy: InvestmentStrategy | None,
+        *,
+        wheel: WheelStrategyConfig | None,
+        dividend: DividendStrategyConfig | None,
+        etf_core: EtfCoreStrategyConfig | None,
+    ) -> tuple[
+        WheelStrategyConfig | None,
+        DividendStrategyConfig | None,
+        EtfCoreStrategyConfig | None,
+    ]:
+        """Keep only the config block that matches the active primary strategy."""
+        if primary_strategy in {
+            InvestmentStrategy.WHEEL,
+            InvestmentStrategy.CSP_INCOME,
+            InvestmentStrategy.COVERED_CALL,
+        }:
+            return wheel, None, None
+        if primary_strategy == InvestmentStrategy.DIVIDEND:
+            return None, dividend, None
+        if primary_strategy == InvestmentStrategy.ETF_CORE:
+            return None, None, etf_core
+        return wheel, dividend, etf_core
+
+    @staticmethod
     def _config_to_json(
         *,
         wheel: WheelStrategyConfig | None,
@@ -156,6 +181,13 @@ class UserInvestmentProfileAdapter:
             update.etf_core
             if update.etf_core is not None
             else (current.etf_core if current else None)
+        )
+
+        wheel, dividend, etf_core = self._active_strategy_configs(
+            primary_strategy,
+            wheel=wheel,
+            dividend=dividend,
+            etf_core=etf_core,
         )
 
         onboarding_completed_at = (

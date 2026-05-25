@@ -1713,7 +1713,7 @@ class PromptEnrichmentService:
                 ]
             )
 
-        if profile.etf_core:
+        if profile.etf_core and profile.primary_strategy == InvestmentStrategy.ETF_CORE:
             allocation = profile.etf_core.target_allocation or {}
             if allocation:
                 alloc_lines = ", ".join(

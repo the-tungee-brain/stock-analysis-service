@@ -293,14 +293,17 @@ def _structured_portfolio_analysis_v1_task() -> str:
           Use bullets for ranked steps (2-4) with timing and $ amounts from the data.
 
         Decision order:
-        1. If **Suggested deploy plan (precomputed)** exists → recommendedAction must follow it exactly.
-        2. Else if ETF core allocation gap data exists and deployable cash > 0 → deploy into the
-           largest underweights using each ticker's "~$X to buy" from the gap table.
-        3. If a single name exceeds profile max or 20% → rank a trim with $ or shares from position data;
+        1. If **Suggested deploy plan (precomputed)** exists and primary strategy is ETF core →
+           recommendedAction must follow it exactly.
+        2. Else if primary strategy is ETF core, ETF allocation gap data exists, and deployable cash > 0 →
+           deploy into the largest underweights using each ticker's "~$X to buy" from the gap table.
+        3. If primary strategy is wheel / CSP / covered call → prioritize concentration, CSP reserves,
+           and strategy-list alignment — do not recommend ETF core deploys unless primary strategy is ETF core.
+        4. If a single name exceeds profile max or 20% → rank a trim with $ or shares from position data;
            do not bury it behind off-list commentary.
-        4. Off-list names that are fine to hold (e.g., TSM) → one brief bullet only; suggest adding to
+        5. Off-list names that are fine to hold (e.g., TSM) → one brief bullet only; suggest adding to
            the working list if relevant — not the headline action.
-        5. Wheel list names not held → mention only if they fit a ranked deploy/trim step from the
+        6. Wheel list names not held → mention only if they fit a ranked deploy/trim step from the
            provided strategy / allocation data — do not list them without a concrete recommendation.
 
         {TICKER_SOURCING_RULES}

@@ -90,7 +90,7 @@ def test_diversification_summary_includes_etf_core_gap():
     ]
     profile = UserInvestmentProfile(
         user_id="user-1",
-        primary_strategy=InvestmentStrategy.WHEEL,
+        primary_strategy=InvestmentStrategy.ETF_CORE,
         etf_core=EtfCoreStrategyConfig(
             target_allocation={"SCHD": 70.0, "BND": 30.0},
         ),
@@ -117,3 +117,36 @@ def test_diversification_summary_includes_etf_core_gap():
     assert "BND:" in block and "30% target" in block
     assert "Deployable cash" in block
     assert "Suggested deploy plan (precomputed" in block
+
+
+def test_diversification_summary_ignores_stale_etf_core_for_wheel_strategy():
+    from app.models.strategy_models import EtfCoreStrategyConfig
+
+    account = _account_with_cash(liquidation=100_000, cash=10_000)
+    positions = [
+        _make_position(symbol="NVDA", market_value=25_000),
+        _make_position(symbol="SCHD", market_value=100),
+    ]
+    profile = UserInvestmentProfile(
+        user_id="user-1",
+        primary_strategy=InvestmentStrategy.WHEEL,
+        wheel=WheelStrategyConfig(wheel_symbols=["NVDA", "TSM"]),
+        etf_core=EtfCoreStrategyConfig(
+            target_allocation={"SCHD": 70.0, "BND": 30.0},
+        ),
+    )
+
+    block = format_diversification_summary_block(
+        positions=positions,
+        account=account,
+        profile=profile,
+        etf_fund_metrics={
+            "SCHD": {"dividend_yield": "3.50%", "expense_ratio": "0.06%"},
+            "BND": {"dividend_yield": "4.20%", "expense_ratio": "0.03%"},
+        },
+    )
+
+    assert block is not None
+    assert "ETF core allocation gap" not in block
+    assert "ETF core weight in portfolio" not in block
+    assert "Suggested deploy plan (precomputed" not in block
