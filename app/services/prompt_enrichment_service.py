@@ -1440,6 +1440,177 @@ class PromptEnrichmentService:
         return [system_msg, user_msg]
 
     @staticmethod
+    def _risk_tolerance_rubric(risk_tolerance: str) -> str:
+        rubrics = {
+            "conservative": (
+                "Prefer large-cap, lower-beta, established businesses with understandable "
+                "models. Avoid speculative small-caps, meme stocks, and leveraged products."
+            ),
+            "moderate": (
+                "Balance quality large-caps with selective mid-caps. Avoid extreme volatility "
+                "unless options experience is advanced and the strategy allows it."
+            ),
+            "aggressive": (
+                "May include higher-beta growth names and larger drawdown candidates when they "
+                "still fit the strategy mechanics and liquidity requirements."
+            ),
+        }
+        return rubrics.get(risk_tolerance, rubrics["moderate"])
+
+    @staticmethod
+    def _options_experience_rubric(options_experience: str) -> str:
+        rubrics = {
+            "none": (
+                "Investor is new to options — stick to mega-cap names with very liquid "
+                "weekly/monthly options. Avoid thinly traded underlyings."
+            ),
+            "beginner": (
+                "Investor is early in options — prefer mega-cap and large-cap names with "
+                "active options markets. Avoid low-liquidity chains."
+            ),
+            "intermediate": (
+                "Investor can handle mid-cap names with active options markets; still avoid "
+                "illiquid or highly erratic underlyings."
+            ),
+            "advanced": (
+                "Investor can consider higher-IV names if risk tolerance allows, but still "
+                "require liquid options and willingness to own shares."
+            ),
+        }
+        return rubrics.get(options_experience, rubrics["beginner"])
+
+    @staticmethod
+    def _income_vs_growth_rubric(income_vs_growth: str) -> str:
+        rubrics = {
+            "income": (
+                "Prioritize stable cash flow, dividends, premium income potential, and "
+                "capital preservation over high-growth speculation."
+            ),
+            "balanced": (
+                "Balance income potential with modest growth; avoid pure speculation or "
+                "extreme yield chasing."
+            ),
+            "growth": (
+                "Accept lower current income for stronger long-term appreciation, but still "
+                "respect the strategy's risk and liquidity requirements."
+            ),
+        }
+        return rubrics.get(income_vs_growth, rubrics["balanced"])
+
+    @staticmethod
+    def _journey_step_guidance(step_id: str | None) -> str | None:
+        if not step_id:
+            return None
+        guidance = {
+            "pick-underlying": (
+                "Investor is choosing underlyings — suggest diverse, high-quality candidates "
+                "they may not have considered. Emphasize liquidity and willingness to own."
+            ),
+            "pick-names": (
+                "Investor is building a dividend watchlist — suggest reliable payers that "
+                "complement any names they already track."
+            ),
+            "set-allocation": (
+                "Investor is defining a core ETF allocation — suggest low-cost building-block "
+                "ETFs that fit their stock/bond mix and avoid redundant overlap."
+            ),
+            "research-underlying": (
+                "Investor is researching before trading — explain business quality, key risks, "
+                "and why the name fits their saved preferences."
+            ),
+            "sell-first-csp": (
+                "Investor is ready to sell puts — prioritize names they would happily own on "
+                "assignment at typical strike discounts."
+            ),
+            "sell-covered-call": (
+                "Investor may hold shares already — suggest names suitable for 100-share "
+                "covered-call income or diversification adds."
+            ),
+            "track-income": (
+                "Investor is tracking CSP income — suggest additional liquid underlyings to "
+                "diversify premium sources."
+            ),
+            "rebalance-check": (
+                "Investor maintains a core ETF portfolio — suggest complementary funds only "
+                "where their target allocation has clear gaps."
+            ),
+        }
+        return guidance.get(step_id)
+
+    @staticmethod
+    def _strategy_specific_guidance(profile, strategy) -> str:
+        from app.models.strategy_models import InvestmentStrategy
+
+        if strategy == InvestmentStrategy.WHEEL:
+            wheel = profile.wheel
+            delta = (
+                f"{wheel.target_delta_min:.2f}–{wheel.target_delta_max:.2f}"
+                if wheel
+                else "0.20–0.30"
+            )
+            dte = wheel.preferred_dte_days if wheel else 7
+            max_pct = wheel.max_single_name_pct if wheel else 15.0
+            return (
+                "Suggest U.S.-listed stocks suitable for the full wheel (CSP → assignment → "
+                f"covered call). Target put delta {delta}, ~{dte}-day DTE, max ~{max_pct:.0f}% "
+                "per name — favor sector diversification and names the investor would own on "
+                "assignment."
+            )
+        if strategy == InvestmentStrategy.CSP_INCOME:
+            wheel = profile.wheel
+            delta = (
+                f"{wheel.target_delta_min:.2f}–{wheel.target_delta_max:.2f}"
+                if wheel
+                else "0.20–0.30"
+            )
+            dte = wheel.preferred_dte_days if wheel else 7
+            return (
+                "Suggest U.S.-listed stocks for cash-secured put income only (not full wheel). "
+                f"Target put delta {delta}, ~{dte}-day DTE. Prioritize liquid puts and "
+                "businesses the investor would buy at a lower effective price if assigned."
+            )
+        if strategy == InvestmentStrategy.COVERED_CALL:
+            return (
+                "Suggest U.S.-listed stocks worth owning in 100+ share lots for covered-call "
+                "income. Prioritize liquid calls, understandable businesses, and names that "
+                "diversify existing holdings."
+            )
+        if strategy == InvestmentStrategy.DIVIDEND:
+            dividend = profile.dividend
+            yield_target = (
+                f"~{dividend.target_yield_pct:.1f}%"
+                if dividend and dividend.target_yield_pct is not None
+                else "their income target"
+            )
+            payout = (
+                f"under {dividend.max_payout_ratio:.0f}%"
+                if dividend and dividend.max_payout_ratio is not None
+                else "with sustainable payout ratios"
+            )
+            return (
+                "Suggest U.S.-listed dividend stocks aligned with the investor's yield target "
+                f"({yield_target}), payout limit ({payout}), and income-vs-growth preference. "
+                "Prefer consistent payers with understandable business models."
+            )
+        if strategy == InvestmentStrategy.ETF_CORE:
+            allocation = (profile.etf_core.target_allocation or {}) if profile.etf_core else {}
+            if allocation:
+                alloc_text = ", ".join(
+                    f"{symbol} {weight:.0f}%"
+                    for symbol, weight in allocation.items()
+                )
+                return (
+                    "Suggest low-cost U.S.-listed ETFs for a buy-and-hold core portfolio. "
+                    f"Current target allocation: {alloc_text}. Use ETF tickers only — suggest "
+                    "complementary funds where the allocation has gaps; avoid redundant overlap."
+                )
+            return (
+                "Suggest low-cost U.S.-listed ETFs for a buy-and-hold core portfolio. "
+                "Use ETF tickers only — favor broad equity, international, and bond building blocks."
+            )
+        return "Suggest liquid, mainstream U.S.-listed symbols appropriate for the strategy."
+
+    @staticmethod
     def format_investment_profile_block(
         profile,
         *,
@@ -1522,6 +1693,14 @@ class PromptEnrichmentService:
                 "Prioritize liquid, widely traded names with active options markets. "
                 "The investor should be comfortable owning shares if assigned."
             )
+            lines.extend(
+                [
+                    "## Options experience guidance",
+                    PromptEnrichmentService._options_experience_rubric(
+                        profile.options_experience
+                    ),
+                ]
+            )
         elif active_strategy == InvestmentStrategy.DIVIDEND:
             lines.append(
                 "## Strategy fit criteria\n"
@@ -1534,6 +1713,17 @@ class PromptEnrichmentService:
                 "Prioritize low-cost, diversified ETFs suitable for a buy-and-hold core portfolio."
             )
 
+        lines.extend(
+            [
+                "## Risk tolerance guidance",
+                PromptEnrichmentService._risk_tolerance_rubric(profile.risk_tolerance),
+                "## Income vs growth guidance",
+                PromptEnrichmentService._income_vs_growth_rubric(
+                    profile.income_vs_growth
+                ),
+            ]
+        )
+
         return "\n".join(lines)
 
     def build_strategy_stock_suggestions_prompt(
@@ -1544,6 +1734,9 @@ class PromptEnrichmentService:
         limit: int = 5,
         exclude_symbols: list[str] | None = None,
         macro_context: str | None = None,
+        journey_step_id: str | None = None,
+        journey_step_title: str | None = None,
+        portfolio_context: str | None = None,
     ) -> list[str]:
         from app.models.strategy_models import InvestmentStrategy
 
@@ -1553,34 +1746,25 @@ class PromptEnrichmentService:
         )
         exclude = sorted({symbol.upper() for symbol in (exclude_symbols or []) if symbol})
         exclude_block = (
-            "Do not repeat these symbols: " + ", ".join(exclude)
+            "Do not repeat these symbols (already in the investor's profile or Schwab holdings): "
+            + ", ".join(exclude)
             if exclude
             else "No symbols to exclude."
         )
         macro_block = macro_context or "No live macro context provided."
-
-        strategy_guidance = {
-            InvestmentStrategy.WHEEL: (
-                "Suggest U.S.-listed stocks suitable for the wheel strategy: liquid options, "
-                "stable enough to own on assignment, and aligned with the user's risk tolerance."
-            ),
-            InvestmentStrategy.CSP_INCOME: (
-                "Suggest U.S.-listed stocks for cash-secured put income: liquid puts, "
-                "businesses the user would buy at a lower price, aligned with risk tolerance."
-            ),
-            InvestmentStrategy.COVERED_CALL: (
-                "Suggest U.S.-listed stocks worth owning 100+ shares for covered-call income: "
-                "liquid calls, understandable businesses, aligned with risk tolerance."
-            ),
-            InvestmentStrategy.DIVIDEND: (
-                "Suggest U.S.-listed dividend stocks aligned with the user's yield target, "
-                "payout-ratio limit, and income-vs-growth preference."
-            ),
-            InvestmentStrategy.ETF_CORE: (
-                "Suggest low-cost U.S.-listed ETFs for a core buy-and-hold portfolio. "
-                "Use ETF tickers, not individual stocks."
-            ),
-        }[strategy]
+        strategy_guidance = self._strategy_specific_guidance(profile, strategy)
+        journey_guidance = self._journey_step_guidance(journey_step_id)
+        journey_block = "Not provided."
+        if journey_step_id or journey_step_title:
+            journey_lines = []
+            if journey_step_title:
+                journey_lines.append(f"- Current journey step: {journey_step_title}")
+            if journey_step_id:
+                journey_lines.append(f"- Step id: {journey_step_id}")
+            if journey_guidance:
+                journey_lines.append(f"- Guidance: {journey_guidance}")
+            journey_block = "\n".join(journey_lines)
+        portfolio_block = portfolio_context or "No linked Schwab holdings context provided."
 
         system_msg = dedent(
             """
@@ -1592,11 +1776,14 @@ class PromptEnrichmentService:
             - Return ONLY valid JSON — no markdown or commentary outside the JSON object.
             - Suggest liquid, mainstream U.S.-listed symbols appropriate for the strategy.
             - Rank picks from best fit to weakest fit.
-            - Each rationale must explain WHY the symbol fits this user's preferences.
+            - Each rationale must tie the pick to THIS investor's risk tolerance, income vs growth
+              preference, strategy config, and journey step when provided.
             - fitScore is 0.0–1.0 (1.0 = best fit for this profile).
-            - tags are short labels like "high-liquidity", "dividend-aristocrat", "mega-cap", "broad-market-etf".
+            - tags are short labels like "high-liquidity", "dividend-aristocrat", "mega-cap",
+              "broad-market-etf", "liquid-options", "core-bond-etf".
             - This is educational research, not personalized financial advice. Do not say "buy" or "sell".
             - Do not invent live prices, yields, or payout ratios — speak qualitatively unless provided.
+            - Respect all exclusions — never suggest a symbol listed in the exclusions block.
 
             Return a single JSON object:
             {
@@ -1626,6 +1813,12 @@ class PromptEnrichmentService:
 
             ## Saved preferences
             {profile_block}
+
+            ## Journey context
+            {journey_block}
+
+            ## Portfolio context
+            {portfolio_block}
 
             ## Exclusions
             {exclude_block}

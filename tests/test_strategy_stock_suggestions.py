@@ -1,13 +1,18 @@
 from unittest.mock import AsyncMock, MagicMock
 import asyncio
 
+from app.models.schwab_models import Instrument, Position
 from app.models.strategy_models import (
     DividendStrategyConfig,
+    EtfCoreStrategyConfig,
     InvestmentStrategy,
+    JourneyStep,
+    JourneyStepStatus,
     StrategyStockPick,
     StrategyStockPickLLM,
     StrategyStockSuggestionsLLMResponse,
     UserInvestmentProfile,
+    UserStrategyJourney,
     WheelStrategyConfig,
 )
 from app.services.prompt_enrichment_service import PromptEnrichmentService
@@ -24,6 +29,26 @@ def _wheel_profile(*, symbols: list[str] | None = None) -> UserInvestmentProfile
         options_experience="beginner",
         income_vs_growth="balanced",
         wheel=WheelStrategyConfig(wheel_symbols=symbols or []),
+    )
+
+
+def _equity_position(symbol: str, *, shares: float = 100, market_value: float = 10000) -> Position:
+    return Position(
+        shortQuantity=0,
+        averagePrice=100,
+        currentDayProfitLoss=0,
+        currentDayProfitLossPercentage=0,
+        longQuantity=shares,
+        settledLongQuantity=shares,
+        settledShortQuantity=0,
+        instrument=Instrument(
+            assetType="EQUITY",
+            cusip="123",
+            symbol=symbol,
+        ),
+        marketValue=market_value,
+        maintenanceRequirement=0,
+        currentDayCost=0,
     )
 
 
@@ -90,11 +115,112 @@ def test_build_strategy_stock_suggestions_prompt_includes_preferences():
         profile,
         strategy=InvestmentStrategy.DIVIDEND,
         limit=3,
+        journey_step_id="pick-names",
+        journey_step_title="Pick dividend names",
+        portfolio_context="Linked Schwab holdings (top positions by market value):\n- KO",
+        macro_context="VIX at 18.0",
     )
     user_prompt = prompts[1]
     assert "dividend" in user_prompt
     assert "conservative" in user_prompt
     assert "4.0%" in user_prompt
+    assert "Risk tolerance guidance" in user_prompt
+    assert "Options experience guidance" not in user_prompt
+    assert "Pick dividend names" in user_prompt
+    assert "Portfolio context" in user_prompt
+    assert "VIX at 18.0" in user_prompt
+
+
+def test_build_strategy_stock_suggestions_prompt_includes_wheel_rubrics():
+    profile = _wheel_profile()
+    prompts = PromptEnrichmentService().build_strategy_stock_suggestions_prompt(
+        profile,
+        strategy=InvestmentStrategy.WHEEL,
+        limit=3,
+    )
+    user_prompt = prompts[1]
+    assert "Options experience guidance" in user_prompt
+    assert "Target put delta" in user_prompt
+
+
+def test_existing_symbols_are_strategy_scoped():
+    profile = UserInvestmentProfile(
+        user_id="user-1",
+        primary_strategy=InvestmentStrategy.DIVIDEND,
+        wheel=WheelStrategyConfig(wheel_symbols=["AAPL"]),
+        dividend=DividendStrategyConfig(dividend_symbols=["KO"]),
+        etf_core=EtfCoreStrategyConfig(target_allocation={"VTI": 70.0}),
+    )
+    wheel_exclusions = StrategyStockSuggestionService._existing_symbols(
+        profile,
+        InvestmentStrategy.WHEEL,
+    )
+    dividend_exclusions = StrategyStockSuggestionService._existing_symbols(
+        profile,
+        InvestmentStrategy.DIVIDEND,
+    )
+    etf_exclusions = StrategyStockSuggestionService._existing_symbols(
+        profile,
+        InvestmentStrategy.ETF_CORE,
+    )
+    assert wheel_exclusions == ["AAPL"]
+    assert dividend_exclusions == ["KO"]
+    assert etf_exclusions == ["VTI"]
+
+
+def test_existing_symbols_include_held_positions_for_covered_call():
+    profile = UserInvestmentProfile(
+        user_id="user-1",
+        primary_strategy=InvestmentStrategy.COVERED_CALL,
+        wheel=WheelStrategyConfig(wheel_symbols=[]),
+    )
+    exclusions = StrategyStockSuggestionService._existing_symbols(
+        profile,
+        InvestmentStrategy.COVERED_CALL,
+        held_symbols=["MSFT"],
+    )
+    assert exclusions == ["MSFT"]
+
+
+def test_format_portfolio_context_includes_covered_call_ready_lots():
+    context = StrategyStockSuggestionService.format_portfolio_context(
+        [
+            _equity_position("AAPL", shares=50, market_value=9000),
+            _equity_position("MSFT", shares=150, market_value=45000),
+        ],
+        strategy=InvestmentStrategy.COVERED_CALL,
+    )
+    assert context is not None
+    assert "MSFT" in context
+    assert "100+ share lots available for covered calls: MSFT" in context
+
+
+def test_resolve_journey_step_prefers_current_step_id():
+    journey = UserStrategyJourney(
+        user_id="user-1",
+        strategy=InvestmentStrategy.WHEEL,
+        current_step_id="research-underlying",
+        steps=[
+            JourneyStep(
+                stepId="pick-underlying",
+                title="Pick your underlying",
+                description="Choose stocks",
+                status=JourneyStepStatus.COMPLETED,
+                order=1,
+            ),
+            JourneyStep(
+                stepId="research-underlying",
+                title="Research before you sell",
+                description="Review risks",
+                status=JourneyStepStatus.IN_PROGRESS,
+                order=2,
+            ),
+        ],
+        completion_pct=25.0,
+    )
+    step = StrategyStockSuggestionService.resolve_journey_step(journey)
+    assert step is not None
+    assert step.step_id == "research-underlying"
 
 
 def test_suggest_stocks_returns_ranked_picks():

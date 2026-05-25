@@ -6,12 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth.dependencies import get_current_user_id
 from app.dependencies.service_dependencies import (
+    get_market_service,
     get_portfolio_analysis_service,
     get_portfolio_service,
     get_schwab_auth_service,
     get_strategy_journey_service,
     get_strategy_stock_suggestion_service,
 )
+from app.models.schwab_models import Position, SchwabAccounts
 from app.models.strategy_models import (
     InvestmentStrategy,
     JourneyStepUpdate,
@@ -24,6 +26,7 @@ from app.models.strategy_models import (
 )
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.services.portfolio_service import PortfolioService
+from app.services.market_service import MarketService
 from app.services.schwab_auth_service import SchwabAuthService, SchwabReauthRequired
 from app.services.strategy.strategy_journey_service import StrategyJourneyService
 from app.services.strategy.strategy_stock_suggestion_service import (
@@ -31,6 +34,58 @@ from app.services.strategy.strategy_stock_suggestion_service import (
 )
 
 router = APIRouter()
+
+
+def _build_stock_suggestion_kwargs(
+    *,
+    strategy: InvestmentStrategy,
+    strategy_stock_suggestion_service: StrategyStockSuggestionService,
+    market_service: MarketService,
+    positions: list[Position],
+    account: SchwabAccounts | None,
+    access_token: str | None,
+    journey: UserStrategyJourney | None,
+) -> dict[str, object]:
+    current_step = strategy_stock_suggestion_service.resolve_journey_step(journey)
+    held_symbols = strategy_stock_suggestion_service.held_underlying_symbols(positions)
+    return {
+        "held_symbols": held_symbols,
+        "portfolio_context": strategy_stock_suggestion_service.format_portfolio_context(
+            positions,
+            account=account,
+            strategy=strategy,
+        ),
+        "macro_context": strategy_stock_suggestion_service.build_macro_context(
+            market_service,
+            access_token,
+        ),
+        "journey_step_id": current_step.step_id if current_step else None,
+        "journey_step_title": current_step.title if current_step else None,
+    }
+
+
+async def _load_schwab_positions(
+    *,
+    user_id: str,
+    schwab_auth_service: SchwabAuthService,
+    portfolio_service: PortfolioService,
+) -> tuple[list[Position], SchwabAccounts | None, str | None, bool]:
+    schwab_linked = schwab_auth_service.is_schwab_authorized(user_id=user_id)
+    positions: list[Position] = []
+    account = None
+    access_token = None
+    if schwab_linked:
+        try:
+            token = schwab_auth_service.get_valid_token_by_user_id(user_id=user_id)
+            access_token = token.access_token
+            account_map = portfolio_service.get_enriched_account(
+                access_token=access_token
+            )
+            account = account_map["account"]
+            positions = account.securitiesAccount.positions
+        except SchwabReauthRequired:
+            schwab_linked = False
+    return positions, account, access_token, schwab_linked
 
 
 @router.get("/strategies", response_model=list[StrategyCatalogItem], response_model_by_alias=True)
@@ -169,34 +224,29 @@ async def get_strategy_recommendations(
     strategy_stock_suggestion_service: StrategyStockSuggestionService = Depends(
         get_strategy_stock_suggestion_service
     ),
+    market_service: MarketService = Depends(get_market_service),
     schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
     portfolio_service: PortfolioService = Depends(get_portfolio_service),
     portfolio_analysis_service: PortfolioAnalysisService = Depends(
         get_portfolio_analysis_service
     ),
 ) -> StrategyRecommendations:
-    schwab_linked = schwab_auth_service.is_schwab_authorized(user_id=user_id)
-    positions = []
-    account = None
-    access_token = None
+    positions, account, access_token, schwab_linked = await _load_schwab_positions(
+        user_id=user_id,
+        schwab_auth_service=schwab_auth_service,
+        portfolio_service=portfolio_service,
+    )
     csp_candidates: list[dict] = []
     covered_call_candidates: list[dict] = []
-
-    if schwab_linked:
-        try:
-            token = schwab_auth_service.get_valid_token_by_user_id(user_id=user_id)
-            access_token = token.access_token
-            account_map = portfolio_service.get_enriched_account(
-                access_token=access_token
-            )
-            account = account_map["account"]
-            positions = account.securitiesAccount.positions
-        except SchwabReauthRequired:
-            schwab_linked = False
 
     profile = await asyncio.to_thread(
         strategy_journey_service.get_profile,
         user_id=user_id,
+    )
+    journey = await asyncio.to_thread(
+        strategy_journey_service.get_journey,
+        user_id=user_id,
+        strategy=strategy,
     )
     focus_symbol = symbol
     if not focus_symbol and profile:
@@ -245,9 +295,19 @@ async def get_strategy_recommendations(
     if profile and strategy_stock_suggestion_service.supports_stock_suggestions(
         strategy
     ):
+        suggestion_kwargs = _build_stock_suggestion_kwargs(
+            strategy=strategy,
+            strategy_stock_suggestion_service=strategy_stock_suggestion_service,
+            market_service=market_service,
+            positions=positions,
+            account=account,
+            access_token=access_token,
+            journey=journey,
+        )
         suggestions = await strategy_stock_suggestion_service.suggest_stocks(
             profile=profile,
             strategy=strategy,
+            **suggestion_kwargs,
         )
         if suggestions is not None:
             recommendations = recommendations.model_copy(
@@ -273,6 +333,9 @@ async def get_strategy_stock_suggestions(
     strategy_stock_suggestion_service: StrategyStockSuggestionService = Depends(
         get_strategy_stock_suggestion_service
     ),
+    market_service: MarketService = Depends(get_market_service),
+    schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
+    portfolio_service: PortfolioService = Depends(get_portfolio_service),
 ) -> StrategyStockSuggestions:
     profile = await asyncio.to_thread(
         strategy_journey_service.get_profile,
@@ -284,10 +347,31 @@ async def get_strategy_stock_suggestions(
     if not strategy_stock_suggestion_service.supports_stock_suggestions(strategy):
         raise HTTPException(status_code=404, detail="Strategy does not support stock suggestions")
 
+    positions, account, access_token, _schwab_linked = await _load_schwab_positions(
+        user_id=user_id,
+        schwab_auth_service=schwab_auth_service,
+        portfolio_service=portfolio_service,
+    )
+    journey = await asyncio.to_thread(
+        strategy_journey_service.get_journey,
+        user_id=user_id,
+        strategy=strategy,
+    )
+    suggestion_kwargs = _build_stock_suggestion_kwargs(
+        strategy=strategy,
+        strategy_stock_suggestion_service=strategy_stock_suggestion_service,
+        market_service=market_service,
+        positions=positions,
+        account=account,
+        access_token=access_token,
+        journey=journey,
+    )
+
     suggestions = await strategy_stock_suggestion_service.suggest_stocks(
         profile=profile,
         strategy=strategy,
         limit=limit,
+        **suggestion_kwargs,
     )
     if suggestions is None:
         raise HTTPException(
