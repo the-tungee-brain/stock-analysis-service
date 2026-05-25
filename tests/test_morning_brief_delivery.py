@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 from app.core.prompts import AnalysisAction
-from app.models.intelligence_models import PortfolioDigest
+from app.models.intelligence_models import MarketNewsItem, PortfolioDigest
 from app.models.intelligence_models import ProactiveAlert
 from app.models.portfolio_memory_models import MorningBrief, PortfolioChanges
 from app.services.morning_brief_delivery_service import MorningBriefDeliveryService
@@ -25,6 +25,9 @@ def test_render_email_includes_macro_and_changes():
         macro_regime="VIX at 18.0",
         digest=PortfolioDigest(
             sector_weights=[],
+            macro_news=[
+                MarketNewsItem(headline="Fed holds rates steady", source="Reuters"),
+            ],
             top_news=[],
             earnings_this_week=["AAPL"],
         ),
@@ -50,6 +53,8 @@ def test_render_email_includes_macro_and_changes():
     assert subject == "Your PowerPocket morning brief"
     assert "Alex" in text_body
     assert "VIX at 18.0" in text_body
+    assert "Fed holds rates steady" in text_body
+    assert "Reuters" in text_body
     assert "portfolio value +1.20%" in text_body
     assert "AAPL" in text_body
     assert "assignment risk" in text_body

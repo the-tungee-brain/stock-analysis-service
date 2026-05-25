@@ -37,6 +37,7 @@ from app.models.intelligence_models import (
     PortfolioIntelligence,
     SymbolIntelligence,
 )
+from app.services.news_service import MARKET_NEWS_PROMPT_LIMIT
 from textwrap import dedent
 from app.core.prompts import (
     AnalysisAction,
@@ -1010,6 +1011,14 @@ class PromptEnrichmentService:
         if digest:
             if digest.macro_regime:
                 sections.append(f"## Macro regime\n{digest.macro_regime}")
+
+            if digest.macro_news:
+                macro_lines = [
+                    f"- {item.headline}"
+                    + (f" ({item.source})" if item.source else "")
+                    for item in digest.macro_news[:MARKET_NEWS_PROMPT_LIMIT]
+                ]
+                sections.append("## Market headlines\n" + "\n".join(macro_lines))
 
             if digest.sector_weights:
                 sector_lines = [

@@ -9,6 +9,7 @@ import redis
 # Per-endpoint TTL defaults (seconds).
 DEFAULT_ENDPOINT_TTLS: dict[str, int] = {
     "company_news": 1800,
+    "general_news": 3600,
     "company_profile": 86400,
     "quote": 300,
     "company_earnings": 43200,

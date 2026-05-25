@@ -132,6 +132,15 @@ class FinnhubAdapter:
             self._cache_key(symbol, _from, to),
         )
 
+    def get_general_news(self, category: str = "general", min_id: int = 0):
+        cache_key = self._cache_key(category, str(min_id))
+        return self._cached_call(
+            "general_news",
+            cache_key,
+            "general_news",
+            lambda: self.finnhub_client.general_news(category, min_id=min_id),
+        )
+
     def get_company_profile(self, symbol: str):
         cache_key = self._cache_key(symbol)
         return self._cached_call(

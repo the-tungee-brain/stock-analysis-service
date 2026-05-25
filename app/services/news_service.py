@@ -1,8 +1,12 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 import os
 
 from app.builders.finnhub_builder import FinnhubBuilder
 from app.models.finnhub_news_models import NewsResponse
+
+MARKET_NEWS_DISPLAY_LIMIT = int(os.getenv("MARKET_NEWS_LIMIT", "5"))
+MARKET_NEWS_PROMPT_LIMIT = int(os.getenv("MARKET_NEWS_PROMPT_LIMIT", "3"))
+MARKET_NEWS_LOOKBACK_HOURS = int(os.getenv("MARKET_NEWS_LOOKBACK_HOURS", "24"))
 
 
 def finnhub_press_releases_enabled() -> bool:
@@ -31,6 +35,33 @@ class NewsService:
             return NewsResponse(root=[])
 
         news_response.root = news_response.root[:10]
+        return news_response
+
+    def get_market_news(
+        self,
+        *,
+        category: str = "general",
+        limit: int | None = None,
+        lookback_hours: int | None = None,
+    ) -> NewsResponse:
+        display_limit = limit or MARKET_NEWS_DISPLAY_LIMIT
+        hours = lookback_hours or MARKET_NEWS_LOOKBACK_HOURS
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+        try:
+            news_response = self.finnhub_builder.get_market_news(category=category)
+        except Exception:
+            return NewsResponse(root=[])
+
+        recent: list = []
+        for item in news_response.root:
+            published = item.datetime
+            if published.tzinfo is None:
+                published = published.replace(tzinfo=timezone.utc)
+            if published >= cutoff:
+                recent.append(item)
+
+        news_response.root = recent[:display_limit]
         return news_response
 
     def invalidate_company_news_cache(

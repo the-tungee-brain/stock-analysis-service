@@ -166,6 +166,13 @@ class PortfolioNewsItem(BaseModel):
     weight_pct: float | None = Field(default=None, serialization_alias="weightPct")
 
 
+class MarketNewsItem(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
+    headline: str
+    source: str | None = None
+
+
 class PortfolioDigest(BaseModel):
     model_config = _INTELLIGENCE_MODEL_CONFIG
 
@@ -173,6 +180,9 @@ class PortfolioDigest(BaseModel):
         default_factory=list, serialization_alias="sectorWeights"
     )
     macro_regime: str | None = Field(default=None, serialization_alias="macroRegime")
+    macro_news: list[MarketNewsItem] = Field(
+        default_factory=list, serialization_alias="macroNews"
+    )
     top_news: list[PortfolioNewsItem] = Field(
         default_factory=list, serialization_alias="topNews"
     )

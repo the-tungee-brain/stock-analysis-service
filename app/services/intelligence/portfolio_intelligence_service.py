@@ -9,6 +9,7 @@ from app.broker.option_chain_table import build_option_chain_table
 from app.broker.sector_labels import normalize_sector_label
 from app.models.intelligence_models import (
     CachedResearchSnippet,
+    MarketNewsItem,
     OptionChainPreview,
     OptionChainSideQuote,
     OptionChainTableRow,
@@ -24,6 +25,7 @@ from app.models.schwab_option_chain_models import OptionChain
 from app.models.schwab_order_models import SchwabOrder
 from app.services.company_research_service import CompanyResearchService
 from app.services.enriched_news_service import EnrichedNewsService
+from app.services.news_service import NewsService
 from app.services.intelligence.event_timeline_builder import EventTimelineBuilder
 from app.services.intelligence.option_roll_planner_service import OptionRollPlannerService
 from app.services.intelligence.options_scoring_service import OptionsScoringService
@@ -83,10 +85,12 @@ class PortfolioIntelligenceService:
         self,
         peer_comparison_service: PeerComparisonService,
         enriched_news_service: EnrichedNewsService,
+        news_service: NewsService | None = None,
         llm_output_cache: LLMOutputCache | None = None,
     ):
         self.peer_comparison_service = peer_comparison_service
         self.enriched_news_service = enriched_news_service
+        self.news_service = news_service
         self.llm_output_cache = llm_output_cache
 
     def attach_enriched_news(self, research: ResearchContext) -> ResearchContext:
@@ -199,6 +203,7 @@ class PortfolioIntelligenceService:
         digest = PortfolioDigest(
             sector_weights=sector_weights,
             macro_regime=self._macro_regime(macro_snapshots or {}),
+            macro_news=self._macro_market_news(),
             top_news=self._portfolio_news_digest(
                 research_contexts=top_holdings_research or [],
                 positions=positions,
@@ -346,6 +351,23 @@ class PortfolioIntelligenceService:
                 parts.append("bonds sold off (TLT down — risk-on)")
 
         return "; ".join(parts) if parts else None
+
+    def _macro_market_news(self) -> list[MarketNewsItem]:
+        if self.news_service is None:
+            return []
+        try:
+            response = self.news_service.get_market_news()
+        except Exception:
+            return []
+
+        return [
+            MarketNewsItem(
+                headline=item.headline,
+                source=item.source or None,
+            )
+            for item in response.root
+            if item.headline
+        ]
 
     def _portfolio_news_digest(
         self,

@@ -268,6 +268,7 @@ async def lifespan(app: FastAPI):
     portfolio_intelligence_service = PortfolioIntelligenceService(
         peer_comparison_service=peer_comparison_service,
         enriched_news_service=enriched_news_service,
+        news_service=news_service,
         llm_output_cache=llm_output_cache,
     )
     transaction_service = TransactionService(

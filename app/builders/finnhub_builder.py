@@ -52,6 +52,28 @@ class FinnhubBuilder:
             to=to.strftime("%Y-%m-%d"),
         )
 
+    def get_market_news(
+        self,
+        *,
+        category: str = "general",
+        min_id: int = 0,
+    ) -> NewsResponse:
+        try:
+            raw = self.finnhub_adapter.get_general_news(
+                category=category,
+                min_id=min_id,
+            )
+            news_response = NewsResponse.model_validate(raw or [])
+        except (FinnhubUnavailableError, requests.exceptions.RequestException) as exc:
+            logger.warning("Finnhub market news unavailable: %s", exc)
+            return NewsResponse(root=[])
+        except Exception:
+            logger.warning("Finnhub market news unavailable", exc_info=True)
+            return NewsResponse(root=[])
+
+        news_response.root.sort(key=attrgetter("datetime"), reverse=True)
+        return news_response
+
     def get_company_profile(self, symbol: str) -> CompanyProfile | None:
         try:
             raw_company_profile = self.finnhub_adapter.get_company_profile(

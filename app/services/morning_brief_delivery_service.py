@@ -192,6 +192,13 @@ class MorningBriefDeliveryService:
         if brief.macro_regime:
             lines.extend(["Macro", brief.macro_regime, ""])
 
+        if brief.digest and brief.digest.macro_news:
+            lines.append("Market headlines")
+            for item in brief.digest.macro_news:
+                source = f" ({item.source})" if item.source else ""
+                lines.append(f"- {item.headline}{source}")
+            lines.append("")
+
         if brief.changes and brief.changes.summary:
             lines.extend(["Since yesterday", brief.changes.summary, ""])
 
@@ -226,6 +233,16 @@ class MorningBriefDeliveryService:
             html_sections.append(
                 "<h3>Macro</h3>" f"<p>{html.escape(brief.macro_regime)}</p>"
             )
+
+        if brief.digest and brief.digest.macro_news:
+            items = "".join(
+                "<li>"
+                f"{html.escape(item.headline)}"
+                f"{f' <em>({html.escape(item.source)})</em>' if item.source else ''}"
+                "</li>"
+                for item in brief.digest.macro_news
+            )
+            html_sections.append(f"<h3>Market headlines</h3><ul>{items}</ul>")
 
         if brief.changes and brief.changes.summary:
             html_sections.append(
