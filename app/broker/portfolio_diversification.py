@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+from typing import TypedDict
+
 from app.broker.option_utils import total_csp_reserved_cash
 from app.broker.position_metrics import portfolio_liquidation_value
 from app.broker.sector_labels import normalize_sector_label
 from app.models.intelligence_models import SectorWeight
 from app.models.schwab_models import Position, SchwabAccounts
 from app.models.strategy_models import InvestmentStrategy, UserInvestmentProfile
+
+
+class EtfFundMetrics(TypedDict):
+    dividend_yield: str | None
+    expense_ratio: str | None
+
+
+def _market_value_by_symbol(
+    ranked: list[tuple[str, float, float]],
+) -> dict[str, float]:
+    return {symbol: market_value for symbol, market_value, _ in ranked}
 
 
 def _aggregate_symbol_weights(
@@ -75,6 +88,7 @@ def format_diversification_summary_block(
     account: SchwabAccounts,
     sector_weights: list[SectorWeight] | None = None,
     profile: UserInvestmentProfile | None = None,
+    etf_fund_metrics: dict[str, EtfFundMetrics] | None = None,
 ) -> str | None:
     if not positions:
         return None
@@ -147,6 +161,42 @@ def format_diversification_summary_block(
     if profile and profile.etf_core and profile.etf_core.target_allocation:
         alloc = profile.etf_core.target_allocation
         weight_by_symbol = {symbol: weight for symbol, _, weight in ranked}
+        value_by_symbol = _market_value_by_symbol(ranked)
+        etf_symbols = [symbol.upper() for symbol in alloc.keys()]
+        etf_total_pct = sum(weight_by_symbol.get(symbol, 0.0) for symbol in etf_symbols)
+        etf_total_value = sum(value_by_symbol.get(symbol, 0.0) for symbol in etf_symbols)
+        non_etf_pct = max(100.0 - etf_total_pct, 0.0)
+
+        lines.append("\n## ETF core weight in portfolio")
+        lines.append(
+            f"- Total in ETF core targets: {etf_total_pct:.1f}% of portfolio "
+            f"(${etf_total_value:,.0f})"
+        )
+        lines.append(
+            f"- Non-ETF-core holdings (single names, options overlay, etc.): "
+            f"{non_etf_pct:.1f}%"
+        )
+        for symbol, target_pct in alloc.items():
+            symbol_upper = symbol.upper()
+            current_pct = weight_by_symbol.get(symbol_upper, 0.0)
+            current_value = value_by_symbol.get(symbol_upper, 0.0)
+            lines.append(
+                f"  - {symbol_upper}: {current_pct:.1f}% of portfolio "
+                f"(${current_value:,.0f}) vs {target_pct:.0f}% target"
+            )
+
+        if etf_fund_metrics:
+            lines.append("\n## ETF fund metrics (yield and fees)")
+            for symbol in alloc.keys():
+                symbol_upper = symbol.upper()
+                metrics = etf_fund_metrics.get(symbol_upper) or {}
+                yield_text = metrics.get("dividend_yield") or "N/A"
+                expense_text = metrics.get("expense_ratio") or "N/A"
+                lines.append(
+                    f"- {symbol_upper}: dividend yield {yield_text}, "
+                    f"expense ratio {expense_text}"
+                )
+
         lines.append("\n## ETF core allocation gap (current vs target)")
         total_buy_gap = 0.0
         underweight_gaps: list[tuple[str, float]] = []

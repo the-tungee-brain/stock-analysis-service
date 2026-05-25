@@ -283,9 +283,11 @@ def _structured_portfolio_analysis_v1_task() -> str:
 
         Populate the JSON schema:
         - summary: max 3 sentences; lead with the #1 move using deployable cash and the precomputed
-          deploy plan from DIVERSIFICATION SUMMARY when present.
+          deploy plan from DIVERSIFICATION SUMMARY when present. Include total **ETF core weight %**
+          in the portfolio when ETF data is shown.
         - recommendedAction: the single highest-impact next step — imperative title, concrete reason,
-          symbol when one name (use "" for multi-ETF deploys).
+          symbol when one name (use "" for multi-ETF deploys). For ETF deploys, mention dividend yield
+          and expense ratio from **ETF fund metrics** when available.
         - sections: include "Gaps vs targets", "Where to put money smarter", and "Action plan (ranked)".
           Plain-text titles only — never use # or ###.
           Use bullets for ranked steps (2-4) with timing and $ amounts from the data.
@@ -435,6 +437,9 @@ PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
 
     ## Step 1 — Read precomputed concentration data
     - Use **WEIGHT_%** in the positions table and **DIVERSIFICATION SUMMARY** — do not recalculate unless N/A.
+    - State **ETF core weight in portfolio** clearly: total % in ETF core targets and each ETF's current % vs target.
+    - When recommending ETF buys, cite each fund's **dividend yield** and **expense ratio** from **ETF fund metrics** —
+      do not invent yield or fee figures.
     - Use **Sector allocation** and **Market headlines (general, last 24h)** from PORTFOLIO INTELLIGENCE when present.
     - Treat short-put underlyings as intentional concentration (options overlay).
 
@@ -575,6 +580,9 @@ DATA_INTEGRITY_RULES = dedent("""
       Do not treat them as company-specific news unless the headline clearly names a held symbol.
     - When **Top holdings news digest** appears in PORTFOLIO INTELLIGENCE, treat it as the main
       symbol-specific catalyst summary for top positions — do not invent additional headlines.
+    - When **ETF core weight in portfolio** and **ETF fund metrics** appear in DIVERSIFICATION SUMMARY,
+      state the total ETF core % and each ETF's current weight; for ETF recommendations cite the
+      provided dividend yield and expense ratio — never guess fund fees or yields.
     """).strip()
 
 _PORTFOLIO_ALLOCATION_CORE = dedent(f"""

@@ -100,10 +100,19 @@ def test_diversification_summary_includes_etf_core_gap():
         positions=positions,
         account=account,
         profile=profile,
+        etf_fund_metrics={
+            "SCHD": {"dividend_yield": "3.50%", "expense_ratio": "0.06%"},
+            "BND": {"dividend_yield": "4.20%", "expense_ratio": "0.03%"},
+        },
     )
 
     assert block is not None
     assert "ETF core allocation gap" in block
+    assert "ETF core weight in portfolio" in block
+    assert "Total in ETF core targets:" in block
+    assert "ETF fund metrics (yield and fees)" in block
+    assert "dividend yield 3.50%" in block
+    assert "expense ratio 0.06%" in block
     assert "SCHD:" in block and "70% target" in block
     assert "BND:" in block and "30% target" in block
     assert "Deployable cash" in block

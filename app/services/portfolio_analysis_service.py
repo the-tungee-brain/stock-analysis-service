@@ -145,6 +145,28 @@ class PortfolioAnalysisService:
             logger.exception("Failed to load investment profile for %s", user_id)
             return None
 
+    def _load_etf_core_fund_metrics(
+        self,
+        profile: UserInvestmentProfile | None,
+    ) -> dict[str, dict[str, str | None]]:
+        if profile is None or not profile.etf_core or not profile.etf_core.target_allocation:
+            return {}
+
+        builder = self.company_research_service.fundamentals_builder
+        metrics_by_symbol: dict[str, dict[str, str | None]] = {}
+        for symbol in profile.etf_core.target_allocation:
+            symbol_upper = symbol.upper()
+            try:
+                metrics_by_symbol[symbol_upper] = builder.build_etf_metrics(
+                    symbol_upper
+                )
+            except Exception:
+                metrics_by_symbol[symbol_upper] = {
+                    "dividend_yield": None,
+                    "expense_ratio": None,
+                }
+        return metrics_by_symbol
+
     @staticmethod
     def _needs_transaction_history(action: AnalysisAction) -> bool:
         return (
@@ -318,11 +340,16 @@ class PortfolioAnalysisService:
                     if intelligence and intelligence.digest
                     else None
                 )
+                etf_fund_metrics = await asyncio.to_thread(
+                    self._load_etf_core_fund_metrics,
+                    profile,
+                )
                 diversification_block = format_diversification_summary_block(
                     positions=positions,
                     account=account,
                     sector_weights=sector_weights,
                     profile=profile,
+                    etf_fund_metrics=etf_fund_metrics,
                 )
                 strategy_alignment_block = format_strategy_symbol_alignment_block(
                     positions=positions,

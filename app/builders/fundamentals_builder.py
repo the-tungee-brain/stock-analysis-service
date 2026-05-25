@@ -84,7 +84,7 @@ class FundamentalsBuilder:
         )
         add(
             "Dividend yield",
-            self._fmt_pct(info.get("dividendYield")),
+            self._fmt_dividend_yield(info.get("dividendYield")),
             "Annual dividend as a share of the stock price. Relevant for income-focused investors.",
         )
         add(
@@ -104,6 +104,34 @@ class FundamentalsBuilder:
         )
 
         return metrics
+
+    def build_etf_metrics(self, symbol: str) -> dict[str, str | None]:
+        info = self.market_data_adapter.get_ticker_info(symbol=symbol)
+        if not info:
+            return {"dividend_yield": None, "expense_ratio": None}
+        return {
+            "dividend_yield": self._fmt_dividend_yield(info.get("dividendYield")),
+            "expense_ratio": self._fmt_expense_ratio(info),
+        }
+
+    @staticmethod
+    def _fmt_dividend_yield(value: float | None) -> str | None:
+        if value is None or not isinstance(value, (int, float)):
+            return None
+        if abs(value) < 1:
+            return f"{value * 100:.2f}%"
+        return f"{value:.2f}%"
+
+    @staticmethod
+    def _fmt_expense_ratio(info: dict) -> str | None:
+        for key in ("annualReportExpenseRatio", "netExpenseRatio", "expenseRatio"):
+            value = info.get(key)
+            if value is None or not isinstance(value, (int, float)):
+                continue
+            if 0 < abs(value) < 0.2:
+                return f"{value * 100:.2f}%"
+            return f"{value:.2f}%"
+        return None
 
     def _fmt_multiple(self, value: float | None) -> str | None:
         if value is None or not isinstance(value, (int, float)):
