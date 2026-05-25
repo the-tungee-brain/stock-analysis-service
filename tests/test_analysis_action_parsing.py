@@ -252,4 +252,21 @@ def test_request_model_accepts_portfolio_analysis_v1_fields():
         }
     )
     assert request.response_format == "portfolio_analysis_v1"
-    assert request.analysis_instructions == "Return ONLY valid JSON."
+
+
+def test_portfolio_allocation_prompts_do_not_hardcode_example_etfs():
+    from app.core.prompts import (
+        AMOUNT_SOURCING_RULES,
+        SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE,
+        TICKER_SOURCING_RULES,
+        _STRUCTURED_V1_JSON_RULES,
+    )
+
+    assert "SCHD and ~$1,310 BND" not in _STRUCTURED_V1_JSON_RULES
+    assert "into SCHD and BND" not in _STRUCTURED_V1_JSON_RULES
+    assert "Format example only" in _STRUCTURED_V1_JSON_RULES
+    assert "Ticker sourcing" in TICKER_SOURCING_RULES
+    assert "Do NOT default to popular ETFs" in TICKER_SOURCING_RULES
+    assert "format examples only" in AMOUNT_SOURCING_RULES.lower()
+    assert TICKER_SOURCING_RULES in SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE
+    assert AMOUNT_SOURCING_RULES in SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE

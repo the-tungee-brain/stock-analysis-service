@@ -192,13 +192,19 @@ _STRUCTURED_V1_JSON_RULES = dedent("""
     - recommendedAction.symbol: ticker when the action targets one symbol; use "" when not applicable.
     - Be decisive — this is a portfolio action plan, not a research memo or bullet diary.
     - summary: max 3 sentences; sentence 1 must state the biggest problem AND your #1 recommended move
-      with a dollar amount or share count (e.g., "Deploy $4,367: ~$3,060 SCHD and ~$1,310 BND to close your
-      ETF core gap; trim HOOD next if it stays above 15%.").
-    - recommendedAction.title: imperative and specific ("Deploy $4,367 into SCHD and BND", not
-      "Consider improving diversification").
+      with a dollar amount or share count derived from this investor's data (deployable cash, gap
+      "~$X to buy" lines, position $ values — NOT copied from prompt examples).
+      Format example only (do not use these numbers): "Deploy $4,367 into the underweight ETFs listed
+      in the allocation gap table; trim HOOD next if it stays above 15%."
+    - recommendedAction.title: imperative and specific with this investor's real $ amounts.
+      Format example only (do not use this number): "Deploy $4,367 into underweight core targets".
+      Bad: "Consider improving diversification".
     - recommendedAction.reason: 1-2 sentences tying numbers from the data to impact — no hedging.
-    - When deployable cash and ETF allocation gap are both shown, recommendedAction must allocate that
-      cash with a per-ticker dollar split. Do not leave cash undeployed without an explicit hold-cash reason.
+    - When deployable cash and ETF allocation gap are both shown, recommendedAction must allocate
+      **this investor's** deployable cash (from DIVERSIFICATION SUMMARY) with a per-ticker dollar split
+      taken from the gap table. Do not leave cash undeployed without an explicit hold-cash reason.
+    - Any dollar figure in these instructions is an illustrative format example — never copy it;
+      always substitute amounts from the provided account and DIVERSIFICATION SUMMARY blocks.
     - Rank 2-4 bullets in "Action plan (ranked)" with timing (this week / this month) and expected impact.
     - Limit off-list commentary (e.g., TSM OK to hold) to one short bullet — never make it the lead action
       unless concentration requires a trim.
@@ -263,34 +269,41 @@ def _structured_portfolio_analysis_task() -> str:
 
         Use WEIGHT_% in the positions table and precomputed blocks in DIVERSIFICATION SUMMARY /
         PORTFOLIO INTELLIGENCE as authoritative. Do not recalculate weights unless WEIGHT_% is N/A.
-        If deployable cash is shown, end ### Where to put money smarter with a clear deploy-$X plan.
+        If deployable cash is shown, end ### Where to put money smarter with a clear deploy plan using
+        that exact deployable cash figure and per-ticker gap $ from DIVERSIFICATION SUMMARY.
 
         {_STRUCTURED_PORTFOLIO_OUTPUT_HEADINGS}
         """).strip()
 
 
 def _structured_portfolio_analysis_v1_task() -> str:
-    return dedent("""
+    return dedent(f"""
         Analyze this portfolio for diversification, concentration risk, and smarter capital deployment.
         Deliver a decisive action plan — not a list of observations.
 
         Populate the JSON schema:
-        - summary: max 3 sentences; lead with the #1 move and dollar amounts from deployable cash / trims.
+        - summary: max 3 sentences; lead with the #1 move using this investor's deployable cash / trim $
+          from DIVERSIFICATION SUMMARY (never copy example $ from the prompt).
         - recommendedAction: the single highest-impact next step — imperative title, concrete reason,
           symbol when one name (use "" for multi-ETF deploys).
         - sections: include "Gaps vs targets", "Where to put money smarter", and "Action plan (ranked)".
           Plain-text titles only — never use # or ###.
-          Use bullets for ranked steps (2-4) with timing and dollar amounts.
+          Use bullets for ranked steps (2-4) with timing and $ amounts from the data.
 
         Decision order:
         1. If ETF core allocation gap data exists and deployable cash > 0 → recommendedAction should deploy
-           cash into the largest underweights first (exact $ per ticker).
-        2. If a single name exceeds profile max or 20% → rank a trim with $ or shares; do not bury it
-           behind off-list commentary.
+           **this investor's** deployable cash into the largest underweights first (exact $ per ticker
+           from the gap table — not example $ from the prompt).
+        2. If a single name exceeds profile max or 20% → rank a trim with $ or shares from position data;
+           do not bury it behind off-list commentary.
         3. Off-list names that are fine to hold (e.g., TSM) → one brief bullet only; suggest adding to
            the working list if relevant — not the headline action.
-        4. Wheel list names not held → mention only if they fit a ranked deploy/trim step (e.g., SPY for
-           diversification) — do not list them without a concrete recommendation.
+        4. Wheel list names not held → mention only if they fit a ranked deploy/trim step from the
+           provided strategy / allocation data — do not list them without a concrete recommendation.
+
+        {TICKER_SOURCING_RULES}
+
+        {AMOUNT_SOURCING_RULES}
 
         Use WEIGHT_% in the positions table and precomputed blocks in DIVERSIFICATION SUMMARY /
         PORTFOLIO INTELLIGENCE as authoritative. Do not recalculate weights unless WEIGHT_% is N/A.
@@ -391,6 +404,32 @@ STRATEGY_SYMBOL_LIST_RULES = dedent("""
     - If fit is strong: recommend holding and suggest adding the symbol to the strategy list.
     """).strip()
 
+TICKER_SOURCING_RULES = dedent("""
+    # Ticker sourcing (CRITICAL — do not invent symbols)
+    - Recommend buys/trims ONLY for tickers explicitly present in the provided data:
+      DIVERSIFICATION SUMMARY (ETF core gap, top holdings), INVESTOR PREFERENCES,
+      STRATEGY SYMBOL LIST ALIGNMENT, PORTFOLIO INTELLIGENCE sector weights, or the positions table.
+    - Do NOT default to popular ETFs or dividend funds (e.g., SCHD, VTI, VOO, BND, VXUS) unless that
+      exact symbol appears in the data above as a target, holding, or strategy-list name.
+    - When ETF core allocation gap data is present, use ONLY those tickers and their dollar gaps —
+      split deployable cash across the largest underweights shown there.
+    - When no buy targets are in the data, recommend hold cash, trim overweight names, or redeploy
+      into an existing underweight holding — never invent a generic ETF basket.
+    """).strip()
+
+AMOUNT_SOURCING_RULES = dedent("""
+    # Dollar amounts and sizing (CRITICAL — use this investor's data only)
+    - Every $ amount, share count, and target weight % must come from the provided data:
+      **Deployable cash**, ETF core gap **"~$X to buy"** lines, position **MKT_VAL** / **WEIGHT_%**,
+      liquidation value, and trim targets in DIVERSIFICATION SUMMARY — not from prompt examples.
+    - Dollar figures shown in instructions (e.g., $4,367) are **format examples only**; substitute
+      this investor's actual deployable cash and per-ticker gap amounts.
+    - Deploy plan: start from deployable cash; allocate across underweight tickers using each line's
+      "~$X to buy" (cap each at the gap if cash is limited; scale proportionally if cash < total gap).
+    - Trim plan: cite current $ and weight, target weight from profile or rules, and $ or shares to sell.
+    - If a needed input is missing, state the gap and give a range or % — do not invent round placeholder $.
+    """).strip()
+
 PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
     # Portfolio diversification framework (follow this order for portfolio-level analysis)
 
@@ -408,14 +447,17 @@ PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
     ## Step 3 — Sector and theme overlap
     - Flag any sector above 25–30% of the portfolio.
     - Flag theme clustering (e.g., multiple mega-cap tech, semiconductors, dividend utilities).
-    - Prefer redeploying into underweight sectors or broad ETFs (VTI, VXUS, BND) when data supports it.
+    - Prefer redeploying into underweight sectors or names already in the investor's targets / portfolio
+      when the data supports it — do not introduce new tickers absent from the provided blocks.
 
     ## Step 4 — Cash and deployment
-    - Start from deployable cash in DIVERSIFICATION SUMMARY (after CSP reserves and a 5% buffer).
-    - If ETF core allocation gap data is present, use it — deploy cash toward the largest underweights first
-      with exact dollar amounts (e.g., "$3,058 into SCHD, $1,309 into BND").
+    - Start from **Deployable cash** in DIVERSIFICATION SUMMARY (after CSP reserves and a 5% buffer).
+    - Use that exact deployable cash figure — not example amounts from the prompt.
+    - If ETF core allocation gap data is present, deploy cash toward the largest underweights listed there
+      using each ticker's **"~$X to buy"** from that table (scale if deployable cash < total gap).
     - If any name is above 20%, prioritize trims before new buys — unless deployable cash is small vs
-      the concentration; then say both: trim X this week AND deploy remaining cash into core ETFs.
+      the concentration; then say both: trim X this week AND deploy remaining cash into the underweight
+      targets from the allocation gap (or hold cash if none are listed).
     - Every trim/add recommendation must include **dollar amount** and **target weight %** when possible.
     - If fully invested, give a ranked "next dollar" priority list instead of vague advice.
     - Never end with observations only — always commit to a ranked deploy/trim plan.
@@ -542,6 +584,10 @@ _PORTFOLIO_ALLOCATION_CORE = dedent(f"""
     - Respect saved investor preferences when provided.
     - For holdings outside the strategy symbol list: evaluate fit on merits; if strong, suggest
       adding to the list — never treat off-list as a risk by itself.
+
+    {TICKER_SOURCING_RULES}
+
+    {AMOUNT_SOURCING_RULES}
 
     {PORTFOLIO_DIVERSIFICATION_RULES}
 
@@ -680,8 +726,9 @@ SYSTEM_NATURAL_MESSAGE = dedent(f"""
 
     # Optional follow-ups (close with ONE short offer when it fits — never stack multiple offers)
     Match the offer to what you just recommended:
-    - **Trim / Close / partial exit** → offer (a) where to redeploy proceeds — hold cash, VTI/VOO, or a
-      specific existing underweight name; OR (b) order mechanics — limit vs market with a suggested limit.
+    - **Trim / Close / partial exit** → offer (a) where to redeploy proceeds — hold cash, an underweight
+      name from the diversification summary, or a ticker from saved strategy targets; OR (b) order mechanics
+      — limit vs market with a suggested limit.
     - **Sell covered call / cash-secured put** → offer to walk through execution (contracts, strike, expiration)
       OR assignment/call-away risk if expiration is near.
     - **Roll the option** → offer to compare rolling vs closing now with estimated credit/debit.
@@ -902,8 +949,9 @@ def _build_action_prompt(
                   covered call / CSP execution, concentration trim order, pre-earnings plan, tax impact,
                   or a deeper dive you offered).
                 - Deliver that follow-up now — do not restart the original {symbol} analysis.
-                - If redeploy: recommend ONE specific path (cash, VTI/VOO, or another stock) with rationale
-                  and approximate dollar amount from context.
+                - If redeploy: recommend ONE specific path (hold cash, an underweight name from the
+                  diversification data, or a ticker from saved strategy targets) with rationale and
+                  approximate dollar amount from context — do not invent tickers not in the data.
                 - If order mechanics: recommend limit vs market with a concrete price or timing.
                 - If options execution: give numbered steps — contracts, strike, expiration, and what to watch.
                 - If roll vs close: compare both with estimated credit/debit and pick one.

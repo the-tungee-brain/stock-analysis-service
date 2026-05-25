@@ -170,7 +170,7 @@ def format_diversification_summary_block(
             if deployable_cash < total_buy_gap:
                 lines.append(
                     "- Prioritize closing the largest ETF gaps first with available deployable cash; "
-                    "note remaining gap for future contributions."
+                    "use only the tickers listed above. Note any remaining gap for future contributions."
                 )
 
     if profile and profile.primary_strategy == InvestmentStrategy.DIVIDEND:
