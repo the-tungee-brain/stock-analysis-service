@@ -20,6 +20,10 @@ class UserStrategyJourneyAdapter:
         self.table_name = "USER_STRATEGY_JOURNEY"
 
     @staticmethod
+    def _parse_step(raw: dict) -> JourneyStep:
+        return JourneyStep.model_validate(raw)
+
+    @staticmethod
     def _completion_pct(steps: list[JourneyStep]) -> float:
         if not steps:
             return 0.0
@@ -41,7 +45,7 @@ class UserStrategyJourneyAdapter:
         ) = row
 
         raw_steps = json.loads(steps_json or "[]")
-        steps = [JourneyStep.model_validate(item) for item in raw_steps]
+        steps = [self._parse_step(item) for item in raw_steps]
         completion_pct = self._completion_pct(steps)
 
         return UserStrategyJourney(

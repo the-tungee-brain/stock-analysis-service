@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 from app.models.strategy_models import (
     InvestmentStrategy,
+    JourneyStep,
     JourneyStepStatus,
     JourneyStepUpdate,
     UserInvestmentProfile,
@@ -10,6 +11,41 @@ from app.models.strategy_models import (
 )
 from app.services.strategy.strategy_catalog import build_initial_steps
 from app.services.strategy.strategy_journey_service import StrategyJourneyService
+
+
+def test_journey_step_validates_camel_case_json():
+    step = JourneyStep.model_validate(
+        {
+            "stepId": "connect-schwab",
+            "title": "Connect Schwab",
+            "description": "Link your account.",
+            "status": "available",
+            "order": 1,
+            "completedAt": None,
+            "metadata": {},
+        }
+    )
+    assert step.step_id == "connect-schwab"
+
+
+def test_journey_step_round_trip_uses_camel_case_aliases():
+    step = build_initial_steps(InvestmentStrategy.WHEEL)[0]
+    payload = step.model_dump(mode="json", by_alias=True)
+    restored = JourneyStep.model_validate(payload)
+    assert restored.step_id == step.step_id
+
+
+def test_wheel_config_validates_camel_case_json():
+    config = WheelStrategyConfig.model_validate(
+        {
+            "wheelSymbols": ["AAPL"],
+            "targetDeltaMin": 0.2,
+            "targetDeltaMax": 0.3,
+            "preferredDteDays": 7,
+            "maxSingleNamePct": 15,
+        }
+    )
+    assert config.wheel_symbols == ["AAPL"]
 
 
 def test_build_initial_steps_unlocks_first_only():
