@@ -15,7 +15,6 @@ from app.models.strategy_models import (
 )
 from app.services.llm_service import LLMService
 from app.services.prompt_enrichment_service import PromptEnrichmentService
-from app.services.strategy.strategy_journey_service import WHEEL_LIKE
 
 logger = logging.getLogger(__name__)
 
@@ -32,21 +31,14 @@ class StrategyStockSuggestionService:
         self.llm_service = llm_service
 
     @staticmethod
-    def needs_stock_suggestions(
-        profile: UserInvestmentProfile,
-        strategy: InvestmentStrategy,
-    ) -> bool:
-        if strategy in WHEEL_LIKE:
-            return not (profile.wheel and profile.wheel.wheel_symbols)
-        if strategy == InvestmentStrategy.DIVIDEND:
-            return not (profile.dividend and profile.dividend.dividend_symbols)
-        if strategy == InvestmentStrategy.ETF_CORE:
-            return not (
-                profile.etf_core and profile.etf_core.target_allocation
-            )
-        if strategy == InvestmentStrategy.COVERED_CALL:
-            return not (profile.wheel and profile.wheel.wheel_symbols)
-        return False
+    def supports_stock_suggestions(strategy: InvestmentStrategy) -> bool:
+        return strategy in {
+            InvestmentStrategy.WHEEL,
+            InvestmentStrategy.CSP_INCOME,
+            InvestmentStrategy.COVERED_CALL,
+            InvestmentStrategy.DIVIDEND,
+            InvestmentStrategy.ETF_CORE,
+        }
 
     @staticmethod
     def _existing_symbols(
@@ -136,7 +128,7 @@ class StrategyStockSuggestionService:
         limit: int = DEFAULT_SUGGESTION_LIMIT,
         macro_context: str | None = None,
     ) -> StrategyStockSuggestions | None:
-        if not self.needs_stock_suggestions(profile, strategy):
+        if not self.supports_stock_suggestions(strategy):
             return None
 
         resolved_limit = max(1, min(limit, DEFAULT_SUGGESTION_LIMIT))
@@ -174,12 +166,17 @@ class StrategyStockSuggestionService:
             limit=resolved_limit,
             exclude_symbols=exclude_symbols,
         )
+
+        summary = llm_response.summary.strip()
         if not picks:
-            return None
+            summary = (
+                summary
+                or "Your current symbols already cover our top ideas for this profile."
+            )
 
         return StrategyStockSuggestions(
             strategy=strategy,
             picks=picks,
-            summary=llm_response.summary.strip(),
+            summary=summary,
             generated_at=datetime.now(timezone.utc),
         )

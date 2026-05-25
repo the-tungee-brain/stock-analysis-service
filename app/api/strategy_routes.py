@@ -242,8 +242,8 @@ async def get_strategy_recommendations(
     if recommendations is None:
         raise HTTPException(status_code=404, detail="Strategy profile not found")
 
-    if profile and strategy_stock_suggestion_service.needs_stock_suggestions(
-        profile, strategy
+    if profile and strategy_stock_suggestion_service.supports_stock_suggestions(
+        strategy
     ):
         suggestions = await strategy_stock_suggestion_service.suggest_stocks(
             profile=profile,
@@ -281,11 +281,8 @@ async def get_strategy_stock_suggestions(
     if profile is None:
         raise HTTPException(status_code=404, detail="Investment profile not found")
 
-    if not strategy_stock_suggestion_service.needs_stock_suggestions(profile, strategy):
-        raise HTTPException(
-            status_code=409,
-            detail="Stock suggestions are only available before symbols are chosen.",
-        )
+    if not strategy_stock_suggestion_service.supports_stock_suggestions(strategy):
+        raise HTTPException(status_code=404, detail="Strategy does not support stock suggestions")
 
     suggestions = await strategy_stock_suggestion_service.suggest_stocks(
         profile=profile,

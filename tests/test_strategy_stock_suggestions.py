@@ -27,17 +27,12 @@ def _wheel_profile(*, symbols: list[str] | None = None) -> UserInvestmentProfile
     )
 
 
-def test_needs_stock_suggestions_when_wheel_symbols_missing():
-    profile = _wheel_profile()
-    assert StrategyStockSuggestionService.needs_stock_suggestions(
-        profile, InvestmentStrategy.WHEEL
+def test_supports_stock_suggestions_for_all_strategy_types():
+    assert StrategyStockSuggestionService.supports_stock_suggestions(
+        InvestmentStrategy.WHEEL
     )
-
-
-def test_needs_stock_suggestions_false_when_symbols_present():
-    profile = _wheel_profile(symbols=["AAPL"])
-    assert not StrategyStockSuggestionService.needs_stock_suggestions(
-        profile, InvestmentStrategy.WHEEL
+    assert StrategyStockSuggestionService.supports_stock_suggestions(
+        InvestmentStrategy.ETF_CORE
     )
 
 
@@ -137,11 +132,34 @@ async def test_suggest_stocks_returns_ranked_picks():
 
 
 @pytest.mark.asyncio
-async def test_suggest_stocks_skips_when_symbols_already_chosen():
-    service = StrategyStockSuggestionService(MagicMock(), MagicMock())
+async def test_suggest_stocks_excludes_existing_symbols():
+    prompt_service = PromptEnrichmentService()
+    llm_service = MagicMock()
+    llm_service.generate_from_prompts = AsyncMock(
+        return_value=StrategyStockSuggestionsLLMResponse(
+            picks=[
+                StrategyStockPick(
+                    symbol="AAPL",
+                    rationale="Already held.",
+                    fit_score=0.95,
+                ),
+                StrategyStockPick(
+                    symbol="MSFT",
+                    rationale="Similar quality mega-cap.",
+                    fit_score=0.9,
+                ),
+            ],
+            summary="Additional ideas beyond your current list.",
+        )
+    )
+    service = StrategyStockSuggestionService(prompt_service, llm_service)
     profile = _wheel_profile(symbols=["AAPL"])
-    result = await service.suggest_stocks(
+
+    suggestions = await service.suggest_stocks(
         profile=profile,
         strategy=InvestmentStrategy.WHEEL,
+        limit=2,
     )
-    assert result is None
+
+    assert suggestions is not None
+    assert [pick.symbol for pick in suggestions.picks] == ["MSFT"]
