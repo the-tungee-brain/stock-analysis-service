@@ -1385,3 +1385,203 @@ class PromptEnrichmentService:
         ).strip()
 
         return [system_msg, user_msg]
+
+    @staticmethod
+    def format_investment_profile_block(
+        profile,
+        *,
+        strategy=None,
+    ) -> str:
+        from app.models.strategy_models import InvestmentStrategy
+
+        active_strategy = strategy or profile.primary_strategy
+        lines = [
+            f"- Primary strategy: {profile.primary_strategy.value if profile.primary_strategy else 'not set'}",
+            f"- Active strategy for this request: {active_strategy.value if active_strategy else 'not set'}",
+            f"- Risk tolerance: {profile.risk_tolerance}",
+            f"- Options experience: {profile.options_experience}",
+            f"- Income vs growth: {profile.income_vs_growth}",
+        ]
+
+        if profile.wheel:
+            wheel = profile.wheel
+            symbols = ", ".join(wheel.wheel_symbols) if wheel.wheel_symbols else "(none chosen yet)"
+            lines.extend(
+                [
+                    "## Wheel / options preferences",
+                    f"- Approved symbols: {symbols}",
+                    f"- Target put delta: {wheel.target_delta_min:.2f}–{wheel.target_delta_max:.2f}",
+                    f"- Preferred DTE: {wheel.preferred_dte_days} days",
+                    f"- Max single-name weight: {wheel.max_single_name_pct:.0f}%",
+                ]
+            )
+
+        if profile.dividend:
+            dividend = profile.dividend
+            symbols = (
+                ", ".join(dividend.dividend_symbols)
+                if dividend.dividend_symbols
+                else "(none chosen yet)"
+            )
+            yield_target = (
+                f"{dividend.target_yield_pct:.1f}%"
+                if dividend.target_yield_pct is not None
+                else "not set"
+            )
+            payout = (
+                f"{dividend.max_payout_ratio:.0f}%"
+                if dividend.max_payout_ratio is not None
+                else "not set"
+            )
+            lines.extend(
+                [
+                    "## Dividend preferences",
+                    f"- Watchlist symbols: {symbols}",
+                    f"- Target yield: {yield_target}",
+                    f"- Max payout ratio: {payout}",
+                ]
+            )
+
+        if profile.etf_core:
+            allocation = profile.etf_core.target_allocation or {}
+            if allocation:
+                alloc_lines = ", ".join(
+                    f"{symbol} {weight:.0f}%"
+                    for symbol, weight in allocation.items()
+                )
+            else:
+                alloc_lines = "(not set yet)"
+            lines.extend(
+                [
+                    "## ETF core preferences",
+                    f"- Target allocation: {alloc_lines}",
+                    f"- Rebalance threshold: {profile.etf_core.rebalance_threshold_pct:.0f}%",
+                ]
+            )
+
+        if active_strategy in {
+            InvestmentStrategy.WHEEL,
+            InvestmentStrategy.CSP_INCOME,
+            InvestmentStrategy.COVERED_CALL,
+        }:
+            lines.append(
+                "## Strategy fit criteria\n"
+                "Prioritize liquid, widely traded names with active options markets. "
+                "The investor should be comfortable owning shares if assigned."
+            )
+        elif active_strategy == InvestmentStrategy.DIVIDEND:
+            lines.append(
+                "## Strategy fit criteria\n"
+                "Prioritize reliable dividend payers with sustainable payout ratios "
+                "and understandable business models."
+            )
+        elif active_strategy == InvestmentStrategy.ETF_CORE:
+            lines.append(
+                "## Strategy fit criteria\n"
+                "Prioritize low-cost, diversified ETFs suitable for a buy-and-hold core portfolio."
+            )
+
+        return "\n".join(lines)
+
+    def build_strategy_stock_suggestions_prompt(
+        self,
+        profile,
+        *,
+        strategy,
+        limit: int = 5,
+        exclude_symbols: list[str] | None = None,
+        macro_context: str | None = None,
+    ) -> list[str]:
+        from app.models.strategy_models import InvestmentStrategy
+
+        profile_block = self.format_investment_profile_block(
+            profile,
+            strategy=strategy,
+        )
+        exclude = sorted({symbol.upper() for symbol in (exclude_symbols or []) if symbol})
+        exclude_block = (
+            "Do not repeat these symbols: " + ", ".join(exclude)
+            if exclude
+            else "No symbols to exclude."
+        )
+        macro_block = macro_context or "No live macro context provided."
+
+        strategy_guidance = {
+            InvestmentStrategy.WHEEL: (
+                "Suggest U.S.-listed stocks suitable for the wheel strategy: liquid options, "
+                "stable enough to own on assignment, and aligned with the user's risk tolerance."
+            ),
+            InvestmentStrategy.CSP_INCOME: (
+                "Suggest U.S.-listed stocks for cash-secured put income: liquid puts, "
+                "businesses the user would buy at a lower price, aligned with risk tolerance."
+            ),
+            InvestmentStrategy.COVERED_CALL: (
+                "Suggest U.S.-listed stocks worth owning 100+ shares for covered-call income: "
+                "liquid calls, understandable businesses, aligned with risk tolerance."
+            ),
+            InvestmentStrategy.DIVIDEND: (
+                "Suggest U.S.-listed dividend stocks aligned with the user's yield target, "
+                "payout-ratio limit, and income-vs-growth preference."
+            ),
+            InvestmentStrategy.ETF_CORE: (
+                "Suggest low-cost U.S.-listed ETFs for a core buy-and-hold portfolio. "
+                "Use ETF tickers, not individual stocks."
+            ),
+        }[strategy]
+
+        system_msg = dedent(
+            """
+            # Role
+            You help a retail investor choose symbols that fit their chosen investing strategy
+            and saved preferences.
+
+            # Rules
+            - Return ONLY valid JSON — no markdown or commentary outside the JSON object.
+            - Suggest liquid, mainstream U.S.-listed symbols appropriate for the strategy.
+            - Rank picks from best fit to weakest fit.
+            - Each rationale must explain WHY the symbol fits this user's preferences.
+            - fitScore is 0.0–1.0 (1.0 = best fit for this profile).
+            - tags are short labels like "high-liquidity", "dividend-aristocrat", "mega-cap", "broad-market-etf".
+            - This is educational research, not personalized financial advice. Do not say "buy" or "sell".
+            - Do not invent live prices, yields, or payout ratios — speak qualitatively unless provided.
+
+            Return a single JSON object:
+            {
+              "picks": [
+                {
+                  "symbol": "AAPL",
+                  "companyName": "Apple Inc.",
+                  "rationale": "...",
+                  "fitScore": 0.92,
+                  "tags": ["mega-cap", "liquid-options"]
+                }
+              ],
+              "summary": "One paragraph on how you chose these names for this profile."
+            }
+            """
+        ).strip()
+
+        user_msg = dedent(
+            f"""
+            Suggest up to {limit} ranked symbols for this investor.
+
+            ## Active strategy
+            {strategy.value}
+
+            ## Strategy-specific guidance
+            {strategy_guidance}
+
+            ## Saved preferences
+            {profile_block}
+
+            ## Exclusions
+            {exclude_block}
+
+            ## Macro context
+            {macro_block}
+
+            Return the top picks for this profile only.
+            """
+        ).strip()
+
+        return [system_msg, user_msg]

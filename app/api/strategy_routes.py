@@ -10,12 +10,14 @@ from app.dependencies.service_dependencies import (
     get_portfolio_service,
     get_schwab_auth_service,
     get_strategy_journey_service,
+    get_strategy_stock_suggestion_service,
 )
 from app.models.strategy_models import (
     InvestmentStrategy,
     JourneyStepUpdate,
     StrategyCatalogItem,
     StrategyRecommendations,
+    StrategyStockSuggestions,
     UserInvestmentProfile,
     UserInvestmentProfileUpdate,
     UserStrategyJourney,
@@ -24,6 +26,9 @@ from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.services.portfolio_service import PortfolioService
 from app.services.schwab_auth_service import SchwabAuthService, SchwabReauthRequired
 from app.services.strategy.strategy_journey_service import StrategyJourneyService
+from app.services.strategy.strategy_stock_suggestion_service import (
+    StrategyStockSuggestionService,
+)
 
 router = APIRouter()
 
@@ -161,6 +166,9 @@ async def get_strategy_recommendations(
     user_id: str = Depends(get_current_user_id),
     symbol: str | None = Query(default=None),
     strategy_journey_service: StrategyJourneyService = Depends(get_strategy_journey_service),
+    strategy_stock_suggestion_service: StrategyStockSuggestionService = Depends(
+        get_strategy_stock_suggestion_service
+    ),
     schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
     portfolio_service: PortfolioService = Depends(get_portfolio_service),
     portfolio_analysis_service: PortfolioAnalysisService = Depends(
@@ -233,4 +241,60 @@ async def get_strategy_recommendations(
     )
     if recommendations is None:
         raise HTTPException(status_code=404, detail="Strategy profile not found")
+
+    if profile and strategy_stock_suggestion_service.needs_stock_suggestions(
+        profile, strategy
+    ):
+        suggestions = await strategy_stock_suggestion_service.suggest_stocks(
+            profile=profile,
+            strategy=strategy,
+        )
+        if suggestions is not None:
+            recommendations = recommendations.model_copy(
+                update={
+                    "suggested_stocks": suggestions.picks,
+                    "stock_suggestions_summary": suggestions.summary,
+                }
+            )
+
     return recommendations
+
+
+@router.get(
+    "/strategies/{strategy}/stock-suggestions",
+    response_model=StrategyStockSuggestions,
+    response_model_by_alias=True,
+)
+async def get_strategy_stock_suggestions(
+    strategy: InvestmentStrategy,
+    limit: int = Query(default=5, ge=1, le=5),
+    user_id: str = Depends(get_current_user_id),
+    strategy_journey_service: StrategyJourneyService = Depends(get_strategy_journey_service),
+    strategy_stock_suggestion_service: StrategyStockSuggestionService = Depends(
+        get_strategy_stock_suggestion_service
+    ),
+) -> StrategyStockSuggestions:
+    profile = await asyncio.to_thread(
+        strategy_journey_service.get_profile,
+        user_id=user_id,
+    )
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Investment profile not found")
+
+    if not strategy_stock_suggestion_service.needs_stock_suggestions(profile, strategy):
+        raise HTTPException(
+            status_code=409,
+            detail="Stock suggestions are only available before symbols are chosen.",
+        )
+
+    suggestions = await strategy_stock_suggestion_service.suggest_stocks(
+        profile=profile,
+        strategy=strategy,
+        limit=limit,
+    )
+    if suggestions is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to generate stock suggestions right now.",
+        )
+    return suggestions

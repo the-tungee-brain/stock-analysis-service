@@ -204,6 +204,30 @@ class StrategyNextAction(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class StrategyStockPick(BaseModel):
+    model_config = _STRATEGY_MODEL_CONFIG
+
+    symbol: str
+    company_name: str | None = Field(default=None, alias="companyName")
+    rationale: str
+    fit_score: float = Field(default=0.0, alias="fitScore", ge=0.0, le=1.0)
+    tags: list[str] = Field(default_factory=list)
+
+
+class StrategyStockSuggestions(BaseModel):
+    model_config = _STRATEGY_MODEL_CONFIG
+
+    strategy: InvestmentStrategy
+    picks: list[StrategyStockPick] = Field(default_factory=list)
+    summary: str = ""
+    generated_at: datetime | None = Field(default=None, alias="generatedAt")
+
+
+class StrategyStockSuggestionsLLMResponse(BaseModel):
+    picks: list[StrategyStockPick]
+    summary: str = ""
+
+
 class StrategyRecommendations(BaseModel):
     model_config = _STRATEGY_MODEL_CONFIG
 
@@ -216,4 +240,10 @@ class StrategyRecommendations(BaseModel):
     symbol: str | None = None
     next_actions: list[StrategyNextAction] = Field(
         default_factory=list, alias="nextActions"
+    )
+    suggested_stocks: list[StrategyStockPick] = Field(
+        default_factory=list, alias="suggestedStocks"
+    )
+    stock_suggestions_summary: str | None = Field(
+        default=None, alias="stockSuggestionsSummary"
     )

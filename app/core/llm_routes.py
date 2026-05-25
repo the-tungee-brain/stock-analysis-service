@@ -7,3 +7,4 @@ class LLMRoute(str, Enum):
     FUNDAMENTALS = "fundamentals"
     EARNINGS = "earnings"
     NEWS = "news"
+    STRATEGY_STOCKS = "strategy_stocks"

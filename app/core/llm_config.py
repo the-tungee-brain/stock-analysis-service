@@ -21,6 +21,9 @@ class Settings:
     MAX_OUTPUT_TOKENS_REASONING_STREAM: int = int(
         os.getenv("MAX_OUTPUT_TOKENS_REASONING_STREAM", "4096")
     )
+    MAX_OUTPUT_TOKENS_STRATEGY_STOCKS: int = int(
+        os.getenv("MAX_OUTPUT_TOKENS_STRATEGY_STOCKS", "1800")
+    )
 
     _ROUTE_TOKEN_LIMITS: dict[LLMRoute, int] = {}
 
@@ -36,6 +39,7 @@ class Settings:
                 LLMRoute.FUNDAMENTALS: self.MAX_OUTPUT_TOKENS_FUNDAMENTALS,
                 LLMRoute.EARNINGS: self.MAX_OUTPUT_TOKENS_SUMMARY,
                 LLMRoute.NEWS: self.MAX_OUTPUT_TOKENS_STREAM,
+                LLMRoute.STRATEGY_STOCKS: self.MAX_OUTPUT_TOKENS_STRATEGY_STOCKS,
             }
         return self._ROUTE_TOKEN_LIMITS.get(route, self.MAX_OUTPUT_TOKENS)
 
