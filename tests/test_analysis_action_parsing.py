@@ -152,3 +152,87 @@ def test_structured_symbol_analyze_uses_trade_prompt_path():
     )
     assert "### Position summary" in symbol_task
     assert system_message_for_structured_analysis(symbol="NVDA") is SYSTEM_MESSAGE
+
+
+def test_portfolio_analysis_v1_prompt_uses_json_task_not_markdown_headings():
+    from app.core.analysis_schema import (
+        STRUCTURED_ANALYSIS_V1,
+        wants_structured_analysis_v1,
+    )
+    from app.core.prompts import PortfolioContext, build_portfolio_prompt
+
+    ctx = PortfolioContext(
+        account=_make_account(),
+        positions=[_make_position()],
+        action=AnalysisAction.FREE_FORM,
+        user_prompt=None,
+        diversification_block="## Portfolio concentration metrics\n- Top 1 / 3 / 5 weights: 100.0%",
+    )
+    prompt = build_portfolio_prompt(ctx, json_response=True)
+    assert "Populate the JSON schema" in prompt
+    assert "recommendedAction" in prompt
+    assert "### Portfolio snapshot" not in prompt
+    assert "DIVERSIFICATION SUMMARY" in prompt
+
+    assert wants_structured_analysis_v1(
+        response_format=STRUCTURED_ANALYSIS_V1,
+        user_prompt=None,
+        action=AnalysisAction.FREE_FORM,
+    )
+    assert not wants_structured_analysis_v1(
+        response_format=STRUCTURED_ANALYSIS_V1,
+        user_prompt="Should I trim?",
+        action=AnalysisAction.FREE_FORM,
+    )
+
+
+def test_symbol_analysis_v1_prompt_uses_json_task():
+    from app.core.prompts import _build_action_prompt
+
+    symbol_task = _build_action_prompt(
+        AnalysisAction.FREE_FORM,
+        "NVDA",
+        user_prompt=None,
+        json_response=True,
+    )
+    assert "Populate the JSON schema" in symbol_task
+    assert "recommendedAction" in symbol_task
+    assert "### Position summary" not in symbol_task
+
+
+def test_portfolio_analysis_v1_llm_response_validates_sample_json():
+    from app.models.analysis_models import PortfolioAnalysisV1LLMResponse
+
+    parsed = PortfolioAnalysisV1LLMResponse.model_validate_json(
+        """
+        {
+          "summary": "Portfolio is heavily concentrated in tech.",
+          "recommendedAction": {
+            "title": "Trim NVDA",
+            "reason": "Single-name weight exceeds 30%.",
+            "symbol": "NVDA"
+          },
+          "sections": [
+            {
+              "title": "Diversification diagnosis",
+              "bullets": ["Top 3 names are 72% of equity."]
+            }
+          ]
+        }
+        """
+    )
+    assert parsed.recommendedAction.symbol == "NVDA"
+    assert parsed.sections[0].title == "Diversification diagnosis"
+
+
+def test_request_model_accepts_portfolio_analysis_v1_fields():
+    request = AnalyzePositionsBySymbolRequest.model_validate(
+        {
+            "account": _make_account().model_dump(),
+            "positions": [_make_position().model_dump()],
+            "response_format": "portfolio_analysis_v1",
+            "analysis_instructions": "Return ONLY valid JSON.",
+        }
+    )
+    assert request.response_format == "portfolio_analysis_v1"
+    assert request.analysis_instructions == "Return ONLY valid JSON."

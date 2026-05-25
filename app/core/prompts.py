@@ -183,6 +183,20 @@ def system_message_for_structured_analysis(*, symbol: Optional[str]) -> str:
     return SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE
 
 
+_STRUCTURED_V1_JSON_RULES = dedent("""
+    Output rules (CRITICAL):
+    - Return ONLY valid JSON matching the required schema.
+    - Do not use markdown headings, code fences, or prose outside the JSON object.
+    - Use plain English in string fields; use sections[].bullets for ranked steps or lists.
+    - recommendedAction.symbol: ticker when the action targets one symbol; use "" when not applicable.
+    """).strip()
+
+
+def system_message_for_structured_v1_analysis(*, symbol: Optional[str]) -> str:
+    base = system_message_for_structured_analysis(symbol=symbol)
+    return f"{base}\n\n{_STRUCTURED_V1_JSON_RULES}"
+
+
 _STRUCTURED_OUTPUT_HEADINGS = dedent("""
     Output format (CRITICAL):
     - Use these exact Markdown headings, in this order:
@@ -237,6 +251,43 @@ def _structured_portfolio_analysis_task() -> str:
         If deployable cash is shown, end ### Where to put money smarter with a clear deploy-$X plan.
 
         {_STRUCTURED_PORTFOLIO_OUTPUT_HEADINGS}
+        """).strip()
+
+
+def _structured_portfolio_analysis_v1_task() -> str:
+    return dedent("""
+        Analyze this portfolio for diversification, concentration risk, and smarter capital deployment.
+
+        Populate the JSON schema:
+        - summary: 2-3 sentence overall diversification read.
+        - recommendedAction: the single highest-impact next step (title, reason, symbol if one name).
+        - sections: 2-5 sections with titles such as "Diversification diagnosis", "Gaps vs targets",
+          "Where to put money smarter", "Risk if you do nothing", "Action plan (ranked)".
+          Use bullets for ranked actions (2-4 steps ranked by diversification impact).
+
+        Priorities (in order):
+        1. Diagnose concentration across single names, sectors, themes, cash, and options overlay.
+        2. Compare current weights to prudent targets and the investor's saved preferences.
+        3. Recommend specific trims, adds, or cash holds with dollar amounts and target weights.
+        4. Rank actions by diversification impact — trim overweight names before suggesting new buys.
+
+        Use WEIGHT_% in the positions table and precomputed blocks in DIVERSIFICATION SUMMARY /
+        PORTFOLIO INTELLIGENCE as authoritative. Do not recalculate weights unless WEIGHT_% is N/A.
+        If deployable cash is shown, include a clear deploy-$X plan in the relevant section.
+        """).strip()
+
+
+def _structured_symbol_analysis_v1_task(symbol: str) -> str:
+    return dedent(f"""
+        Analyze {symbol} and recommend exactly ONE primary action using the decision framework
+        in your system instructions (Buy more, Trim, Close, Hold, Sell covered call,
+        Sell cash-secured put, or Roll the option).
+
+        Populate the JSON schema:
+        - summary: 2-3 sentence position read (size, P&L, thesis).
+        - recommendedAction: the one clear trade or hold decision; set symbol to "{symbol}" when relevant.
+        - sections: 2-4 sections such as "Position snapshot", "Recommendation rationale",
+          "Execution plan", "Risk/reward". Use bullets for concrete numbers and timing.
         """).strip()
 
 
@@ -755,6 +806,7 @@ def _build_action_prompt(
     user_prompt: Optional[str],
     *,
     analysis_since: Optional[datetime] = None,
+    json_response: bool = False,
 ) -> str:
     if action is AnalysisAction.FREE_FORM:
         if user_prompt and is_follow_up_affirmation(user_prompt):
@@ -798,6 +850,8 @@ def _build_action_prompt(
                 - If Hold is correct under the decision rules, say so confidently.
                 """).strip()
 
+        if json_response:
+            return _structured_symbol_analysis_v1_task(symbol=symbol)
         return _structured_symbol_analysis_task(symbol=symbol)
 
     if action is AnalysisAction.DAILY_SUMMARY:
@@ -927,7 +981,9 @@ def _build_action_prompt(
     return user_prompt or f"Give a clear, actionable plan for {symbol}."
 
 
-def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> str:
+def build_symbol_prompt(
+    ctx: SymbolContext, *, include_context: bool = True, json_response: bool = False
+) -> str:
     """
     Build a compact user prompt for symbol-level analysis.
     Use this as the `user` content; pair with SYSTEM_MESSAGE as `system`.
@@ -937,6 +993,7 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
         ctx.symbol,
         ctx.user_prompt,
         analysis_since=ctx.analysis_since,
+        json_response=json_response,
     )
 
     if not include_context:
@@ -1031,7 +1088,9 @@ def build_symbol_prompt(ctx: SymbolContext, *, include_context: bool = True) -> 
       """).strip()
 
 
-def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = True) -> str:
+def build_portfolio_prompt(
+    ctx: PortfolioContext, *, include_context: bool = True, json_response: bool = False
+) -> str:
     """
     Build a compact user prompt for portfolio-level analysis.
     Use this as the `user` content; pair with SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE as `system`
@@ -1079,7 +1138,11 @@ def build_portfolio_prompt(ctx: PortfolioContext, *, include_context: bool = Tru
               each with expected impact and effort (Low / Medium / High).
             """).strip()
     else:
-        task_block = _structured_portfolio_analysis_task()
+        task_block = (
+            _structured_portfolio_analysis_v1_task()
+            if json_response
+            else _structured_portfolio_analysis_task()
+        )
 
     if not include_context:
         return dedent(f"""

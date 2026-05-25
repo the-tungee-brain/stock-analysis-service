@@ -18,12 +18,15 @@ from app.dependencies.service_dependencies import (
 from openai.types.shared import ResponsesModel
 from app.core.prompts import (
     AnalysisAction,
-    SYSTEM_MESSAGE,
     SYSTEM_NATURAL_MESSAGE,
     system_message_for_structured_analysis,
+    system_message_for_structured_v1_analysis,
     should_use_natural_response,
     uses_structured_system_message,
 )
+from app.core.analysis_schema import wants_structured_analysis_v1
+from app.core.llm_routes import LLMRoute
+from app.models.analysis_models import PortfolioAnalysisV1LLMResponse
 from app.auth.dependencies import get_current_user_id
 from app.core.llm_config import settings
 
@@ -39,6 +42,8 @@ class AnalyzePositionsBySymbolRequest(BaseModel):
     user_display_message: Optional[str] = None
     action: AnalysisAction = AnalysisAction.FREE_FORM
     model: Optional[ResponsesModel] = "gpt-4.1-mini"
+    response_format: Optional[str] = None
+    analysis_instructions: Optional[str] = None
 
     @field_validator("action", mode="before")
     @classmethod
@@ -67,6 +72,11 @@ async def analyze_positions_by_symbol(
 
     structured = uses_structured_system_message(
         request.prompt,
+        action=request.action,
+    )
+    json_v1 = wants_structured_analysis_v1(
+        response_format=request.response_format,
+        user_prompt=request.prompt,
         action=request.action,
     )
 
@@ -109,7 +119,17 @@ async def analyze_positions_by_symbol(
     user_prompt = prompt_enrichment_service.build_portfolio_strategy_prompt(
         ctx=ctx,
         include_context=include_context,
+        json_response=json_v1,
     )
+    if json_v1 and request.analysis_instructions:
+        user_prompt = {
+            "role": "user",
+            "content": (
+                user_prompt["content"]
+                + "\n\n"
+                + request.analysis_instructions.strip()
+            ),
+        }
 
     if session_id:
         chat_service.create_message(
@@ -121,6 +141,22 @@ async def analyze_positions_by_symbol(
     assistant_content_parts: List[str] = []
 
     async def streamer():
+        if json_v1:
+            system_prompt = system_message_for_structured_v1_analysis(
+                symbol=request.symbol
+            )
+            parsed = await llm_service.generate_from_prompts(
+                prompts=[system_prompt, user_prompt["content"]],
+                response_model=PortfolioAnalysisV1LLMResponse,
+                route=LLMRoute.NEWS,
+                model=request.model or settings.OPENAI_MODEL,
+                max_output_tokens=settings.MAX_OUTPUT_TOKENS_STREAM,
+            )
+            payload = parsed.model_dump_json()
+            assistant_content_parts.append(payload)
+            yield payload
+            return
+
         system_prompt = (
             SYSTEM_NATURAL_MESSAGE
             if should_use_natural_response(request.prompt, action=request.action)

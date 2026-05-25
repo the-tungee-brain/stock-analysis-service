@@ -1113,13 +1113,15 @@ class PromptEnrichmentService:
         return [system_msg, user_msg]
 
     def build_portfolio_strategy_prompt(
-        self, ctx: BaseAnalysisContext, *, include_context: bool = True
+        self, ctx: BaseAnalysisContext, *, include_context: bool = True, json_response: bool = False
     ) -> Dict[str, Any]:
         if isinstance(ctx, SymbolContext):
-            user_content = build_symbol_prompt(ctx=ctx, include_context=include_context)
+            user_content = build_symbol_prompt(
+                ctx=ctx, include_context=include_context, json_response=json_response
+            )
         elif isinstance(ctx, PortfolioContext):
             user_content = build_portfolio_prompt(
-                ctx=ctx, include_context=include_context
+                ctx=ctx, include_context=include_context, json_response=json_response
             )
         else:
             raise ValueError(f"Unknown context type: {type(ctx)}")
