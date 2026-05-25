@@ -1,4 +1,5 @@
 from app.broker.option_chain_table import build_option_chain_table
+from app.broker.sector_labels import normalize_sector_label
 from app.models.schwab_market_models import PromptQuoteSnapshot
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
 from app.broker.order_grouping import (
@@ -959,7 +960,7 @@ class PromptEnrichmentService:
 
             if digest.sector_weights:
                 sector_lines = [
-                    f"- {sw.sector}: {sw.weight_pct:.1f}% ({', '.join(sw.symbols[:4])})"
+                    f"- {normalize_sector_label(sw.sector)}: {sw.weight_pct:.1f}% ({', '.join(sw.symbols[:4])})"
                     for sw in digest.sector_weights[:6]
                 ]
                 sections.append(

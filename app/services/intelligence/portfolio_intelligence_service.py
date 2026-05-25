@@ -6,6 +6,7 @@ from app.adapters.cache.llm_output_cache import LLMOutputCache
 from app.core.llm_routes import LLMRoute
 from app.models.company_research_models import AISummary, ResearchContext
 from app.broker.option_chain_table import build_option_chain_table
+from app.broker.sector_labels import normalize_sector_label
 from app.models.intelligence_models import (
     CachedResearchSnippet,
     OptionChainPreview,
@@ -287,7 +288,7 @@ class PortfolioIntelligenceService:
         by_sector: dict[str, tuple[float, list[str]]] = {}
         for position in positions:
             symbol = self._position_symbol(position)
-            sector = sector_by_symbol.get(symbol.upper(), "Unknown")
+            sector = normalize_sector_label(sector_by_symbol.get(symbol.upper()))
             mv = abs(position.marketValue)
             current = by_sector.get(sector, (0.0, []))
             symbols = current[1]
