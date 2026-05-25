@@ -39,6 +39,8 @@ class CompanyProfileService:
     def _snapshot_from_finnhub(self, symbol: str) -> ResearchSnapshot | None:
         try:
             profile = self.finnhub_builder.get_company_profile(symbol=symbol)
+            if profile is None:
+                return None
             quote = self.finnhub_builder.get_quote(symbol=symbol)
         except Exception:
             logger.warning("Finnhub snapshot unavailable for %s", symbol, exc_info=True)
