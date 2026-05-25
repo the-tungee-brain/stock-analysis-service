@@ -8,6 +8,7 @@ from app.dependencies.service_dependencies import (
 )
 from app.services.enriched_news_service import EnrichedNewsService
 from app.models.news_analytics_models import StockNewsView
+from app.models.finnhub_news_models import NewsResponse
 from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.llm_service import LLMService
 
@@ -24,7 +25,10 @@ async def get_company_news(
     llm_service: LLMService = Depends(get_llm_service),
     enriched_news_service: EnrichedNewsService = Depends(get_enriched_news_service),
 ) -> StockNewsView:
-    news = news_service.get_company_news(symbol=symbol, lookback_days=7)
+    try:
+        news = news_service.get_company_news(symbol=symbol, lookback_days=7)
+    except Exception:
+        news = NewsResponse(root=[])
     prompts = prompt_enrichment_service.enrich_news_prompt(symbol=symbol, news=news)
     stock_news_view = await llm_service.analyze_news(
         symbol=symbol, prompts=prompts, news=news

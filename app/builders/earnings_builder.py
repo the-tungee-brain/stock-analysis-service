@@ -29,9 +29,12 @@ class EarningsBuilder:
 
     def build_list(self, symbol: str, limit: int = 8) -> EarningsListResponse:
         symbol = symbol.upper()
-        raw_surprises = self._safe_list(
-            self.finnhub_adapter.get_company_earnings(symbol=symbol, limit=limit)
-        )
+        try:
+            raw_surprises = self._safe_list(
+                self.finnhub_adapter.get_company_earnings(symbol=symbol, limit=limit)
+            )
+        except Exception:
+            raw_surprises = []
         if not raw_surprises:
             return EarningsListResponse(symbol=symbol)
 
@@ -92,9 +95,12 @@ class EarningsBuilder:
         calendar_row = calendar_by_date.get(iso_date, {})
 
         surprise_row: dict[str, Any] | None = None
-        raw_surprises = self._safe_list(
-            self.finnhub_adapter.get_company_earnings(symbol=symbol, limit=20)
-        )
+        try:
+            raw_surprises = self._safe_list(
+                self.finnhub_adapter.get_company_earnings(symbol=symbol, limit=20)
+            )
+        except Exception:
+            raw_surprises = []
         for item in raw_surprises:
             item_date = self._period_to_report_date(item.get("period"))
             if item_date and item_date.isoformat() == iso_date:
@@ -222,12 +228,15 @@ class EarningsBuilder:
         start: date,
         end: date,
     ) -> dict[str, dict[str, Any]]:
-        raw = self.finnhub_adapter.get_earnings_calendar(
-            _from=start.isoformat(),
-            to=end.isoformat(),
-            symbol=symbol,
-            international=False,
-        )
+        try:
+            raw = self.finnhub_adapter.get_earnings_calendar(
+                _from=start.isoformat(),
+                to=end.isoformat(),
+                symbol=symbol,
+                international=False,
+            )
+        except Exception:
+            return {}
         rows = raw.get("earningsCalendar") if isinstance(raw, dict) else []
         by_date: dict[str, dict[str, Any]] = {}
         for row in self._safe_list(rows):

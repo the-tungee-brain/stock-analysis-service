@@ -82,11 +82,14 @@ class EarningsService:
         end = report_date + timedelta(days=3)
         if end > date.today():
             end = date.today()
-        raw_news = self.finnhub_builder.get_company_news(
-            symbol=symbol,
-            _from=start,
-            to=end,
-        )
+        try:
+            raw_news = self.finnhub_builder.get_company_news(
+                symbol=symbol,
+                _from=start,
+                to=end,
+            )
+        except Exception:
+            return []
         return self.earnings_builder.news_to_headlines(raw_news.root, limit=10)
 
     def build_research_context(self, symbol: str):
