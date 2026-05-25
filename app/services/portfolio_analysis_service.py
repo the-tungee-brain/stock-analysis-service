@@ -316,7 +316,7 @@ class PortfolioAnalysisService:
         option_chains_markdown = (
             self.prompt_enrichment_service.build_option_chain_markdown(
                 chain=option_chains,
-                max_rows=10,
+                strike_count=10,
             )
         )
 

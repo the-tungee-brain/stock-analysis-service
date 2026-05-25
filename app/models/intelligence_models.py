@@ -95,6 +95,35 @@ class OptionsScorecard(BaseModel):
     )
 
 
+class OptionChainSideQuote(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
+    bid: float | None = None
+    ask: float | None = None
+    delta: float | None = None
+    open_interest: int | None = Field(default=None, serialization_alias="openInterest")
+    iv: float | None = None
+
+
+class OptionChainTableRow(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
+    strike: float
+    call: OptionChainSideQuote | None = None
+    put: OptionChainSideQuote | None = None
+
+
+class OptionChainPreview(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
+    expiration: str | None = None
+    strike_count: int = Field(default=5, serialization_alias="strikeCount")
+    underlying_price: float | None = Field(
+        default=None, serialization_alias="underlyingPrice"
+    )
+    rows: list[OptionChainTableRow] = Field(default_factory=list)
+
+
 class OptionRollSuggestion(BaseModel):
     model_config = _INTELLIGENCE_MODEL_CONFIG
 
@@ -188,6 +217,9 @@ class SymbolIntelligence(BaseModel):
     )
     options_scorecard: OptionsScorecard | None = Field(
         default=None, serialization_alias="optionsScorecard"
+    )
+    option_chain_preview: OptionChainPreview | None = Field(
+        default=None, serialization_alias="optionChainPreview"
     )
     roll_suggestions: list[OptionRollSuggestion] = Field(
         default_factory=list, serialization_alias="rollSuggestions"

@@ -5,8 +5,12 @@ from datetime import date, datetime
 from app.adapters.cache.llm_output_cache import LLMOutputCache
 from app.core.llm_routes import LLMRoute
 from app.models.company_research_models import AISummary, ResearchContext
+from app.broker.option_chain_table import build_option_chain_table
 from app.models.intelligence_models import (
     CachedResearchSnippet,
+    OptionChainPreview,
+    OptionChainSideQuote,
+    OptionChainTableRow,
     PortfolioDigest,
     PortfolioIntelligence,
     PortfolioNewsItem,
@@ -24,6 +28,45 @@ from app.services.intelligence.option_roll_planner_service import OptionRollPlan
 from app.services.intelligence.options_scoring_service import OptionsScoringService
 from app.services.intelligence.peer_comparison_service import PeerComparisonService
 from app.services.intelligence.signal_engine import SignalEngine, build_proactive_alerts
+
+INTELLIGENCE_OPTION_STRIKE_COUNT = 5
+
+
+def _map_option_chain_side_quote(
+    quote,
+) -> OptionChainSideQuote | None:
+    if quote is None:
+        return None
+    return OptionChainSideQuote(
+        bid=quote.bid,
+        ask=quote.ask,
+        delta=quote.delta,
+        open_interest=quote.open_interest,
+        iv=quote.iv,
+    )
+
+
+def _build_option_chain_preview(option_chain: OptionChain) -> OptionChainPreview | None:
+    table = build_option_chain_table(
+        option_chain,
+        strike_count=INTELLIGENCE_OPTION_STRIKE_COUNT,
+    )
+    if table is None:
+        return None
+
+    return OptionChainPreview(
+        expiration=table.expiration,
+        underlying_price=table.underlying_price,
+        strike_count=table.strike_count,
+        rows=[
+            OptionChainTableRow(
+                strike=row.strike,
+                call=_map_option_chain_side_quote(row.call),
+                put=_map_option_chain_side_quote(row.put),
+            )
+            for row in table.rows
+        ],
+    )
 
 
 class PortfolioIntelligenceService:
@@ -83,6 +126,7 @@ class PortfolioIntelligenceService:
         )
 
         options_scorecard = None
+        option_chain_preview = None
         roll_suggestions = []
         if option_chain is not None:
             short_calls, short_puts = self._short_option_strikes(
@@ -93,6 +137,7 @@ class PortfolioIntelligenceService:
                 short_call_strikes=short_calls,
                 short_put_strikes=short_puts,
             )
+            option_chain_preview = _build_option_chain_preview(option_chain)
             roll_suggestions = OptionRollPlannerService.build_roll_suggestions(
                 positions=positions,
                 symbol=symbol,
@@ -108,6 +153,7 @@ class PortfolioIntelligenceService:
             peer_comparison=peer_comparison,
             event_timeline=timeline,
             options_scorecard=options_scorecard,
+            option_chain_preview=option_chain_preview,
             roll_suggestions=roll_suggestions,
             cached_research=cached_research,
             data_gaps=list(research.data_gaps),

@@ -198,6 +198,7 @@ def test_symbol_intelligence_serializes_camel_case_aliases():
     assert "peerComparison" in payload
     assert "eventTimeline" in payload
     assert "optionsScorecard" in payload
+    assert "optionChainPreview" in payload
     assert "cachedResearch" in payload
     assert "dataGaps" in payload
     assert payload["peerComparison"]["targetSymbol"] == "AAPL"

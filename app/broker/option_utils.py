@@ -1,6 +1,6 @@
 import re
 from datetime import date, datetime, timezone
-from typing import List, Literal
+from typing import Iterable, List, Literal
 
 from app.models.schwab_models import Position
 
@@ -13,6 +13,31 @@ _OCC_EXPIRY_RE = re.compile(r"(\d{6})[CP]", re.IGNORECASE)
 
 AssignmentRiskLevel = Literal["critical", "high", "moderate", "watch", "low"]
 Moneyness = Literal["ITM", "ATM", "OTM", "unknown"]
+
+
+def select_strikes_around_spot(
+    strikes: Iterable[float],
+    underlying_price: float | None,
+    strike_count: int,
+) -> list[float]:
+    """Keep up to strike_count strikes below and above the spot-centered ATM strike."""
+    unique = sorted(set(strikes))
+    if not unique or strike_count <= 0:
+        return unique
+
+    if underlying_price is None:
+        return unique[: strike_count * 2 + 1]
+
+    atm_idx = min(
+        range(len(unique)),
+        key=lambda index: (abs(unique[index] - underlying_price), unique[index]),
+    )
+    below = unique[:atm_idx]
+    above = unique[atm_idx + 1:]
+    atm = unique[atm_idx]
+
+    selected = below[-strike_count:] + [atm] + above[:strike_count]
+    return sorted(set(selected))
 
 
 def parse_expiration_from_option_symbol(symbol: str) -> date | None:

@@ -1,3 +1,4 @@
+from app.broker.option_chain_table import build_option_chain_table
 from app.models.schwab_market_models import PromptQuoteSnapshot
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
 from app.broker.order_grouping import (
@@ -662,47 +663,11 @@ class PromptEnrichmentService:
     def build_option_chain_markdown(
         self,
         chain: OptionChain,
-        max_rows: int = 10,
+        strike_count: int = 5,
     ) -> str:
-        if not chain.callExpDateMap and not chain.putExpDateMap:
+        table = build_option_chain_table(chain, strike_count=strike_count)
+        if table is None or not table.rows:
             return "No option chain data available."
-
-        underlying_price = chain.underlyingPrice or (
-            chain.underlying.last
-            if chain.underlying and chain.underlying.last
-            else None
-        )
-
-        def parse_exp_key(k: str) -> datetime:
-            return datetime.fromisoformat(k.split(":")[0])
-
-        all_exp_keys = list(
-            set(chain.callExpDateMap.keys()) | set(chain.putExpDateMap.keys())
-        )
-        if not all_exp_keys:
-            return "No option chain data available."
-
-        all_exp_keys.sort(key=parse_exp_key)
-        first_exp_key = all_exp_keys[0]
-
-        calls_by_strike = chain.callExpDateMap.get(first_exp_key, {})
-        puts_by_strike = chain.putExpDateMap.get(first_exp_key, {})
-
-        rows: List[Tuple[float, OptionContract | None, OptionContract | None]] = []
-
-        for strike_str, call_list in calls_by_strike.items():
-            try:
-                strike = float(strike_str)
-            except ValueError:
-                continue
-            call = call_list[0] if call_list else None
-            put_list = puts_by_strike.get(strike_str) or []
-            put = put_list[0] if put_list else None
-            rows.append((strike, call, put))
-
-        if underlying_price is not None and rows:
-            rows.sort(key=lambda t: abs(t[0] - underlying_price))
-        rows = rows[:max_rows]
 
         header = (
             "| Strike | Call Bid | Call Ask | Call Δ | Call OI | Call IV | "
@@ -711,52 +676,43 @@ class PromptEnrichmentService:
             "---------|---------|-------|---------|--------|\n"
         )
 
-        def fmt_side(opt: OptionContract | None) -> tuple[str, str]:
-            if not opt:
-                return "", ""
-            bid = opt.bidPrice
-            ask = opt.askPrice
-            return (
-                (
-                    f"{bid:.2f}"
-                    if isinstance(bid, (int, float)) and bid not in (0, None)
-                    else ""
-                ),
-                (
-                    f"{ask:.2f}"
-                    if isinstance(ask, (int, float)) and ask not in (0, None)
-                    else ""
-                ),
-            )
-
-        def fmt_iv(opt: OptionContract | None) -> str:
-            if not opt or opt.volatility is None:
+        def fmt_price(value: float | None) -> str:
+            if value is None or value == 0:
                 return ""
-            iv = opt.volatility
-            return f"{iv:.0f}%"
+            return f"{value:.2f}"
 
-        def fmt_delta(opt: OptionContract | None) -> str:
-            if not opt or opt.delta is None:
+        def fmt_iv(value: float | None) -> str:
+            if value is None:
                 return ""
-            return f"{opt.delta:.2f}"
+            return f"{value:.0f}%"
 
-        def fmt_oi(opt: OptionContract | None) -> str:
-            if not opt or opt.openInterest is None:
+        def fmt_delta(value: float | None) -> str:
+            if value is None:
                 return ""
-            return f"{opt.openInterest:,}"
+            return f"{value:.2f}"
+
+        def fmt_oi(value: int | None) -> str:
+            if value is None:
+                return ""
+            return f"{value:,}"
 
         lines: List[str] = []
-        for strike, call, put in sorted(rows, key=lambda t: t[0]):
-            cbid, cask = fmt_side(call)
-            pbid, pask = fmt_side(put)
+        for row in table.rows:
+            call = row.call
+            put = row.put
             lines.append(
-                f"| {strike:.2f} | {cbid} | {cask} | {fmt_delta(call)} | "
-                f"{fmt_oi(call)} | {fmt_iv(call)} | {pbid} | {pask} | "
-                f"{fmt_delta(put)} | {fmt_oi(put)} | {fmt_iv(put)} |"
+                f"| {row.strike:.2f} | "
+                f"{fmt_price(call.bid if call else None)} | "
+                f"{fmt_price(call.ask if call else None)} | "
+                f"{fmt_delta(call.delta if call else None)} | "
+                f"{fmt_oi(call.open_interest if call else None)} | "
+                f"{fmt_iv(call.iv if call else None)} | "
+                f"{fmt_price(put.bid if put else None)} | "
+                f"{fmt_price(put.ask if put else None)} | "
+                f"{fmt_delta(put.delta if put else None)} | "
+                f"{fmt_oi(put.open_interest if put else None)} | "
+                f"{fmt_iv(put.iv if put else None)} |"
             )
-
-        if not lines:
-            return "No option chain data available."
 
         return (
             "Nearest expiration option prices (near current price):\n\n"

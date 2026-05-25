@@ -1,0 +1,116 @@
+{
+  "symbol": "AAPL",
+  "status": "SUCCESS",
+  "underlying": {
+    "symbol": "AAPL",
+    "description": "Apple Inc",
+    "last": 200.12,
+    "mark": 200.1,
+    "bid": 200.08,
+    "ask": 200.14,
+    "totalVolume": 51234567
+  },
+  "underlyingPrice": 200.12,
+  "volatility": 28.5,
+  "daysToExpiration": 30,
+  "callExpDateMap": {
+    "2026-06-20:30": {
+      "195.0": [
+        {
+          "putCall": "CALL",
+          "symbol": "AAPL  260620C00195000",
+          "description": "AAPL 06/20/2026 195.00 C",
+          "bidPrice": 8.5,
+          "askPrice": 8.7,
+          "lastPrice": 8.6,
+          "markPrice": 8.6,
+          "totalVolume": 1200,
+          "openInterest": 5400,
+          "volatility": 24.15,
+          "delta": 0.62,
+          "gamma": 0.018,
+          "theta": -0.09,
+          "vega": 0.21,
+          "strikePrice": 195.0,
+          "expirationDate": "2026-06-20T20:00:00.000+00:00",
+          "daysToExpiration": 30,
+          "multiplier": 100,
+          "isInTheMoney": true
+        }
+      ],
+      "200.0": [
+        {
+          "putCall": "CALL",
+          "symbol": "AAPL  260620C00200000",
+          "description": "AAPL 06/20/2026 200.00 C",
+          "bidPrice": 5.2,
+          "askPrice": 5.4,
+          "lastPrice": 5.3,
+          "markPrice": 5.3,
+          "totalVolume": 3400,
+          "openInterest": 8900,
+          "volatility": 23.8,
+          "delta": 0.48,
+          "gamma": 0.022,
+          "theta": -0.11,
+          "vega": 0.24,
+          "strikePrice": 200.0,
+          "expirationDate": "2026-06-20T20:00:00.000+00:00",
+          "daysToExpiration": 30,
+          "multiplier": 100,
+          "isInTheMoney": false
+        }
+      ]
+    }
+  },
+  "putExpDateMap": {
+    "2026-06-20:30": {
+      "195.0": [
+        {
+          "putCall": "PUT",
+          "symbol": "AAPL  260620P00195000",
+          "description": "AAPL 06/20/2026 195.00 P",
+          "bidPrice": 4.1,
+          "askPrice": 4.3,
+          "lastPrice": 4.2,
+          "markPrice": 4.2,
+          "totalVolume": 900,
+          "openInterest": 4200,
+          "volatility": 25.1,
+          "delta": -0.38,
+          "gamma": 0.019,
+          "theta": -0.08,
+          "vega": 0.2,
+          "strikePrice": 195.0,
+          "expirationDate": "2026-06-20T20:00:00.000+00:00",
+          "daysToExpiration": 30,
+          "multiplier": 100,
+          "isInTheMoney": false
+        }
+      ],
+      "190.0": [
+        {
+          "putCall": "PUT",
+          "symbol": "AAPL  260620P00190000",
+          "description": "AAPL 06/20/2026 190.00 P",
+          "bidPrice": 2.0,
+          "askPrice": 2.15,
+          "lastPrice": 2.05,
+          "markPrice": 2.08,
+          "totalVolume": 2100,
+          "openInterest": 6100,
+          "volatility": 24.6,
+          "delta": -0.22,
+          "gamma": 0.017,
+          "theta": -0.07,
+          "vega": 0.18,
+          "strikePrice": 190.0,
+          "expirationDate": "2026-06-20T20:00:00.000+00:00",
+          "daysToExpiration": 30,
+          "multiplier": 100,
+          "isInTheMoney": false
+        }
+      ]
+    }
+  }
+}

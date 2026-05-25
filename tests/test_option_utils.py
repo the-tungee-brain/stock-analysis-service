@@ -1,6 +1,7 @@
 from app.broker.option_utils import (
     cash_secured_put_reserved_cash,
     parse_strike_from_option_symbol,
+    select_strikes_around_spot,
     summarize_csp_cash_reserves,
     total_csp_reserved_cash,
 )
@@ -38,6 +39,20 @@ def _make_option_position(
         shortOpenProfitLoss=50.0,
         currentDayCost=0.0,
     )
+
+
+def test_select_strikes_around_spot_keeps_up_and_down_rows():
+    strikes = [180.0, 185.0, 190.0, 195.0, 200.0, 205.0, 210.0, 215.0, 220.0]
+    selected = select_strikes_around_spot(strikes, underlying_price=200.0, strike_count=2)
+
+    assert selected == [190.0, 195.0, 200.0, 205.0, 210.0]
+
+
+def test_select_strikes_around_spot_handles_fewer_strikes_than_requested():
+    strikes = [195.0, 200.0, 205.0]
+    selected = select_strikes_around_spot(strikes, underlying_price=201.0, strike_count=5)
+
+    assert selected == [195.0, 200.0, 205.0]
 
 
 def test_parse_strike_from_occ_symbol():

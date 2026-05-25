@@ -1,10 +1,17 @@
-from app.adapters.schwab.schwab_market_adapter import SchwabMarketAdapter
+import logging
 from typing import List, Literal, Optional
+from pydantic import ValidationError
+
+from app.adapters.schwab.schwab_market_adapter import (
+    ContractType,
+    SchwabMarketAdapter,
+    StrategyType,
+)
 from app.models.schwab_market_models import QuotesResponse
-from app.adapters.schwab.schwab_market_adapter import ContractType, StrategyType
 from app.models.schwab_option_chain_models import OptionChain
 
 QuoteField = Literal["quote", "fundamental", "all"]
+logger = logging.getLogger(__name__)
 
 
 class SchwabMarketBuilder:
@@ -49,4 +56,12 @@ class SchwabMarketBuilder:
             strategy=strategy,
         )
 
-        return OptionChain.model_validate(raw_option_chains)
+        try:
+            return OptionChain.model_validate(raw_option_chains)
+        except ValidationError as exc:
+            logger.error(
+                "Option chain validation failed for %s: %s",
+                symbol,
+                exc,
+            )
+            raise
