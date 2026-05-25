@@ -44,7 +44,6 @@ def test_finnhub_adapter_uses_response_cache():
     adapter = FinnhubAdapter(
         api_key="test-key",
         response_cache=cache,
-        rate_limiter=None,
     )
     adapter.finnhub_client = MagicMock()
     adapter.finnhub_client.quote.return_value = {"c": 100.0}
@@ -61,7 +60,6 @@ def test_finnhub_adapter_skips_upstream_when_circuit_open():
     adapter = FinnhubAdapter(
         api_key="test-key",
         circuit_cooldown_seconds=60,
-        rate_limiter=None,
     )
     adapter.finnhub_client = MagicMock()
     adapter.finnhub_client.quote.side_effect = requests.exceptions.ConnectTimeout(

@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from app.adapters.finnhub.finnhub_adapter import FinnhubAdapter
+from app.adapters.finnhub.finnhub_adapter import DEFAULT_TIMEOUT_SECONDS, FinnhubAdapter
 from app.adapters.finnhub.finnhub_circuit import FinnhubUnavailableError
 from app.services.company_profile_service import CompanyProfileService
 from finnhub.exceptions import FinnhubAPIException
@@ -16,11 +16,15 @@ def _timeout_error() -> requests.exceptions.ConnectTimeout:
     )
 
 
+def test_finnhub_adapter_default_timeout():
+    adapter = FinnhubAdapter(api_key="test-key")
+    assert adapter.finnhub_client.DEFAULT_TIMEOUT == DEFAULT_TIMEOUT_SECONDS
+
+
 def test_finnhub_adapter_uses_short_timeout():
     adapter = FinnhubAdapter(
         api_key="test-key",
         timeout_seconds=2.5,
-        rate_limiter=None,
     )
     assert adapter.finnhub_client.DEFAULT_TIMEOUT == 2.5
 
@@ -30,7 +34,6 @@ def test_finnhub_adapter_opens_circuit_after_timeout():
         api_key="test-key",
         timeout_seconds=1,
         circuit_cooldown_seconds=60,
-        rate_limiter=None,
     )
     adapter.finnhub_client = MagicMock()
     adapter.finnhub_client.quote.side_effect = _timeout_error()
@@ -47,7 +50,6 @@ def test_finnhub_adapter_does_not_open_circuit_on_429():
     adapter = FinnhubAdapter(
         api_key="test-key",
         circuit_cooldown_seconds=60,
-        rate_limiter=None,
     )
     adapter.finnhub_client = MagicMock()
     response = MagicMock()
@@ -66,7 +68,6 @@ def test_finnhub_adapter_opens_circuit_after_non_rate_limit_api_error():
     adapter = FinnhubAdapter(
         api_key="test-key",
         circuit_cooldown_seconds=60,
-        rate_limiter=None,
     )
     adapter.finnhub_client = MagicMock()
     response = MagicMock()

@@ -14,13 +14,12 @@ from app.adapters.finnhub.finnhub_circuit import (
     FinnhubCircuitBreaker,
     FinnhubUnavailableError,
 )
-from app.adapters.finnhub.finnhub_rate_limiter import FinnhubRateLimiter
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-_UNSET = object()
+DEFAULT_TIMEOUT_SECONDS = 15.0
 
 
 class FinnhubAdapter:
@@ -31,12 +30,11 @@ class FinnhubAdapter:
         timeout_seconds: float | None = None,
         circuit_cooldown_seconds: float | None = None,
         response_cache: FinnhubResponseCache | None = None,
-        rate_limiter: FinnhubRateLimiter | None | object = _UNSET,
     ):
         timeout = float(
             timeout_seconds
             if timeout_seconds is not None
-            else os.getenv("FINNHUB_TIMEOUT_SECONDS", "2")
+            else os.getenv("FINNHUB_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT_SECONDS))
         )
         cooldown = float(
             circuit_cooldown_seconds
@@ -45,11 +43,6 @@ class FinnhubAdapter:
         )
         self._circuit = FinnhubCircuitBreaker.from_env(cooldown_seconds=cooldown)
         self._cache = response_cache
-        self._rate_limiter = (
-            FinnhubRateLimiter.from_env()
-            if rate_limiter is _UNSET
-            else rate_limiter
-        )
         self.finnhub_client = finnhub.Client(api_key=api_key)
         self.finnhub_client.DEFAULT_TIMEOUT = timeout
 
@@ -79,9 +72,6 @@ class FinnhubAdapter:
     def _call(self, label: str, fn: Callable[[], T]) -> T:
         if not self._circuit.allow_request():
             raise FinnhubUnavailableError("Finnhub circuit open")
-
-        if self._rate_limiter is not None:
-            self._rate_limiter.acquire()
 
         try:
             result = fn()
