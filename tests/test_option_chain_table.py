@@ -1,8 +1,12 @@
 import json
 from pathlib import Path
 
-from app.broker.option_chain_table import build_option_chain_table
-from app.models.schwab_option_chain_models import OptionChain
+from app.broker.option_chain_table import (
+    build_option_chain_table,
+    fair_option_price,
+    quoted_last,
+)
+from app.models.schwab_option_chain_models import OptionChain, OptionContract
 from app.services.intelligence.portfolio_intelligence_service import (
     PortfolioIntelligenceService,
     _build_option_chain_preview,
@@ -66,3 +70,32 @@ def test_build_symbol_intelligence_includes_option_chain_preview():
 
     assert intelligence.option_chain_preview is not None
     assert len(intelligence.option_chain_preview.rows) >= 2
+
+
+def test_fair_option_price_uses_theoretical_when_live_quotes_missing():
+    contract = OptionContract(
+        putCall="CALL",
+        symbol="AAPL  260526C00310000",
+        strikePrice=310.0,
+        expirationDate="2026-05-26T20:00:00.000+00:00",
+        daysToExpiration=2,
+        theoreticalOptionValue=1.21,
+        delta=0.39,
+    )
+
+    assert fair_option_price(contract) == 1.21
+
+
+def test_quoted_last_uses_prior_close_when_last_trade_missing():
+    contract = OptionContract(
+        putCall="CALL",
+        symbol="AAPL  260526C00310000",
+        strikePrice=310.0,
+        expirationDate="2026-05-26T20:00:00.000+00:00",
+        daysToExpiration=2,
+        closePrice=1.21,
+        delta=0.39,
+    )
+
+    assert quoted_last(contract) == 1.21
+    assert fair_option_price(contract) == 1.21

@@ -87,7 +87,7 @@ async def _run_sync(work: Callable[[], T]) -> T:
 async def get_symbol_intelligence(
     symbol: str = Query(..., min_length=1, max_length=12),
     include_options: bool = Query(
-        default=False,
+        default=True,
         description="Include Schwab option chain scoring when linked (heavier request)",
     ),
     user_id: str = Depends(get_current_user_id),

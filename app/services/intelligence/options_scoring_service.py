@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from app.broker.option_chain_table import (
+    fair_option_price,
+    quoted_ask,
+    quoted_bid,
+    quoted_last,
+)
 from app.models.intelligence_models import OptionsScorecard, OptionsStrikeCandidate
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
 
@@ -144,9 +150,10 @@ class OptionsScoringService:
                     expiration=contract.expirationDate,
                     delta=delta,
                     open_interest=oi,
-                    bid=contract.bidPrice,
-                    ask=contract.askPrice,
-                    last_price=contract.lastPrice,
+                    bid=quoted_bid(contract),
+                    ask=quoted_ask(contract),
+                    last_price=quoted_last(contract),
+                    mark=fair_option_price(contract),
                     theta=contract.theta,
                     iv=contract.volatility,
                     score=round(score, 3),
@@ -171,9 +178,9 @@ class OptionsScoringService:
 
     @staticmethod
     def _spread_pct(contract: OptionContract) -> float | None:
-        bid = contract.bidPrice
-        ask = contract.askPrice
-        if bid is None or ask is None or ask <= 0:
+        bid = quoted_bid(contract)
+        ask = quoted_ask(contract)
+        if bid is None or ask is None:
             return None
         mid = (bid + ask) / 2.0
         if mid <= 0:

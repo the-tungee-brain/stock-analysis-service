@@ -685,8 +685,8 @@ class PromptEnrichmentService:
 
         meta_lines = self._format_option_chain_metadata(table)
         header = (
-            "| Strike | Call Bid | Call Ask | Call Mark | Call Last | Call Δ | Call Θ | Call OI | Call IV | "
-            "Put Bid | Put Ask | Put Mark | Put Last | Put Δ | Put Θ | Put OI | Put IV |\n"
+            "| Strike | Call Bid | Call Ask | Call Mark | Call Last | Call Delta | Call Theta | Call OI | Call IV | "
+            "Put Bid | Put Ask | Put Mark | Put Last | Put Delta | Put Theta | Put OI | Put IV |\n"
             "|--------|----------|----------|-----------|-----------|--------|--------|---------|---------|"
             "---------|---------|----------|----------|-------|--------|---------|--------|\n"
         )
@@ -805,8 +805,9 @@ class PromptEnrichmentService:
             f"Expiration: {expiration} ({dte})\n"
             f"Quotes as of: {quote_as_of}\n"
             "Units: all option prices are per share (×100 per contract). "
-            "Mark = Schwab mark when available, else bid/ask mid. "
-            "Θ (theta) is daily decay per share. IV is annualized %.\n"
+            "Mark = Schwab mark when available, else bid/ask mid, else model value. "
+            "Last = last trade, else prior close when live quote is unavailable. "
+            "Theta is daily decay per share. IV is annualized %.\n"
             f"Strikes shown: {table.strike_count} above and below spot (nearest expiration).\n\n"
         )
 
@@ -911,7 +912,7 @@ class PromptEnrichmentService:
 
         if scorecard.covered_call_candidates:
             call_lines = [
-                f"- ${c.strike:g} exp {c.expiration[:10]}: Δ={c.delta:.2f}, "
+                f"- ${c.strike:g} exp {c.expiration[:10]}: delta={c.delta:.2f}, "
                 f"OI={c.open_interest:,}, score={c.score:.2f} — {c.rationale}"
                 for c in scorecard.covered_call_candidates
             ]
@@ -921,7 +922,7 @@ class PromptEnrichmentService:
 
         if scorecard.csp_candidates:
             put_lines = [
-                f"- ${c.strike:g} exp {c.expiration[:10]}: Δ={c.delta:.2f}, "
+                f"- ${c.strike:g} exp {c.expiration[:10]}: delta={c.delta:.2f}, "
                 f"OI={c.open_interest:,}, score={c.score:.2f} — {c.rationale}"
                 for c in scorecard.csp_candidates
             ]

@@ -7,23 +7,50 @@ from app.broker.option_utils import select_strikes_around_spot
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
 
 
+def _valid_price(value: float | None) -> float | None:
+    if value is None or value <= 0:
+        return None
+    return value
+
+
+def quoted_bid(contract: OptionContract | None) -> float | None:
+    if contract is None:
+        return None
+    return _valid_price(contract.bidPrice)
+
+
+def quoted_ask(contract: OptionContract | None) -> float | None:
+    if contract is None:
+        return None
+    return _valid_price(contract.askPrice)
+
+
+def quoted_last(contract: OptionContract | None) -> float | None:
+    """Last trade when available, else prior-session close from Schwab."""
+    if contract is None:
+        return None
+    return _valid_price(contract.lastPrice) or _valid_price(contract.closePrice)
+
+
 def fair_option_price(contract: OptionContract | None) -> float | None:
-    """Mark when available, else bid/ask mid, else last."""
+    """Mark when available, else bid/ask mid, else model/theoretical value."""
     if contract is None:
         return None
 
-    if contract.markPrice is not None and contract.markPrice != 0:
-        return contract.markPrice
+    mark = _valid_price(contract.markPrice)
+    if mark is not None:
+        return mark
 
-    bid = contract.bidPrice
-    ask = contract.askPrice
-    if bid is not None and ask is not None and (bid != 0 or ask != 0):
-        return (bid + ask) / 2
+    bid = quoted_bid(contract)
+    ask = quoted_ask(contract)
+    if bid is not None and ask is not None:
+        return (bid + ask) / 2.0
 
-    if contract.lastPrice is not None and contract.lastPrice != 0:
-        return contract.lastPrice
+    last = quoted_last(contract)
+    if last is not None:
+        return last
 
-    return None
+    return _valid_price(contract.theoreticalOptionValue)
 
 
 @dataclass(frozen=True)
@@ -60,14 +87,17 @@ def _side_quote(contract: OptionContract | None) -> OptionChainSideQuote | None:
     if contract is None:
         return None
 
+    bid = quoted_bid(contract)
+    ask = quoted_ask(contract)
+    last = quoted_last(contract)
     mark = fair_option_price(contract)
     has_value = any(
         value is not None
         for value in (
-            contract.bidPrice,
-            contract.askPrice,
+            bid,
+            ask,
             mark,
-            contract.lastPrice,
+            last,
             contract.delta,
             contract.theta,
             contract.openInterest,
@@ -78,10 +108,10 @@ def _side_quote(contract: OptionContract | None) -> OptionChainSideQuote | None:
         return None
 
     return OptionChainSideQuote(
-        bid=contract.bidPrice,
-        ask=contract.askPrice,
+        bid=bid,
+        ask=ask,
         mark=mark,
-        last_price=contract.lastPrice,
+        last_price=last,
         delta=contract.delta,
         theta=contract.theta,
         open_interest=contract.openInterest,

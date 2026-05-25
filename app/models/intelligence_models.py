@@ -74,6 +74,7 @@ class OptionsStrikeCandidate(BaseModel):
     bid: float | None = None
     ask: float | None = None
     last_price: float | None = Field(default=None, serialization_alias="lastPrice")
+    mark: float | None = None
     theta: float | None = None
     iv: float | None = None
     score: float
