@@ -235,6 +235,10 @@ class SymbolIntelligence(BaseModel):
     )
     data_gaps: list[str] = Field(default_factory=list, serialization_alias="dataGaps")
     partial: bool = False
+    reauth_required: bool = Field(default=False, serialization_alias="reauthRequired")
+    authorization_url: str | None = Field(
+        default=None, serialization_alias="authorizationUrl"
+    )
 
 
 class PortfolioIntelligence(BaseModel):

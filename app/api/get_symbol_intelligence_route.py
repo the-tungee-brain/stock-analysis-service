@@ -48,6 +48,9 @@ def _fetch_symbol_intelligence(
     account: SchwabAccounts | None = None
     positions: list[Position] = []
     access_token: str | None = None
+    reauth_required = False
+    authorization_url: str | None = None
+    schwab_gap = False
 
     try:
         schwab_token = schwab_auth_service.get_valid_token_by_user_id(user_id=user_id)
@@ -61,11 +64,15 @@ def _fetch_symbol_intelligence(
             symbol_upper,
         )
     except SchwabReauthRequired:
-        pass
+        reauth_required = True
+        authorization_url = schwab_auth_service.build_reauth_authorization_url(
+            user_id=user_id
+        )
+        schwab_gap = True
     except Exception:
-        pass
+        schwab_gap = True
 
-    return portfolio_analysis_service.build_symbol_intelligence(
+    result = portfolio_analysis_service.build_symbol_intelligence(
         user_id=user_id,
         symbol=symbol_upper,
         account=account,
@@ -73,6 +80,21 @@ def _fetch_symbol_intelligence(
         access_token=access_token,
         include_options=include_options and access_token is not None,
     )
+
+    if not reauth_required and not schwab_gap:
+        return result
+
+    updates: dict[str, object] = {"partial": True}
+    if reauth_required:
+        updates["reauth_required"] = True
+        updates["authorization_url"] = authorization_url
+    if schwab_gap:
+        gaps = list(result.data_gaps)
+        if "schwab" not in gaps:
+            gaps.append("schwab")
+        updates["data_gaps"] = gaps
+
+    return result.model_copy(update=updates)
 
 
 async def _run_sync(work: Callable[[], T]) -> T:

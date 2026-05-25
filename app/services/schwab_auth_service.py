@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlencode
 
 from app.builders.schwab_auth_builder import SchwabAuthBuilder
@@ -59,6 +60,21 @@ class SchwabAuthService:
         }
         query = urlencode(params)
         return f"{self.schwab_oauth_uri}/authorize?{query}"
+
+    def build_reauth_authorization_url(self, user_id: str) -> str:
+        state = secrets.token_urlsafe(32)
+        self.cache_state(state=state, user_id=user_id)
+        return self.build_authorization_url(state=state)
+
+    def reauth_http_detail(
+        self, user_id: str, exc: SchwabReauthRequired | str
+    ) -> dict[str, Any]:
+        message = str(exc) if isinstance(exc, SchwabReauthRequired) else exc
+        return {
+            "message": message,
+            "reauth_required": True,
+            "authorization_url": self.build_reauth_authorization_url(user_id=user_id),
+        }
 
     def claim_access_token(self, user_id: str, auth_code: str) -> None:
         access_token = self.schwab_auth_builder.get_access_token(auth_code=auth_code)

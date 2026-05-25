@@ -107,14 +107,9 @@ def get_option_chain_debug(
     try:
         schwab_token = schwab_auth_service.get_valid_token_by_user_id(user_id=user_id)
     except SchwabReauthRequired as exc:
-        auth_url = schwab_auth_service.build_authorization_url(state=user_id)
         raise HTTPException(
             status_code=401,
-            detail={
-                "message": str(exc),
-                "reauth_required": True,
-                "authorization_url": auth_url,
-            },
+            detail=schwab_auth_service.reauth_http_detail(user_id, exc),
         )
 
     positions: list[Position] = []

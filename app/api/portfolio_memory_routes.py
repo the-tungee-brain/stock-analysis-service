@@ -82,14 +82,9 @@ async def get_attention_queue(
     try:
         schwab_token = schwab_auth_service.get_valid_token_by_user_id(user_id=user_id)
     except SchwabReauthRequired as exc:
-        auth_url = schwab_auth_service.build_authorization_url(state=user_id)
         raise HTTPException(
             status_code=401,
-            detail={
-                "message": str(exc),
-                "reauth_required": True,
-                "authorization_url": auth_url,
-            },
+            detail=schwab_auth_service.reauth_http_detail(user_id, exc),
         )
 
     account_map = portfolio_service.get_enriched_account(
@@ -143,6 +138,7 @@ async def get_morning_brief(
     delivery_service: MorningBriefDeliveryService = Depends(
         get_morning_brief_delivery_service
     ),
+    schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
     refresh: bool = Query(default=False),
 ) -> MorningBrief:
     brief = await asyncio.to_thread(
@@ -154,10 +150,9 @@ async def get_morning_brief(
     if brief is None:
         raise HTTPException(
             status_code=401,
-            detail={
-                "message": "Schwab re-authorization required.",
-                "reauth_required": True,
-            },
+            detail=schwab_auth_service.reauth_http_detail(
+                user_id, "Schwab re-authorization required."
+            ),
         )
     return brief
 
