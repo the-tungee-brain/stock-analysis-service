@@ -51,7 +51,7 @@ class MorningBriefDeliveryService:
         self.schwab_auth_service = schwab_auth_service
         self.portfolio_memory_service = portfolio_memory_service
         self.frontend_uri = os.getenv(
-            "POWERPOCKET_FRONTEND_URI", "https://powerpocket.netlify.app"
+            "POWERPOCKET_FRONTEND_URI", "https://tomcrest.com"
         )
 
     def build_for_user(
@@ -204,8 +204,7 @@ class MorningBriefDeliveryService:
 
         if brief.digest and brief.digest.earnings_this_week:
             lines.append(
-                "Earnings this week: "
-                + ", ".join(brief.digest.earnings_this_week[:8])
+                "Earnings this week: " + ", ".join(brief.digest.earnings_this_week[:8])
             )
             lines.append("")
 
@@ -225,8 +224,7 @@ class MorningBriefDeliveryService:
 
         if brief.macro_regime:
             html_sections.append(
-                "<h3>Macro</h3>"
-                f"<p>{html.escape(brief.macro_regime)}</p>"
+                "<h3>Macro</h3>" f"<p>{html.escape(brief.macro_regime)}</p>"
             )
 
         if brief.changes and brief.changes.summary:
@@ -259,7 +257,7 @@ class MorningBriefDeliveryService:
         )
 
         html_body = (
-            "<html><body style=\"font-family: sans-serif; line-height: 1.5;\">"
+            '<html><body style="font-family: sans-serif; line-height: 1.5;">'
             + "".join(html_sections)
             + "</body></html>"
         )

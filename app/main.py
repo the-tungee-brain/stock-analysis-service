@@ -29,7 +29,9 @@ from app.api.research_chat_route import router as research_chat_router
 from app.api.chat_sessions_route import router as chat_sessions_router
 from app.api.get_account_positions_route import router as get_account_positions_router
 from app.api.get_portfolio_brief_route import router as get_portfolio_brief_router
-from app.api.get_symbol_intelligence_route import router as get_symbol_intelligence_router
+from app.api.get_symbol_intelligence_route import (
+    router as get_symbol_intelligence_router,
+)
 from app.api.get_option_chain_debug_route import router as get_option_chain_debug_router
 from app.api.internal_morning_brief_route import router as internal_morning_brief_router
 from app.api.portfolio_memory_routes import router as portfolio_memory_router
@@ -44,7 +46,8 @@ app = FastAPI(lifespan=lifespan)
 
 origins = [
     "http://localhost:3000",
-    "https://powerpocket.netlify.app",
+    "https://tomcrest.com",
+    "https://www.tomcrest.com",
 ]
 
 app.add_middleware(
