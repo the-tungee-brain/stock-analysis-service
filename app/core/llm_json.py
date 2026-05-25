@@ -14,9 +14,6 @@ def strip_code_fence(text: str) -> str:
 
 
 def _strictify_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    if schema.get("type") == "object":
-        schema["additionalProperties"] = False
-
     for key in ("$defs", "definitions"):
         defs = schema.get(key)
         if isinstance(defs, dict):
@@ -33,6 +30,15 @@ def _strictify_schema(schema: dict[str, Any]) -> dict[str, Any]:
     items = schema.get("items")
     if isinstance(items, dict):
         _strictify_schema(items)
+
+    if schema.get("type") == "object":
+        schema["additionalProperties"] = False
+        properties = schema.get("properties")
+        if isinstance(properties, dict) and properties:
+            schema["required"] = list(properties.keys())
+            for prop in properties.values():
+                if isinstance(prop, dict):
+                    prop.pop("default", None)
 
     return schema
 

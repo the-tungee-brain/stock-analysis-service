@@ -201,7 +201,16 @@ def test_symbol_analysis_v1_prompt_uses_json_task():
 
 
 def test_portfolio_analysis_v1_llm_response_validates_sample_json():
+    from app.core.llm_json import openai_response_schema
     from app.models.analysis_models import PortfolioAnalysisV1LLMResponse
+
+    schema = openai_response_schema(PortfolioAnalysisV1LLMResponse)
+    assert set(schema["required"]) == set(schema["properties"].keys())
+    action_schema = schema["$defs"]["StructuredAnalysisActionLLM"]
+    assert set(action_schema["required"]) == set(action_schema["properties"].keys())
+    section_schema = schema["$defs"]["StructuredAnalysisSectionLLM"]
+    assert set(section_schema["required"]) == set(section_schema["properties"].keys())
+    assert "default" not in action_schema["properties"]["symbol"]
 
     parsed = PortfolioAnalysisV1LLMResponse.model_validate_json(
         """
