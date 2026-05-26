@@ -256,11 +256,29 @@ class OptionsScoringService:
 
             moneyness = ""
             if underlying_price:
-                pct_otm = ((strike / underlying_price) - 1.0) * 100.0
+                pct_from_spot = ((strike / underlying_price) - 1.0) * 100.0
                 if side == "call":
-                    moneyness = f"{pct_otm:+.1f}% from spot"
+                    if pct_from_spot > 0.5:
+                        moneyness = f"{pct_from_spot:.1f}% above stock price"
+                    elif pct_from_spot < -0.5:
+                        moneyness = f"{abs(pct_from_spot):.1f}% below stock price"
+                    else:
+                        moneyness = "at the money"
                 else:
-                    moneyness = f"{-pct_otm:+.1f}% from spot"
+                    if pct_from_spot < -0.5:
+                        moneyness = f"{abs(pct_from_spot):.1f}% below stock price"
+                    elif pct_from_spot > 0.5:
+                        moneyness = f"{pct_from_spot:.1f}% above stock price"
+                    else:
+                        moneyness = "at the money"
+
+            summary_parts = [
+                f"{days_to_expiration} days to expiry",
+                f"delta {abs_delta:.2f}",
+                f"{oi:,} open interest",
+            ]
+            if moneyness:
+                summary_parts.append(moneyness)
 
             candidates.append(
                 OptionsStrikeCandidate(
@@ -276,12 +294,7 @@ class OptionsScoringService:
                     theta=contract.theta,
                     iv=contract.volatility,
                     score=round(score, 3),
-                    rationale=(
-                        f"{rationale_prefix} (target |delta| "
-                        f"{band.min_delta:.2f}–{band.max_delta:.2f}, ~{preferred_dte} DTE): "
-                        f"delta {delta:.2f}, {days_to_expiration} DTE, OI {oi:,}"
-                        + (f", {moneyness}" if moneyness else "")
-                    ),
+                    rationale=" · ".join(summary_parts),
                 )
             )
 

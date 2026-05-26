@@ -1017,7 +1017,7 @@ class PromptEnrichmentService:
                 for c in scorecard.covered_call_candidates[:3]
             ]
             sections.append(
-                "### Top covered call candidates (max 3, ranked for saved strategy delta/DTE)\n"
+                "### Top covered call candidates (max 3, matched to saved strategy)\n"
                 + "\n".join(call_lines)
             )
 
@@ -1027,7 +1027,7 @@ class PromptEnrichmentService:
                 for c in scorecard.csp_candidates[:3]
             ]
             sections.append(
-                "### Top cash-secured put candidates (max 3, ranked for saved strategy delta/DTE)\n"
+                "### Top cash-secured put candidates (max 3, matched to saved strategy)\n"
                 + "\n".join(put_lines)
             )
 
