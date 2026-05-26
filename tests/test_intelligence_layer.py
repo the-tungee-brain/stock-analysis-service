@@ -11,12 +11,16 @@ from app.models.company_research_models import (
 from app.models.intelligence_models import (
     IntelligenceSignal,
     OptionRollSuggestion,
+    OptionsScorecard,
+    OptionsStrikeCandidate,
     PeerComparison,
     PeerMetric,
     SymbolIntelligence,
 )
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
 from app.services.intelligence.event_timeline_builder import EventTimelineBuilder
+from app.models.schwab_models import Instrument, Position
+from app.services.intelligence.option_roll_planner_service import OptionRollPlannerService
 from app.services.intelligence.options_scoring_service import OptionsScoringService
 from app.services.intelligence.signal_engine import SignalEngine
 from app.services.prompt_enrichment_service import PromptEnrichmentService
@@ -173,6 +177,140 @@ def test_options_scoring_ranks_liquid_strikes():
     assert scorecard.covered_call_candidates
     assert scorecard.csp_candidates
     assert scorecard.covered_call_candidates[0].strike == 210.0
+
+
+def test_options_scoring_prefers_target_dte_over_far_expiration():
+    near_exp = (date.today() + timedelta(days=10)).isoformat()
+    far_exp = (date.today() + timedelta(days=30)).isoformat()
+    chain = OptionChain(
+        symbol="NVDA",
+        underlyingPrice=220.0,
+        putExpDateMap={
+            f"{near_exp}:10": {
+                "200.0": [
+                    OptionContract(
+                        putCall="PUT",
+                        symbol="NVDA",
+                        strikePrice=200.0,
+                        expirationDate=near_exp,
+                        daysToExpiration=10,
+                        delta=-0.25,
+                        openInterest=1200,
+                        bidPrice=2.5,
+                        askPrice=2.7,
+                    )
+                ]
+            },
+            f"{far_exp}:30": {
+                "200.0": [
+                    OptionContract(
+                        putCall="PUT",
+                        symbol="NVDA",
+                        strikePrice=200.0,
+                        expirationDate=far_exp,
+                        daysToExpiration=30,
+                        delta=-0.25,
+                        openInterest=1200,
+                        bidPrice=2.5,
+                        askPrice=2.7,
+                    )
+                ]
+            },
+        },
+    )
+
+    scorecard = OptionsScoringService.build_scorecard(chain)
+
+    assert scorecard is not None
+    assert scorecard.csp_candidates
+    assert scorecard.csp_candidates[0].expiration == near_exp
+    assert scorecard.csp_candidates[0].score >= scorecard.csp_candidates[1].score
+
+
+def test_roll_planner_prefers_lower_delta_when_assignment_risk():
+    near_exp = (date.today() + timedelta(days=3)).isoformat()
+    roll_exp = (date.today() + timedelta(days=10)).isoformat()
+    position = Position(
+        shortQuantity=1.0,
+        averagePrice=2.0,
+        currentDayProfitLoss=0.0,
+        currentDayProfitLossPercentage=0.0,
+        longQuantity=0.0,
+        settledLongQuantity=0.0,
+        settledShortQuantity=1.0,
+        instrument=Instrument(
+            assetType="OPTION",
+            cusip="",
+            symbol="NVDA  260529P00212500",
+            putCall="PUT",
+            underlyingSymbol="NVDA",
+            strikePrice=212.5,
+            expirationDate=near_exp,
+        ),
+        marketValue=-200.0,
+        maintenanceRequirement=0.0,
+        currentDayCost=0.0,
+    )
+    chain = OptionChain(
+        symbol="NVDA",
+        underlyingPrice=220.0,
+        putExpDateMap={
+            f"{near_exp}:3": {
+                "212.5": [
+                    OptionContract(
+                        putCall="PUT",
+                        symbol="NVDA",
+                        strikePrice=212.5,
+                        expirationDate=near_exp,
+                        daysToExpiration=3,
+                        delta=-0.44,
+                        openInterest=800,
+                        bid=1.2,
+                        ask=1.35,
+                    )
+                ]
+            }
+        },
+    )
+    scorecard = OptionsScorecard(
+        underlying_price=220.0,
+        csp_candidates=[
+            OptionsStrikeCandidate(
+                side="put",
+                strike=210.0,
+                expiration=near_exp,
+                delta=-0.35,
+                open_interest=900,
+                bid=2.0,
+                ask=2.2,
+                score=0.7,
+                rationale="Closer strike",
+            ),
+            OptionsStrikeCandidate(
+                side="put",
+                strike=200.0,
+                expiration=roll_exp,
+                delta=-0.28,
+                open_interest=1200,
+                bid=2.5,
+                ask=2.7,
+                score=0.75,
+                rationale="Lower delta roll target",
+            ),
+        ],
+    )
+
+    suggestions = OptionRollPlannerService.build_roll_suggestions(
+        positions=[position],
+        symbol="NVDA",
+        option_chain=chain,
+        scorecard=scorecard,
+    )
+
+    assert len(suggestions) == 1
+    assert suggestions[0].suggested_strike == 200.0
+    assert suggestions[0].suggested_expiration == roll_exp
+    assert "lowers assignment delta" in suggestions[0].rationale
 
 
 def test_symbol_intelligence_serializes_camel_case_aliases():

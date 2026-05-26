@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from app.broker.option_chain_table import quoted_ask, quoted_bid
+from app.broker.option_chain_table import lookup_option_contract, quoted_ask, quoted_bid
+from app.broker.option_greeks import sanitize_delta
+from app.broker.option_utils import (
+    parse_put_call_from_option_symbol,
+    position_expiration_date,
+)
 from app.models.intelligence_models import (
     OptionRollSuggestion,
     OptionsScorecard,
@@ -39,35 +44,36 @@ class OptionRollPlannerService:
 
             strike = instrument.strikePrice
             expiration = instrument.expirationDate
-            put_call = instrument.putCall
+            put_call = instrument.putCall or parse_put_call_from_option_symbol(
+                instrument.symbol or ""
+            )
             if strike is None or not expiration or not put_call:
                 continue
 
             side = "call" if put_call == "CALL" else "put"
-            exp_map = (
-                option_chain.callExpDateMap
-                if side == "call"
-                else option_chain.putExpDateMap
-            )
-
+            expiration_date = position_expiration_date(position)
             current_contract = None
-            for contracts_by_strike in exp_map.values():
-                match = OptionsScoringService._find_contract(
-                    contracts_by_strike, strike
+            if expiration_date is not None:
+                current_contract = lookup_option_contract(
+                    option_chain,
+                    expiration=expiration_date,
+                    strike=strike,
+                    put_call=put_call,
                 )
-                if match is not None:
-                    current_contract = match
-                    break
 
             candidates = (
                 scorecard.covered_call_candidates
                 if side == "call"
                 else scorecard.csp_candidates
             )
+            close_delta = sanitize_delta(
+                current_contract.delta if current_contract is not None else None
+            )
             alternative = OptionRollPlannerService._pick_alternative(
                 side=side,
                 current_strike=strike,
                 current_expiration=expiration,
+                current_delta=close_delta,
                 candidates=candidates,
             )
             if alternative is None:
@@ -80,34 +86,16 @@ class OptionRollPlannerService:
                 alternative_ask=alternative.ask,
             )
 
-            close_delta = getattr(current_contract, "delta", None)
-            rationale = (
-                f"Buy to close ${strike:g} {side} exp {expiration[:10]}"
-                + (
-                    f" (delta {close_delta:.2f}"
-                    if close_delta is not None
-                    else " (delta n/a"
-                )
-                + (
-                    f", bid/ask {current_bid:.2f}/{current_ask:.2f})"
-                    if current_bid is not None and current_ask is not None
-                    else ")"
-                )
-                + f" → sell ${alternative.strike:g} {side} exp {alternative.expiration[:10]}"
-                + (
-                    f" (delta {alternative.delta:.2f}"
-                    if alternative.delta is not None
-                    else " (delta n/a"
-                )
-                + (
-                    f", bid/ask {alternative.bid:.2f}/{alternative.ask:.2f}, "
-                    f"OI {alternative.open_interest:,})"
-                    if alternative.bid is not None and alternative.ask is not None
-                    else ")"
-                )
+            rationale = OptionRollPlannerService._build_rationale(
+                side=side,
+                strike=strike,
+                expiration=expiration,
+                close_delta=close_delta,
+                current_bid=current_bid,
+                current_ask=current_ask,
+                alternative=alternative,
+                estimated_credit=estimated_credit,
             )
-            if estimated_credit is not None:
-                rationale += f"; estimated net credit ~${estimated_credit:.2f}/contract"
 
             suggestions.append(
                 OptionRollSuggestion(
@@ -132,17 +120,122 @@ class OptionRollPlannerService:
         side: str,
         current_strike: float,
         current_expiration: str,
+        current_delta: float | None,
         candidates: list[OptionsStrikeCandidate],
     ) -> OptionsStrikeCandidate | None:
-        for candidate in candidates:
-            if candidate.side != side:
-                continue
-            if abs(candidate.strike - current_strike) < 0.01:
-                continue
-            if candidate.expiration[:10] == current_expiration[:10]:
-                continue
-            return candidate
-        return candidates[0] if candidates else None
+        if not candidates:
+            return None
+
+        current_exp = current_expiration[:10]
+        current_abs_delta = abs(current_delta) if current_delta is not None else None
+
+        ranked = sorted(
+            candidates,
+            key=lambda candidate: OptionRollPlannerService._roll_fit_score(
+                candidate=candidate,
+                side=side,
+                current_strike=current_strike,
+                current_exp=current_exp,
+                current_abs_delta=current_abs_delta,
+            ),
+            reverse=True,
+        )
+        best_score = OptionRollPlannerService._roll_fit_score(
+            candidate=ranked[0],
+            side=side,
+            current_strike=current_strike,
+            current_exp=current_exp,
+            current_abs_delta=current_abs_delta,
+        )
+        if best_score < 0:
+            return None
+        return ranked[0]
+
+    @staticmethod
+    def _roll_fit_score(
+        *,
+        candidate: OptionsStrikeCandidate,
+        side: str,
+        current_strike: float,
+        current_exp: str,
+        current_abs_delta: float | None,
+    ) -> float:
+        if candidate.side != side:
+            return -1.0
+        if (
+            abs(candidate.strike - current_strike) < 0.01
+            and candidate.expiration[:10] == current_exp
+        ):
+            return -1.0
+
+        score = candidate.score
+        candidate_dte = OptionsScoringService._expiration_dte(candidate.expiration)
+        score += OptionsScoringService._dte_score(candidate_dte) * 0.25
+
+        if candidate.expiration[:10] > current_exp:
+            score += 0.15
+
+        candidate_delta = sanitize_delta(candidate.delta)
+        if current_abs_delta is not None and candidate_delta is not None:
+            candidate_abs_delta = abs(candidate_delta)
+            if current_abs_delta >= OptionsScoringService.ASSIGNMENT_DELTA_THRESHOLD:
+                if candidate_abs_delta < current_abs_delta:
+                    score += 0.25
+                else:
+                    score -= 0.15
+            if (
+                OptionsScoringService.TARGET_DELTA_MIN
+                <= candidate_abs_delta
+                <= OptionsScoringService.TARGET_DELTA_MAX
+            ):
+                score += 0.10
+
+        return score
+
+    @staticmethod
+    def _build_rationale(
+        *,
+        side: str,
+        strike: float,
+        expiration: str,
+        close_delta: float | None,
+        current_bid: float | None,
+        current_ask: float | None,
+        alternative: OptionsStrikeCandidate,
+        estimated_credit: float | None,
+    ) -> str:
+        alt_dte = OptionsScoringService._expiration_dte(alternative.expiration)
+        rationale = (
+            f"Buy to close ${strike:g} {side} exp {expiration[:10]}"
+            + (
+                f" (delta {close_delta:.2f}"
+                if close_delta is not None
+                else " (delta n/a"
+            )
+            + (
+                f", bid/ask {current_bid:.2f}/{current_ask:.2f})"
+                if current_bid is not None and current_ask is not None
+                else ")"
+            )
+            + f" → sell ${alternative.strike:g} {side} exp {alternative.expiration[:10]}"
+            + (
+                f" (delta {alternative.delta:.2f}, {alt_dte} DTE"
+                if alternative.delta is not None
+                else f" ({alt_dte} DTE"
+            )
+            + (
+                f", bid/ask {alternative.bid:.2f}/{alternative.ask:.2f}, "
+                f"OI {alternative.open_interest:,})"
+                if alternative.bid is not None and alternative.ask is not None
+                else ")"
+            )
+        )
+        if close_delta is not None and alternative.delta is not None:
+            if abs(close_delta) > abs(alternative.delta):
+                rationale += "; lowers assignment delta"
+        if estimated_credit is not None:
+            rationale += f"; estimated net credit ~${estimated_credit:.2f}/contract"
+        return rationale
 
     @staticmethod
     def _estimate_roll_credit(
