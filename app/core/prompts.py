@@ -1384,8 +1384,13 @@ def build_symbol_prompt(
     Build a compact user prompt for symbol-level analysis.
     Use this as the `user` content; pair with SYSTEM_MESSAGE as `system`.
     """
-    natural_delivery = not json_response and should_use_natural_response(
-        ctx.user_prompt, action=ctx.action
+    follow_up_affirmation = bool(
+        ctx.user_prompt and is_follow_up_affirmation(ctx.user_prompt)
+    )
+    natural_delivery = (
+        not json_response
+        and should_use_natural_response(ctx.user_prompt, action=ctx.action)
+        and not follow_up_affirmation
     )
     action_block = _build_action_prompt(
         ctx.action,
