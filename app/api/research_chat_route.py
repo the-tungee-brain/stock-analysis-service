@@ -90,6 +90,7 @@ async def research_chat(
 
         holdings_block = None
         intelligence_block = None
+        option_chain_block = None
         try:
             schwab_token = schwab_auth_service.get_valid_token_by_user_id(
                 user_id=user_id
@@ -99,7 +100,7 @@ async def research_chat(
             )
             account = account_map["account"]
             positions = account.securitiesAccount.positions
-            holdings_block, intelligence_block = await asyncio.to_thread(
+            holdings_block, intelligence_block, option_chain_block = await asyncio.to_thread(
                 portfolio_analysis_service.build_research_chat_holdings_context,
                 user_id=user_id,
                 symbol=symbol,
@@ -110,9 +111,11 @@ async def research_chat(
         except SchwabReauthRequired:
             holdings_block = None
             intelligence_block = None
+            option_chain_block = None
         except Exception:
             holdings_block = None
             intelligence_block = None
+            option_chain_block = None
 
         user_message = prompt_enrichment_service.build_research_chat_user_message(
             ctx=ctx,
@@ -120,6 +123,7 @@ async def research_chat(
             include_context=is_first_chat,
             holdings_block=holdings_block,
             intelligence_block=intelligence_block,
+            option_chain_block=option_chain_block,
         )
 
         async for chunk in llm_service.analyze_option_position(

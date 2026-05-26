@@ -44,6 +44,7 @@ from textwrap import dedent
 from app.core.prompts import (
     AnalysisAction,
     BaseAnalysisContext,
+    OPTIONS_EXECUTION_SPECIFICITY_RULES,
     build_symbol_prompt,
     build_portfolio_prompt,
     PortfolioContext,
@@ -101,8 +102,13 @@ RESEARCH_CHAT_SYSTEM_MESSAGE = dedent(f"""
     - Explain jargon briefly when needed (e.g., "free cash flow = cash left after running the business").
     - If the user asks whether to buy or sell, explain bull case, bear case, and key risks —
       do NOT give a personalized trading order.
+    - When OPTION DATA or PRECOMPUTED INTELLIGENCE includes options scorecards, roll suggestions,
+      held contracts, or chain tables, discuss strategies with specific strikes, expirations,
+      delta, and bid/ask from that data — frame as educational examples, not orders to execute.
     - If data is missing, say so and answer with what you do know.
     - In follow-up messages, stay concise and build on prior context without repeating the full intro.
+
+    {OPTIONS_EXECUTION_SPECIFICITY_RULES}
     """).strip()
 
 
@@ -451,6 +457,7 @@ class PromptEnrichmentService:
         include_context: bool = True,
         holdings_block: str | None = None,
         intelligence_block: str | None = None,
+        option_chain_block: str | None = None,
     ) -> dict[str, str]:
         if include_context:
             context_block = self._format_research_context_block(ctx)
@@ -472,13 +479,21 @@ class PromptEnrichmentService:
                         intelligence_block,
                     ]
                 )
+            if option_chain_block:
+                sections.extend(
+                    [
+                        "=== OPTION DATA (HELD CONTRACTS + CHAIN) ===",
+                        option_chain_block,
+                    ]
+                )
             sections.extend(
                 [
                     "=== USER QUESTION ===",
                     user_prompt,
-                    "Answer using the research data above. When holdings or precomputed "
-                    "intelligence are present, tie recommendations to the user's actual "
-                    "positions and option legs. Acknowledge any gaps instead of guessing.",
+                    "Answer using the research data above. When holdings, precomputed "
+                    "intelligence, or option data are present, tie recommendations to the "
+                    "user's actual positions and option legs with specific strikes, expirations, "
+                    "delta, and bid/ask when available. Acknowledge any gaps instead of guessing.",
                 ]
             )
             content = "\n\n".join(sections).strip()

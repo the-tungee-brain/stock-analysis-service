@@ -35,6 +35,7 @@ from app.models.intelligence_models import (
     SymbolIntelligence,
 )
 from app.models.schwab_models import Position, SchwabAccounts
+from app.models.schwab_option_chain_models import OptionChain
 from app.models.strategy_models import InvestmentStrategy, UserInvestmentProfile
 from app.services.company_research_service import CompanyResearchService
 from app.services.intelligence.portfolio_intelligence_service import (
@@ -66,6 +67,7 @@ NEWS_ENRICH_ACTIONS = frozenset(
 ASSIGNMENT_RISK_WINDOW_DAYS = 14
 PORTFOLIO_RESEARCH_LIMIT = 8
 INTELLIGENCE_OPTION_STRIKE_COUNT = 5
+RESEARCH_CHAT_OPTION_STRIKE_COUNT = 10
 INTELLIGENCE_OPTION_LOOKAHEAD_DAYS = DEFAULT_OPTION_CHAIN_LOOKAHEAD_DAYS
 
 logger = logging.getLogger(__name__)
@@ -211,6 +213,47 @@ class PortfolioAnalysisService:
                 expirations.append(expiration)
 
         return option_chain_date_window(held_expirations=expirations or None)
+
+    def _load_symbol_option_chain(
+        self,
+        *,
+        access_token: str,
+        symbol: str,
+        positions: list[Position] | None = None,
+        strike_count: int = INTELLIGENCE_OPTION_STRIKE_COUNT,
+    ) -> OptionChain | None:
+        symbol_upper = symbol.strip().upper()
+        positions = positions or []
+        held_expirations = [
+            expiration
+            for position in positions
+            if position.instrument.assetType == "OPTION"
+            and (
+                (position.instrument.underlyingSymbol or position.instrument.symbol or "")
+                .strip()
+                .upper()
+                .split()[0]
+                == symbol_upper
+            )
+            and (expiration := position_expiration_date(position)) is not None
+        ]
+        from_date, to_date = option_chain_date_window(
+            held_expirations=held_expirations or None
+        )
+        try:
+            return self.market_service.get_option_chains(
+                access_token=access_token,
+                symbol=symbol_upper,
+                strike_count=strike_count,
+                from_date=from_date,
+                to_date=to_date,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to load option chain for %s",
+                symbol_upper,
+            )
+            return None
 
     @staticmethod
     def _should_auto_enrich_news(action: AnalysisAction) -> bool:
@@ -868,36 +911,11 @@ class PortfolioAnalysisService:
         def load_option_chain():
             if not include_options or not has_schwab:
                 return None
-            held_expirations = [
-                expiration
-                for position in positions
-                if position.instrument.assetType == "OPTION"
-                and (
-                    (position.instrument.underlyingSymbol or position.instrument.symbol or "")
-                    .strip()
-                    .upper()
-                    .split()[0]
-                    == symbol_upper
-                )
-                and (expiration := position_expiration_date(position)) is not None
-            ]
-            from_date, to_date = option_chain_date_window(
-                held_expirations=held_expirations or None
+            return self._load_symbol_option_chain(
+                access_token=access_token,
+                symbol=symbol_upper,
+                positions=positions,
             )
-            try:
-                return self.market_service.get_option_chains(
-                    access_token=access_token,
-                    symbol=symbol_upper,
-                    strike_count=INTELLIGENCE_OPTION_STRIKE_COUNT,
-                    from_date=from_date,
-                    to_date=to_date,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to load option chain for symbol intelligence: %s",
-                    symbol_upper,
-                )
-                return None
 
         def load_quote_snapshot():
             if not has_schwab:
@@ -991,26 +1009,30 @@ class PortfolioAnalysisService:
         account: SchwabAccounts | None,
         positions: list[Position],
         access_token: str | None,
-    ) -> tuple[str | None, str | None]:
+    ) -> tuple[str | None, str | None, str | None]:
         symbol_upper = symbol.upper()
         symbol_positions = self._positions_for_symbol(positions, symbol_upper)
-        if not symbol_positions or account is None:
-            return None, None
 
-        sections: list[str] = []
-        account_summary = _build_account_summary(account)
-        if account_summary:
-            sections.append(f"## Account snapshot\n{account_summary}")
+        holdings_block = None
+        if symbol_positions and account is not None:
+            sections: list[str] = []
+            account_summary = _build_account_summary(account)
+            if account_summary:
+                sections.append(f"## Account snapshot\n{account_summary}")
 
-        positions_table = _enrich_positions_table(
-            symbol_positions,
-            account=account,
-        )
-        sections.append(
-            f"## Your {symbol_upper} positions\n{positions_table}"
-        )
-        holdings_block = "\n\n".join(sections)
+            positions_table = _enrich_positions_table(
+                symbol_positions,
+                account=account,
+            )
+            sections.append(
+                f"## Your {symbol_upper} positions\n{positions_table}"
+            )
+            holdings_block = "\n\n".join(sections)
 
+        if account is None or access_token is None:
+            return holdings_block, None, None
+
+        intelligence = None
         intelligence_block = None
         try:
             intelligence = self.build_symbol_intelligence(
@@ -1029,25 +1051,63 @@ class PortfolioAnalysisService:
         except Exception:
             intelligence_block = None
 
-        if access_token:
+        try:
+            macro_snapshots = self.market_service.get_enriched_quote_snapshot(
+                access_token=access_token,
+                symbols=BENCHMARK_SYMBOLS,
+            )
+            macro_block = self._build_macro_market_context_block(
+                macro_snapshots=macro_snapshots,
+            )
+            if macro_block:
+                intelligence_block = (
+                    f"{macro_block}\n\n{intelligence_block}"
+                    if intelligence_block
+                    else macro_block
+                )
+        except Exception:
+            pass
+
+        option_chain_block = None
+        try:
+            option_chain = self._load_symbol_option_chain(
+                access_token=access_token,
+                symbol=symbol_upper,
+                positions=symbol_positions,
+                strike_count=RESEARCH_CHAT_OPTION_STRIKE_COUNT,
+            )
+            underlying_iv_percent = None
             try:
-                macro_snapshots = self.market_service.get_enriched_quote_snapshot(
+                snapshots = self.market_service.get_enriched_quote_snapshot(
                     access_token=access_token,
-                    symbols=BENCHMARK_SYMBOLS,
+                    symbols=[symbol_upper],
                 )
-                macro_block = self._build_macro_market_context_block(
-                    macro_snapshots=macro_snapshots,
-                )
-                if macro_block:
-                    intelligence_block = (
-                        f"{macro_block}\n\n{intelligence_block}"
-                        if intelligence_block
-                        else macro_block
-                    )
+                quote = snapshots.get(symbol_upper)
+                if quote is not None and quote.implied_vol is not None:
+                    underlying_iv_percent = quote.implied_vol
             except Exception:
                 pass
 
-        return holdings_block, intelligence_block
+            has_options_scorecard = (
+                self.prompt_enrichment_service.has_actionable_options_scorecard(
+                    intelligence
+                )
+            )
+            option_chain_block = (
+                self.prompt_enrichment_service.resolve_option_chain_block(
+                    chain=option_chain,
+                    action=AnalysisAction.FREE_FORM,
+                    has_options_scorecard=has_options_scorecard,
+                    strike_count=RESEARCH_CHAT_OPTION_STRIKE_COUNT,
+                    positions=symbol_positions or None,
+                    symbol=symbol_upper,
+                    underlying_iv_percent=underlying_iv_percent,
+                )
+            )
+        except Exception:
+            option_chain_block = None
+
+        return holdings_block, intelligence_block, option_chain_block
 
     def _build_portfolio_intelligence_block(
         self,
