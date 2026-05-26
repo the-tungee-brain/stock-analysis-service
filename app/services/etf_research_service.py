@@ -3,10 +3,15 @@ from typing import Any
 from app.adapters.securitiesdb.securitiesdb_adapter import SecuritiesDbAdapter
 from app.builders.fundamentals_builder import FundamentalsBuilder
 from app.models.company_research_models import EtfHoldingItem, EtfHoldingsContext
+from app.utils.etf_holdings_quality import (
+    compute_quality_score,
+    rank_etf_holdings_by_quality,
+)
 
 
 class EtfResearchService:
     DEFAULT_HOLDINGS_LIMIT = 25
+    DEFAULT_QUALITY_LIMIT = 5
 
     def __init__(
         self,
@@ -25,6 +30,7 @@ class EtfResearchService:
         symbol: str,
         *,
         holdings_limit: int | None = None,
+        quality_limit: int | None = None,
     ) -> EtfHoldingsContext | None:
         payload = self.securitiesdb_adapter.get_etf_holdings(symbol=symbol)
         if payload is None:
@@ -39,47 +45,68 @@ class EtfResearchService:
 
         resolved_limit = holdings_limit or self.DEFAULT_HOLDINGS_LIMIT
         resolved_limit = max(1, min(resolved_limit, 100))
+        resolved_quality_limit = quality_limit or self.DEFAULT_QUALITY_LIMIT
+        resolved_quality_limit = max(1, min(resolved_quality_limit, 10))
 
         raw_holdings = data.get("holdings")
-        holdings: list[EtfHoldingItem] = []
+        all_holdings: list[EtfHoldingItem] = []
         if isinstance(raw_holdings, list):
-            for item in raw_holdings[:resolved_limit]:
+            for item in raw_holdings:
                 if not isinstance(item, dict):
                     continue
-                name = item.get("name")
-                weight = item.get("weight_pct")
-                if not isinstance(name, str) or not isinstance(weight, (int, float)):
-                    continue
-                ticker = item.get("ticker")
-                sector = item.get("sector")
-                market_cap = self._format_market_cap(item.get("market_cap"))
-                holdings.append(
-                    EtfHoldingItem(
-                        ticker=ticker.upper() if isinstance(ticker, str) else None,
-                        name=name,
-                        weight_pct=float(weight),
-                        sector=sector if isinstance(sector, str) else None,
-                        market_cap=market_cap,
-                    )
-                )
+                parsed = self._parse_holding_item(item)
+                if parsed is not None:
+                    all_holdings.append(parsed)
+
+        strongest, weakest = rank_etf_holdings_by_quality(
+            all_holdings,
+            limit=resolved_quality_limit,
+        )
 
         sector_breakdown = self._parse_sector_breakdown(data.get("sector_breakdown"))
         fund_metrics = self.fundamentals_builder.build_etf_metrics(symbol=symbol)
 
         total_holdings = data.get("total_holdings")
         if not isinstance(total_holdings, int):
-            total_holdings = len(holdings)
+            total_holdings = len(all_holdings)
 
         return EtfHoldingsContext(
             ticker=str(data.get("ticker") or symbol).upper(),
             total_holdings=total_holdings,
             aum=self._format_aum(data.get("aum")),
             sector_breakdown=sector_breakdown,
-            holdings=holdings,
+            holdings=all_holdings[:resolved_limit],
+            strongest_holdings=strongest,
+            weakest_holdings=weakest,
             dividend_yield=fund_metrics.get("dividend_yield"),
             expense_ratio=fund_metrics.get("expense_ratio"),
             data_as_of=self._extract_data_as_of(meta_dict),
             confidence_score=self._extract_confidence_score(meta_dict),
+        )
+
+    @staticmethod
+    def _parse_holding_item(item: dict[str, Any]) -> EtfHoldingItem | None:
+        name = item.get("name")
+        weight = item.get("weight_pct")
+        if not isinstance(name, str) or not isinstance(weight, (int, float)):
+            return None
+
+        ticker = item.get("ticker")
+        sector = item.get("sector")
+        piotroski_raw = item.get("piotroski_f")
+        altman_raw = item.get("altman_z")
+        piotroski_f = int(piotroski_raw) if isinstance(piotroski_raw, int) else None
+        altman_z = float(altman_raw) if isinstance(altman_raw, (int, float)) else None
+
+        return EtfHoldingItem(
+            ticker=ticker.upper() if isinstance(ticker, str) else None,
+            name=name,
+            weight_pct=float(weight),
+            sector=sector if isinstance(sector, str) else None,
+            market_cap=EtfResearchService._format_market_cap(item.get("market_cap")),
+            piotroski_f=piotroski_f,
+            altman_z=altman_z,
+            quality_score=compute_quality_score(piotroski_f, altman_z),
         )
 
     @staticmethod

@@ -499,6 +499,36 @@ class PromptEnrichmentService:
                     f"| {ticker} | {holding.name} | {holding.weight_pct:.2f}% | {sector} |"
                 )
 
+        if etf.strongest_holdings:
+            lines.append("### Strongest holdings (Piotroski + Altman Z)")
+            for holding in etf.strongest_holdings[:5]:
+                ticker = holding.ticker or "—"
+                piotroski = holding.piotroski_f if holding.piotroski_f is not None else "—"
+                altman = (
+                    f"{holding.altman_z:.2f}"
+                    if holding.altman_z is not None
+                    else "—"
+                )
+                lines.append(
+                    f"- {ticker}: weight {holding.weight_pct:.2f}%, "
+                    f"Piotroski {piotroski}/9, Altman Z {altman}"
+                )
+
+        if etf.weakest_holdings:
+            lines.append("### Weakest holdings (Piotroski + Altman Z)")
+            for holding in etf.weakest_holdings[:5]:
+                ticker = holding.ticker or "—"
+                piotroski = holding.piotroski_f if holding.piotroski_f is not None else "—"
+                altman = (
+                    f"{holding.altman_z:.2f}"
+                    if holding.altman_z is not None
+                    else "—"
+                )
+                lines.append(
+                    f"- {ticker}: weight {holding.weight_pct:.2f}%, "
+                    f"Piotroski {piotroski}/9, Altman Z {altman}"
+                )
+
         return "\n".join(lines)
 
     def format_research_context_block(

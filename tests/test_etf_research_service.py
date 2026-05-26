@@ -33,6 +33,8 @@ SPY_PAYLOAD = {
                 "weight_pct": 8.3483,
                 "sector": "Technology",
                 "market_cap": 5_215_507_972_096,
+                "piotroski_f": 4,
+                "altman_z": 60.4029,
             },
             {
                 "ticker": "AAPL",
@@ -40,6 +42,17 @@ SPY_PAYLOAD = {
                 "weight_pct": 7.0078,
                 "sector": "Technology",
                 "market_cap": 4_535_749_181_440,
+                "piotroski_f": 8,
+                "altman_z": 10.3117,
+            },
+            {
+                "ticker": "C",
+                "name": "CITIGROUP INC",
+                "weight_pct": 0.3424,
+                "sector": "Financial Services",
+                "market_cap": 213_350_612_992,
+                "piotroski_f": 2,
+                "altman_z": 0.1988,
             },
         ],
     },
@@ -70,6 +83,11 @@ def test_etf_research_service_maps_holdings_payload():
     assert context.holdings[0].ticker == "NVDA"
     assert context.holdings[0].weight_pct == pytest.approx(8.3483)
     assert context.holdings[0].market_cap == "$5.2T"
+    assert context.holdings[0].piotroski_f == 4
+    assert context.holdings[0].altman_z == pytest.approx(60.4029)
+    assert context.holdings[0].quality_score is not None
+    assert context.strongest_holdings[0].ticker == "AAPL"
+    assert context.weakest_holdings[0].ticker == "C"
     assert context.dividend_yield == "1.25%"
     assert context.expense_ratio == "0.09%"
     assert context.data_as_of == "2026-05-24T23:59:59.000Z"
