@@ -576,10 +576,12 @@ class PortfolioAnalysisService:
             if symbol in market_snapshots and market_snapshots[symbol].last is not None
             else None
         )
-        precomputed = SymbolAnalysisPrecomputedService.build(
+        precomputed = self.build_symbol_analysis_precomputed(
+            user_id=user_id,
             symbol=symbol,
             account=account,
             positions=positions,
+            access_token=access_token,
             intelligence=symbol_intelligence,
             option_chain=option_chains,
             underlying_price=underlying_price,
@@ -1128,6 +1130,65 @@ class PortfolioAnalysisService:
             option_chain_block = None
 
         return holdings_block, intelligence_block, option_chain_block
+
+    def build_symbol_analysis_precomputed(
+        self,
+        *,
+        user_id: str,
+        symbol: str,
+        account: SchwabAccounts,
+        positions: list[Position],
+        access_token: str,
+        intelligence: SymbolIntelligence | None = None,
+        option_chain: OptionChain | None = None,
+        underlying_price: float | None = None,
+        strike_count: int = SYMBOL_ANALYZE_OPTION_STRIKE_COUNT,
+    ):
+        from app.models.symbol_analysis_precomputed_models import (
+            SymbolAnalysisPrecomputed,
+        )
+
+        symbol_upper = symbol.strip().upper()
+        symbol_positions = self._positions_for_symbol(positions, symbol_upper)
+
+        if intelligence is None:
+            intelligence = self.build_symbol_intelligence(
+                user_id=user_id,
+                symbol=symbol_upper,
+                account=account,
+                positions=symbol_positions,
+                access_token=access_token,
+                include_options=True,
+            )
+
+        if option_chain is None:
+            option_chain = self._load_symbol_option_chain(
+                access_token=access_token,
+                symbol=symbol_upper,
+                positions=symbol_positions,
+                strike_count=strike_count,
+            )
+
+        if underlying_price is None:
+            try:
+                snapshots = self.market_service.get_enriched_quote_snapshot(
+                    access_token=access_token,
+                    symbols=[symbol_upper],
+                )
+                quote = snapshots.get(symbol_upper)
+                if quote is not None and quote.last is not None:
+                    underlying_price = quote.last
+            except Exception:
+                pass
+
+        return SymbolAnalysisPrecomputedService.build(
+            symbol=symbol_upper,
+            account=account,
+            positions=positions,
+            intelligence=intelligence,
+            option_chain=option_chain,
+            underlying_price=underlying_price,
+        )
 
     def _build_portfolio_intelligence_block(
         self,

@@ -59,7 +59,17 @@ class AnalyzePositionsBySymbolRequest(BaseModel):
         return AnalysisAction.parse(str(value))
 
 
-@router.post("/analyze-positions-by-symbol")
+@router.post(
+    "/analyze-positions-by-symbol",
+    summary="Analyze portfolio or symbol positions",
+    description=(
+        "Streams analysis text. When request.response_format is portfolio_analysis_v1 "
+        "and there is no user-typed prompt, the stream body is JSON for "
+        "SymbolAnalysisV1Envelope: { analysis, precomputed }. Parse analysis for LLM "
+        "narrative; render precomputed.heldOptionOutcomes for Compare paths UI. "
+        "Response header X-Analysis-Envelope: symbol_analysis_v1 when JSON envelope is used."
+    ),
+)
 async def analyze_positions_by_symbol(
     request: AnalyzePositionsBySymbolRequest,
     user_id: str = Depends(get_current_user_id),
@@ -194,11 +204,15 @@ async def analyze_positions_by_symbol(
                     content=assistant_content,
                 )
 
+    response_headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    }
+    if json_v1:
+        response_headers["X-Analysis-Envelope"] = "symbol_analysis_v1"
+
     return StreamingResponse(
         streamer(),
         media_type="text/plain; charset=utf-8",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers=response_headers,
     )

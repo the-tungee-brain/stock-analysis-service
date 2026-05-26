@@ -126,6 +126,9 @@ def test_symbol_analysis_precomputed_builds_roll_close_hold_paths():
     assert outcome.roll.open_leg.strike == 205.0
     assert outcome.roll.net_credit_per_contract == 115.0
     assert outcome.hold.in_the_money is False
+    assert len(outcome.compare_paths) >= 2
+    roll_card = next(c for c in outcome.compare_paths if c.path == "roll")
+    assert any("Net credit" in line for line in roll_card.lines)
 
 
 def test_symbol_analysis_v1_envelope_serializes_camel_case():

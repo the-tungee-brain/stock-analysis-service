@@ -96,6 +96,14 @@ class HeldOptionDecisionDrivers(BaseModel):
     action_trigger: str | None = Field(default=None, serialization_alias="actionTrigger")
 
 
+class ComparePathOption(BaseModel):
+    model_config = _PRECOMPUTED_MODEL_CONFIG
+
+    path: Literal["roll", "close", "hold"]
+    title: str
+    lines: list[str] = Field(default_factory=list)
+
+
 class HeldOptionOutcomes(BaseModel):
     model_config = _PRECOMPUTED_MODEL_CONFIG
 
@@ -104,6 +112,9 @@ class HeldOptionOutcomes(BaseModel):
     roll: RollPathOutcome | None = None
     close: ClosePathOutcome
     hold: HoldPathOutcome
+    compare_paths: list[ComparePathOption] = Field(
+        default_factory=list, serialization_alias="comparePaths"
+    )
 
 
 class SymbolAnalysisPrecomputed(BaseModel):

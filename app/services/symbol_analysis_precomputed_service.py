@@ -25,6 +25,7 @@ from app.models.schwab_models import Position, SchwabAccounts
 from app.models.schwab_option_chain_models import OptionChain
 from app.models.symbol_analysis_precomputed_models import (
     ClosePathOutcome,
+    ComparePathOption,
     HeldOptionDecisionDrivers,
     HeldOptionOutcomes,
     HoldPathOutcome,
@@ -266,7 +267,75 @@ class SymbolAnalysisPrecomputedService:
             roll=roll,
             close=close,
             hold=hold,
+            compare_paths=SymbolAnalysisPrecomputedService._build_compare_paths(
+                roll=roll,
+                close=close,
+                hold=hold,
+                side=side,
+            ),
         )
+
+    @staticmethod
+    def _build_compare_paths(
+        *,
+        roll: RollPathOutcome | None,
+        close: ClosePathOutcome,
+        hold: HoldPathOutcome,
+        side: str,
+    ) -> list[ComparePathOption]:
+        options: list[ComparePathOption] = []
+
+        if roll is not None:
+            roll_lines = [
+                f"Buy to close ${roll.close_leg.strike:g} {side} exp {roll.close_leg.expiration[:10]}",
+                f"Sell ${roll.open_leg.strike:g} {side} exp {roll.open_leg.expiration[:10]}",
+            ]
+            if roll.close_leg.cash_per_contract is not None:
+                roll_lines.append(
+                    f"Pay ~${roll.close_leg.cash_per_contract:,.0f} to close"
+                )
+            if roll.open_leg.cash_per_contract is not None:
+                roll_lines.append(
+                    f"Collect ~${roll.open_leg.cash_per_contract:,.0f} on new leg"
+                )
+            if roll.net_credit_per_contract is not None:
+                if roll.is_net_credit:
+                    roll_lines.append(
+                        f"Net credit ~${roll.net_credit_per_contract:,.0f} per contract"
+                    )
+                else:
+                    roll_lines.append(
+                        f"Net debit ~${abs(roll.net_credit_per_contract):,.0f} per contract"
+                    )
+            if roll.open_leg.delta is not None:
+                roll_lines.append(f"New leg delta {roll.open_leg.delta:.2f}")
+            options.append(
+                ComparePathOption(path="roll", title="Roll", lines=roll_lines)
+            )
+
+        close_lines: list[str] = []
+        if close.cost_per_contract is not None:
+            close_lines.append(f"Pay ~${close.cost_per_contract:,.0f} to buy to close")
+        if close.open_pnl is not None:
+            close_lines.append(f"Locks in open P/L ${close.open_pnl:,.0f}")
+        if close_lines:
+            options.append(
+                ComparePathOption(path="close", title="Close now", lines=close_lines)
+            )
+
+        hold_lines: list[str] = []
+        if hold.days_to_expiration is not None:
+            hold_lines.append(f"{hold.days_to_expiration} DTE remaining")
+        if hold.delta is not None:
+            hold_lines.append(f"Delta {hold.delta:.2f}")
+        if hold.assignment_note:
+            hold_lines.append(hold.assignment_note)
+        if hold_lines:
+            options.append(
+                ComparePathOption(path="hold", title="Hold to expiration", lines=hold_lines)
+            )
+
+        return options
 
     @staticmethod
     def _action_trigger(
