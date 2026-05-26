@@ -9,6 +9,7 @@ from app.models.analysis_models import (
 from app.models.intelligence_models import (
     OptionRollSuggestion,
     OptionsScorecard,
+    OptionsStrikeCandidate,
     SymbolIntelligence,
 )
 from app.models.schwab_models import Instrument, Position
@@ -133,6 +134,108 @@ def test_symbol_analysis_precomputed_builds_roll_close_hold_paths():
     assert len(outcome.compare_paths) >= 2
     roll_card = next(c for c in outcome.compare_paths if c.path == "roll")
     assert any("Net credit" in line for line in roll_card.lines)
+
+
+def test_match_roll_suggestion_falls_back_when_expiration_differs():
+    near_exp = (date.today() + timedelta(days=3)).isoformat()
+    wrong_exp = (date.today() + timedelta(days=5)).isoformat()
+    roll_exp = (date.today() + timedelta(days=10)).isoformat()
+    suggestion = OptionRollSuggestion(
+        side="put",
+        current_strike=212.5,
+        current_expiration=wrong_exp,
+        suggested_strike=205.0,
+        suggested_expiration=roll_exp,
+        current_delta=-0.44,
+        suggested_delta=-0.28,
+        estimated_credit=1.15,
+        rationale="roll",
+    )
+
+    matched = SymbolAnalysisPrecomputedService._match_roll_suggestion(
+        [suggestion],
+        strike=212.5,
+        expiration_iso=near_exp,
+        side="put",
+    )
+
+    assert matched is suggestion
+
+
+def test_precomputed_synthesizes_roll_suggestions_from_scorecard():
+    near_exp = (date.today() + timedelta(days=3)).isoformat()
+    roll_exp = (date.today() + timedelta(days=10)).isoformat()
+    chain = OptionChain(
+        symbol="NVDA",
+        underlyingPrice=220.0,
+        putExpDateMap={
+            f"{near_exp}:3": {
+                "212.5": [
+                    OptionContract(
+                        putCall="PUT",
+                        symbol="NVDA",
+                        strikePrice=212.5,
+                        expirationDate=near_exp,
+                        daysToExpiration=3,
+                        delta=-0.44,
+                        openInterest=800,
+                        bid=1.2,
+                        ask=1.35,
+                    )
+                ]
+            },
+            f"{roll_exp}:10": {
+                "205.0": [
+                    OptionContract(
+                        putCall="PUT",
+                        symbol="NVDA",
+                        strikePrice=205.0,
+                        expirationDate=roll_exp,
+                        daysToExpiration=10,
+                        delta=-0.28,
+                        openInterest=1200,
+                        bid=2.5,
+                        ask=2.7,
+                    )
+                ]
+            },
+        },
+    )
+    intelligence = SymbolIntelligence(
+        symbol="NVDA",
+        roll_suggestions=[],
+        options_scorecard=OptionsScorecard(
+            underlying_price=220.0,
+            csp_candidates=[
+                OptionsStrikeCandidate(
+                    side="put",
+                    strike=205.0,
+                    expiration=roll_exp,
+                    delta=-0.28,
+                    open_interest=1200,
+                    bid=2.5,
+                    ask=2.7,
+                    score=0.8,
+                    rationale="Lower delta roll target",
+                )
+            ],
+        ),
+    )
+
+    precomputed = SymbolAnalysisPrecomputedService.build(
+        symbol="NVDA",
+        account=_make_account(liquidation_value=100_000),
+        positions=[_short_nvda_put_position()],
+        intelligence=intelligence,
+        option_chain=chain,
+        underlying_price=220.0,
+    )
+
+    assert precomputed is not None
+    assert len(precomputed.roll_suggestions) == 1
+    outcome = precomputed.held_option_outcomes[0]
+    assert outcome.roll is not None
+    assert any(c.path == "roll" for c in outcome.compare_paths)
 
 
 def test_symbol_analysis_v1_envelope_serializes_camel_case():

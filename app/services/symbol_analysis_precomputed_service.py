@@ -78,6 +78,23 @@ class SymbolAnalysisPrecomputedService:
         roll_suggestions = (
             list(intelligence.roll_suggestions) if intelligence is not None else []
         )
+        if (
+            not roll_suggestions
+            and intelligence is not None
+            and option_chain is not None
+            and intelligence.options_scorecard is not None
+            and held_short_options
+        ):
+            from app.services.intelligence.option_roll_planner_service import (
+                OptionRollPlannerService,
+            )
+
+            roll_suggestions = OptionRollPlannerService.build_roll_suggestions(
+                positions=held_short_options,
+                symbol=symbol_upper,
+                option_chain=option_chain,
+                scorecard=intelligence.options_scorecard,
+            )
         held_outcomes: list[HeldOptionOutcomes] = []
 
         for position in held_short_options:
@@ -558,12 +575,32 @@ class SymbolAnalysisPrecomputedService:
         side: str,
     ) -> OptionRollSuggestion | None:
         exp = expiration_iso[:10]
+
+        def strike_matches(suggestion: OptionRollSuggestion) -> bool:
+            return abs(suggestion.current_strike - strike) < 0.01
+
+        def expiration_matches(suggestion: OptionRollSuggestion) -> bool:
+            return suggestion.current_expiration[:10] == exp
+
         for suggestion in roll_suggestions:
             if suggestion.side != side:
                 continue
-            if abs(suggestion.current_strike - strike) >= 0.01:
+            if not strike_matches(suggestion):
                 continue
-            if suggestion.current_expiration[:10] != exp:
+            if expiration_matches(suggestion):
+                return suggestion
+
+        for suggestion in roll_suggestions:
+            if suggestion.side != side:
                 continue
-            return suggestion
+            if strike_matches(suggestion):
+                return suggestion
+
+        side_matches = [s for s in roll_suggestions if s.side == side]
+        if len(side_matches) == 1:
+            return side_matches[0]
+
+        if len(roll_suggestions) == 1:
+            return roll_suggestions[0]
+
         return None

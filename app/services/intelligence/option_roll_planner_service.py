@@ -5,6 +5,7 @@ from app.broker.option_greeks import sanitize_delta
 from app.broker.option_utils import (
     parse_put_call_from_option_symbol,
     position_expiration_date,
+    position_strike_price,
 )
 from app.models.intelligence_models import (
     OptionRollSuggestion,
@@ -42,24 +43,22 @@ class OptionRollPlannerService:
             if underlying != symbol_upper:
                 continue
 
-            strike = instrument.strikePrice
-            expiration = instrument.expirationDate
+            strike = position_strike_price(position) or instrument.strikePrice
+            expiration_date = position_expiration_date(position)
             put_call = instrument.putCall or parse_put_call_from_option_symbol(
                 instrument.symbol or ""
             )
-            if strike is None or not expiration or not put_call:
+            if strike is None or expiration_date is None or not put_call:
                 continue
 
             side = "call" if put_call == "CALL" else "put"
-            expiration_date = position_expiration_date(position)
-            current_contract = None
-            if expiration_date is not None:
-                current_contract = lookup_option_contract(
-                    option_chain,
-                    expiration=expiration_date,
-                    strike=strike,
-                    put_call=put_call,
-                )
+            expiration = expiration_date.isoformat()
+            current_contract = lookup_option_contract(
+                option_chain,
+                expiration=expiration_date,
+                strike=strike,
+                put_call=put_call,
+            )
 
             candidates = (
                 scorecard.covered_call_candidates
