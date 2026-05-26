@@ -80,6 +80,7 @@ def test_build_analysis_context_loads_market_data_when_requested():
     )
     service._build_research_bundle = MagicMock(return_value=("research", "intel", False, None))
     service._build_recent_transactions_block = MagicMock(return_value=None)
+    service.build_symbol_analysis_precomputed = MagicMock(return_value=None)
     service.portfolio_intelligence_service.enriched_news_service.ensure_enriched = (
         AsyncMock(return_value=None)
     )

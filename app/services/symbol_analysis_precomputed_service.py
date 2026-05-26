@@ -58,6 +58,11 @@ class SymbolAnalysisPrecomputedService:
         if not held_short_options and intelligence is None:
             return None
 
+        if intelligence is not None and not isinstance(intelligence, SymbolIntelligence):
+            intelligence = None
+            if not held_short_options:
+                return None
+
         if underlying_price is None and intelligence and intelligence.options_scorecard:
             underlying_price = intelligence.options_scorecard.underlying_price
         if underlying_price is None and option_chain is not None:
