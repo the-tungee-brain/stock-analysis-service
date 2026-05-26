@@ -49,6 +49,10 @@ async def get_business_details(
         return StreamingResponse(
             streamer(),
             media_type="text/plain; charset=utf-8",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     prompts = prompt_enrichment_service.build_business_details_prompt(ctx=ctx)

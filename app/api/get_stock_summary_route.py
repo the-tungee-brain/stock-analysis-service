@@ -48,6 +48,10 @@ async def get_stock_summary(
         return StreamingResponse(
             streamer(),
             media_type="text/plain; charset=utf-8",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     prompts = prompt_enrichment_service.build_stock_summary_prompt(ctx=ctx)

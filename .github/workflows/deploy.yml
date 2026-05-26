@@ -87,7 +87,7 @@ jobs:
               --memory-swap=6g \
               --cpus=3.5 \
               -e GUNICORN_WORKERS=3 \
-              -e GUNICORN_TIMEOUT=120 \
+              -e GUNICORN_TIMEOUT=300 \
               -e RESEARCH_FETCH_WORKERS=6 \
               -e PEER_FETCH_WORKERS=3 \
               -e RESEARCH_CONTEXT_CACHE_TTL_SECONDS=3600 \
