@@ -209,6 +209,7 @@ def format_option_move_scenarios(
 
 def format_short_option_decision_outcomes(
     *,
+    symbol: str | None = None,
     put_call: str,
     side: str,
     strike: float,
@@ -257,17 +258,19 @@ def format_short_option_decision_outcomes(
         )
 
     if underlying is not None:
+        ticker = (symbol or "Stock").strip().upper()
+        stock = f"{ticker} at ${underlying:.2f}"
         if put_call.upper() == "PUT":
             itm = underlying < strike
             lines.append(
-                f"  Hold to expiration: spot ${underlying:.2f} vs ${strike:g} put — "
-                f"{'ITM (assignment to buy shares possible)' if itm else 'OTM (may expire worthless, keep premium if fully OTM)'}"
+                f"  Hold to expiration: {stock} vs your ${strike:g} put — "
+                f"{'below strike (assignment to buy 100 shares possible)' if itm else 'above strike (keep premium if still above strike at expiry; assignment if price falls below strike)'}"
             )
         else:
             itm = underlying > strike
             lines.append(
-                f"  Hold to expiration: spot ${underlying:.2f} vs ${strike:g} call — "
-                f"{'ITM (shares may be called away)' if itm else 'OTM (may expire worthless, keep premium if fully OTM)'}"
+                f"  Hold to expiration: {stock} vs your ${strike:g} call — "
+                f"{'above strike (shares may be called away)' if itm else 'below strike (keep premium if still below strike at expiry)'}"
             )
 
     if delta is not None:

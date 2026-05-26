@@ -45,7 +45,6 @@ from textwrap import dedent
 from app.core.prompts import (
     AnalysisAction,
     BaseAnalysisContext,
-    OPTIONS_EXECUTION_SPECIFICITY_RULES,
     build_symbol_prompt,
     build_portfolio_prompt,
     PortfolioContext,
@@ -89,6 +88,17 @@ RESEARCH_SYSTEM_PREAMBLE = dedent("""
     - If news headlines are empty, do not fabricate recent headlines.
     """).strip()
 
+RESEARCH_OPTIONS_RULES = dedent("""
+    # Options in research chat (educational framing)
+    - When OPTION DATA is provided, cite strikes, expirations, delta, and bid/ask from the feed.
+    - Use retail terms: sell covered call, sell cash-secured put, buy to close, roll the option.
+    - Price vs strike: say "[TICKER] at $[price]" — not "spot". Short put above strike → keep premium
+      if still above at expiry; below strike at expiry → assignment at the strike (wheel); effective
+      cost ≈ strike minus premium collected.
+    - Roll math when discussing rolls: pay to close (ask × 100), collect on new leg (bid × 100), net/contract.
+    - Unless the user is asking what to do with a held position, frame as education — not a live order.
+    """).strip()
+
 RESEARCH_CHAT_SYSTEM_MESSAGE = dedent(f"""
     {RESEARCH_SYSTEM_PREAMBLE}
 
@@ -102,14 +112,13 @@ RESEARCH_CHAT_SYSTEM_MESSAGE = dedent(f"""
     - Use "you" naturally. Short paragraphs are easier to read than long walls of text.
     - Explain jargon briefly when needed (e.g., "free cash flow = cash left after running the business").
     - If the user asks whether to buy or sell, explain bull case, bear case, and key risks —
-      do NOT give a personalized trading order.
+      do NOT give a personalized trading order unless they ask about a specific held position.
     - When OPTION DATA or PRECOMPUTED INTELLIGENCE includes options scorecards, roll suggestions,
-      held contracts, or chain tables, discuss strategies with specific strikes, expirations,
-      delta, and bid/ask from that data — frame as educational examples, not orders to execute.
+      held contracts, or chain tables, use specific numbers from that data.
     - If data is missing, say so and answer with what you do know.
     - In follow-up messages, stay concise and build on prior context without repeating the full intro.
 
-    {OPTIONS_EXECUTION_SPECIFICITY_RULES}
+    {RESEARCH_OPTIONS_RULES}
     """).strip()
 
 

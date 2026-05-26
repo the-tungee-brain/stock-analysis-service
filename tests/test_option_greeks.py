@@ -101,6 +101,7 @@ def test_format_held_option_contracts_includes_scenarios():
 
 def test_format_short_option_decision_outcomes_includes_close_and_roll_math():
     block = format_short_option_decision_outcomes(
+        symbol="NVDA",
         put_call="PUT",
         side="short",
         strike=212.5,
@@ -120,6 +121,7 @@ def test_format_short_option_decision_outcomes_includes_close_and_roll_math():
     assert "Delta -0.44" in block
     assert "open P/L" in block
     assert "Original premium collected" in block
+    assert "NVDA at $220.00" in block
 
 
 def test_estimate_delta_black_scholes_atm_call():

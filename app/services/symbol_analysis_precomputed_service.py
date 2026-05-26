@@ -210,20 +210,24 @@ class SymbolAnalysisPrecomputedService:
             if put_call == "PUT":
                 itm = underlying_price < strike
                 assignment_note = (
-                    f"Spot ${underlying_price:.2f} below ${strike:g} strike — "
-                    "assignment to buy shares is possible if still ITM at expiration."
-                    if itm
-                    else f"Spot ${underlying_price:.2f} above ${strike:g} strike — "
-                    "may expire worthless if OTM at expiration."
+                    SymbolAnalysisPrecomputedService._short_put_hold_note(
+                        symbol=symbol,
+                        underlying_price=underlying_price,
+                        strike=strike,
+                        itm=itm,
+                        entry_per_share=entry_per_share,
+                    )
                 )
             else:
                 itm = underlying_price > strike
                 assignment_note = (
-                    f"Spot ${underlying_price:.2f} above ${strike:g} strike — "
-                    "shares may be called away if still ITM at expiration."
-                    if itm
-                    else f"Spot ${underlying_price:.2f} below ${strike:g} strike — "
-                    "may expire worthless if OTM at expiration."
+                    SymbolAnalysisPrecomputedService._short_call_hold_note(
+                        symbol=symbol,
+                        underlying_price=underlying_price,
+                        strike=strike,
+                        itm=itm,
+                        entry_per_share=entry_per_share,
+                    )
                 )
 
         hold = HoldPathOutcome(
@@ -278,6 +282,91 @@ class SymbolAnalysisPrecomputedService:
                 hold=hold,
                 side=side,
             ),
+        )
+
+    @staticmethod
+    def _stock_at_price(symbol: str, price: float) -> str:
+        return f"{symbol.strip().upper()} at ${price:.2f}"
+
+    @staticmethod
+    def _effective_assignment_basis_note(
+        strike: float, entry_per_share: float | None
+    ) -> str:
+        if entry_per_share is None or entry_per_share <= 0:
+            return ""
+        effective = strike - entry_per_share
+        return (
+            f"; effective cost ~${effective:.2f}/share if assigned "
+            f"(${strike:g} strike minus ${entry_per_share:.2f} premium collected)"
+        )
+
+    @staticmethod
+    def _short_put_hold_note(
+        *,
+        symbol: str,
+        underlying_price: float,
+        strike: float,
+        itm: bool,
+        entry_per_share: float | None,
+    ) -> str:
+        ticker = symbol.strip().upper()
+        stock = SymbolAnalysisPrecomputedService._stock_at_price(
+            ticker, underlying_price
+        )
+        basis = SymbolAnalysisPrecomputedService._effective_assignment_basis_note(
+            strike, entry_per_share
+        )
+        premium_kept = ""
+        if entry_per_share is not None and entry_per_share > 0:
+            premium_kept = (
+                f" (~${entry_per_share * OPTION_CONTRACT_MULTIPLIER:,.0f}/contract)"
+            )
+
+        if itm:
+            return (
+                f"{stock} is below your ${strike:g} put strike — "
+                f"assignment to buy 100 {ticker} shares at ${strike:g} is likely if "
+                f"still below the strike at expiration (cash-secured put wheel){basis}."
+            )
+
+        return (
+            f"{stock} is above your ${strike:g} put strike — "
+            f"if {ticker} is still above ${strike:g} at expiration, keep full premium "
+            f"collected{premium_kept}; if {ticker} falls below ${strike:g} by expiry, "
+            f"assignment buys 100 shares at ${strike:g}{basis}."
+        )
+
+    @staticmethod
+    def _short_call_hold_note(
+        *,
+        symbol: str,
+        underlying_price: float,
+        strike: float,
+        itm: bool,
+        entry_per_share: float | None,
+    ) -> str:
+        ticker = symbol.strip().upper()
+        stock = SymbolAnalysisPrecomputedService._stock_at_price(
+            ticker, underlying_price
+        )
+        premium_kept = ""
+        if entry_per_share is not None and entry_per_share > 0:
+            premium_kept = (
+                f" (~${entry_per_share * OPTION_CONTRACT_MULTIPLIER:,.0f}/contract)"
+            )
+
+        if itm:
+            return (
+                f"{stock} is above your ${strike:g} call strike — "
+                f"100 {ticker} shares may be called away at ${strike:g} if still above "
+                "the strike at expiration."
+            )
+
+        return (
+            f"{stock} is below your ${strike:g} call strike — "
+            f"if {ticker} is still below ${strike:g} at expiration, keep full premium "
+            f"collected{premium_kept}; if {ticker} rises above ${strike:g} by expiry, "
+            "shares may be called away."
         )
 
     @staticmethod

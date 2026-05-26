@@ -474,6 +474,7 @@ def format_held_option_contracts_markdown(
         )
         if side == "short":
             scenario_block = format_short_option_decision_outcomes(
+                symbol=symbol_upper,
                 put_call=put_call,
                 side=side,
                 strike=strike,
