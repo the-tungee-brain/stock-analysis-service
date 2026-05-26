@@ -117,6 +117,18 @@ class CompanyProfileService:
         change_pct = self._compute_change_pct(current=price, prev_close=prev_close)
         website = info.get("website") or f"https://finance.yahoo.com/quote/{symbol}"
         logo = self._normalize_logo_url(symbol, info.get("logo_url"))
+        is_etf = self._is_etf_info(info)
+
+        if is_etf:
+            sector = self._etf_sector_label(info)
+            country = self._etf_country_label(info)
+            market_cap = self._format_market_cap_absolute(
+                info.get("totalAssets") or info.get("marketCap")
+            )
+        else:
+            sector = info.get("sector") or info.get("industry") or "Unknown"
+            country = info.get("country") or "Unknown"
+            market_cap = self._format_market_cap_absolute(info.get("marketCap"))
 
         return ResearchSnapshot(
             symbol=symbol,
@@ -125,15 +137,57 @@ class CompanyProfileService:
                 or info.get("shortName")
                 or symbol
             ),
-            sector=info.get("sector") or info.get("industry") or "Unknown",
-            country=info.get("country") or "Unknown",
+            sector=sector,
+            country=country,
             price=price,
             changePct=change_pct,
-            marketCap=self._format_market_cap_absolute(info.get("marketCap")),
+            marketCap=market_cap,
             range52w=self._format_52w_range(symbol),
             weburl=website,
             logo=logo,
         )
+
+    @staticmethod
+    def _is_etf_info(info: dict) -> bool:
+        quote_type = str(info.get("quoteType") or "").upper()
+        if quote_type == "ETF":
+            return True
+        legal_type = str(info.get("legalType") or "").lower()
+        return "exchange traded fund" in legal_type
+
+    @staticmethod
+    def _etf_sector_label(info: dict) -> str:
+        for key in ("category", "fundFamily", "industry", "sector"):
+            value = info.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return "Exchange-traded fund"
+
+    @staticmethod
+    def _etf_country_label(info: dict) -> str:
+        country = info.get("country")
+        if isinstance(country, str) and country.strip():
+            return country.strip()
+
+        exchange = str(info.get("exchange") or info.get("fullExchangeName") or "").upper()
+        us_exchanges = {
+            "NYQ",
+            "NMS",
+            "NGM",
+            "NCM",
+            "ASE",
+            "PCX",
+            "BTS",
+            "SNP",
+            "NYQ",
+            "NASDAQ",
+            "NYSE",
+            "ARCA",
+        }
+        if exchange in us_exchanges or "NEW YORK" in exchange or "NASDAQ" in exchange:
+            return "United States"
+
+        return "United States"
 
     @staticmethod
     def _price_from_yfinance(info: dict, history) -> float | None:

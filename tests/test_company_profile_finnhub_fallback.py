@@ -123,3 +123,44 @@ def test_get_peers_returns_empty_when_all_sources_fail():
         yfinance_adapter=yfinance_adapter,
     )
     assert service.get_peers("AAPL") == []
+
+
+def test_get_snapshot_uses_etf_labels_from_yfinance():
+    finnhub_builder = MagicMock()
+    service = CompanyProfileService(finnhub_builder=finnhub_builder)
+
+    mock_history = MagicMock()
+    mock_history.empty = False
+    mock_history.__len__ = lambda self: 2
+    mock_history.__getitem__ = lambda self, key: {
+        "Close": MagicMock(
+            iloc=MagicMock(
+                __getitem__=lambda _, index: 500.0 if index == -1 else 495.0
+            )
+        )
+    }[key]
+
+    mock_ticker = MagicMock()
+    mock_ticker.info = {
+        "longName": "SPDR S&P 500 ETF Trust",
+        "quoteType": "ETF",
+        "category": "Large Blend",
+        "fundFamily": "SPDR",
+        "totalAssets": 640_000_000_000,
+        "exchange": "NYQ",
+        "website": "https://www.ssga.com",
+    }
+    mock_ticker.history.return_value = mock_history
+
+    with patch("app.services.company_profile_service.yf.Ticker", return_value=mock_ticker):
+        with patch.object(
+            service,
+            "get_52w_range_yf",
+            return_value=(400.0, 520.0),
+        ):
+            snapshot = service.get_snapshot("SPY")
+
+    assert snapshot.symbol == "SPY"
+    assert snapshot.sector == "Large Blend"
+    assert snapshot.country == "United States"
+    assert snapshot.marketCap == "640.0B"
