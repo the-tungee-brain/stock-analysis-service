@@ -495,10 +495,6 @@ class SymbolAnalysisPrecomputedService:
         return "; ".join(triggers)
 
     @staticmethod
-    def _format_cash_amount(amount: float) -> str:
-        return f"${abs(amount):,.0f}"
-
-    @staticmethod
     def _build_roll_cash_picture(
         *,
         entry_premium_per_contract: float | None,
@@ -543,13 +539,6 @@ class SymbolAnalysisPrecomputedService:
         ):
             return None
 
-        summary = SymbolAnalysisPrecomputedService._roll_cash_summary(
-            net_cash_after_roll=net_cash_after_roll,
-            loss_on_closed_put=loss_on_closed_put,
-            roll_net=roll_net,
-            open_collect_per_contract=open_collect_per_contract,
-        )
-
         return RollCashPicture(
             entry_premium_per_contract=entry_premium_per_contract,
             close_cost_per_contract=close_cost_per_contract,
@@ -557,59 +546,8 @@ class SymbolAnalysisPrecomputedService:
             roll_net_per_contract=roll_net,
             net_cash_after_roll_per_contract=net_cash_after_roll,
             loss_on_closed_put_per_contract=loss_on_closed_put,
-            summary=summary,
+            summary=None,
         )
-
-    @staticmethod
-    def _roll_cash_summary(
-        *,
-        net_cash_after_roll: float | None,
-        loss_on_closed_put: float | None,
-        roll_net: float | None,
-        open_collect_per_contract: float | None,
-    ) -> str | None:
-        if net_cash_after_roll is None and roll_net is None:
-            return None
-
-        parts: list[str] = []
-        fmt = SymbolAnalysisPrecomputedService._format_cash_amount
-
-        if net_cash_after_roll is not None:
-            if net_cash_after_roll >= 0:
-                parts.append(
-                    f"You keep {fmt(net_cash_after_roll)} more cash in your account "
-                    "than before you sold the first put."
-                )
-            else:
-                parts.append(
-                    f"You are {fmt(net_cash_after_roll)} net behind vs before you "
-                    "sold the first put."
-                )
-
-        if loss_on_closed_put is not None and loss_on_closed_put < 0:
-            parts.append(
-                f"Closing the old put realizes a {fmt(loss_on_closed_put)} loss on "
-                "that leg."
-            )
-
-        if roll_net is not None:
-            if roll_net < 0:
-                parts.append(
-                    f"The roll itself is a {fmt(roll_net)} debit today — you pay "
-                    "more to close than you collect on the new put."
-                )
-            elif roll_net > 0:
-                parts.append(
-                    f"The roll itself brings in a {fmt(roll_net)} credit today."
-                )
-
-        if open_collect_per_contract is not None and open_collect_per_contract > 0:
-            parts.append(
-                f"You still hold the new short put; you keep its "
-                f"{fmt(open_collect_per_contract)} premium if it expires out of the money."
-            )
-
-        return " ".join(parts) if parts else None
 
     @staticmethod
     def _resolve_roll_cash_picture(

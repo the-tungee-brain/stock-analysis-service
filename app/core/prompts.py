@@ -18,6 +18,7 @@ from app.broker.option_utils import (
     days_to_expiration,
     total_csp_reserved_cash,
 )
+from app.broker.option_chain_table import OPTION_CHAIN_BID_ASK_LEGEND
 from app.broker.position_metrics import (
     portfolio_liquidation_value as _portfolio_liquidation_value,
     position_cost_basis as _position_cost_basis,
@@ -738,22 +739,28 @@ OPTIONS_STRATEGY_RULES = dedent("""
     - Fewer than 100 shares and no qualifying call for a poor man's covered call.
     """).strip()
 
-OPTIONS_EXECUTION_SPECIFICITY_RULES = dedent("""
+OPTIONS_EXECUTION_SPECIFICITY_RULES = dedent(f"""
     # Options execution (CRITICAL when recommending rolls, covered calls, or CSPs)
     Never say only "roll the option" or "roll before expiration" without naming both legs,
     the greeks/quotes that drive the decision, and approximate $ outcomes.
 
+    ## Schwab option chain bid/ask (authoritative mapping)
+    {OPTION_CHAIN_BID_ASK_LEGEND}
+    - Use **ask** (×100) for buy-to-close on a short leg and for quoting cost to exit.
+    - Use **bid** (×100) for sell-to-open on a new short leg and for CSP/covered-call premium.
+    - Do not treat bid as the price to close a short or ask as premium collected on a new sale.
+
     ## Cite when data exists
     1. **Portfolio context** — WEIGHT_% and PNL_% (e.g. "0.3% of portfolio but -36.6% on the leg").
     2. **Greeks & time** — delta, DTE from HELD OPTION CONTRACTS or OPTION CHAIN.
-    3. **Quotes** — bid/ask/mark; close leg ask, new leg bid for rolls.
+    3. **Quotes** — bid/ask/mark with the mapping above; close leg ask, new short leg bid for rolls.
     4. **Thesis** — intact / weakened / broken.
     5. **Trigger** — why now (loss below -30%, |delta| high, <= 3 DTE, near expiry ITM).
 
     ## Compare roll vs close vs hold
     Use PRECOMPUTED OUTCOMES when present — copy $ figures verbatim.
     - **Roll:** pay ~$X to close (ask × 100); collect ~$Y on new leg (bid × 100); net ~$Z/contract.
-    - **Close:** pay ~$X to buy to close; locks in open P/L ~$Y.
+    - **Close:** pay ~$X to buy to close (ask × 100); locks in open P/L ~$Y.
     - **Hold short put (CSP):** [TICKER] stock price vs put strike — not "spot". Above strike: keep
       premium if still above at expiry; if price falls below strike by expiry: assignment buys 100 shares
       at the strike; effective cost ≈ strike minus premium collected (wheel goal).

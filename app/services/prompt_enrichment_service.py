@@ -1,8 +1,9 @@
 from app.broker.option_chain_table import (
+    DEFAULT_OPTION_CHAIN_STRIKE_COUNT,
+    OPTION_CHAIN_BID_ASK_LEGEND,
     OptionChainTable,
     build_option_chain_table,
     build_option_chain_tables_for_positions,
-    DEFAULT_OPTION_CHAIN_STRIKE_COUNT,
     format_held_option_contracts_markdown,
 )
 from app.broker.sector_labels import normalize_sector_label
@@ -88,14 +89,15 @@ RESEARCH_SYSTEM_PREAMBLE = dedent("""
     - If news headlines are empty, do not fabricate recent headlines.
     """).strip()
 
-RESEARCH_OPTIONS_RULES = dedent("""
+RESEARCH_OPTIONS_RULES = dedent(f"""
     # Options in research chat (educational framing)
     - When OPTION DATA is provided, cite strikes, expirations, delta, and bid/ask from the feed.
+    - {OPTION_CHAIN_BID_ASK_LEGEND}
     - Use retail terms: sell covered call, sell cash-secured put, buy to close, roll the option.
     - Price vs strike: say "[TICKER] at $[price]" — not "spot". Short put above strike → keep premium
       if still above at expiry; below strike at expiry → assignment at the strike (wheel); effective
       cost ≈ strike minus premium collected.
-    - Roll math when discussing rolls: pay to close (ask × 100), collect on new leg (bid × 100), net/contract.
+    - Roll math: pay to close at ask × 100, collect on new short leg at bid × 100, net per contract.
     - Unless the user is asking what to do with a held position, frame as education — not a live order.
     """).strip()
 
@@ -896,7 +898,7 @@ class PromptEnrichmentService:
             f"Underlying: {symbol} @ {underlying}\n"
             f"Expiration: {expiration} ({dte})\n"
             f"Quotes as of: {quote_as_of}\n"
-            "Units: all option prices are per share (×100 per contract). "
+            f"{OPTION_CHAIN_BID_ASK_LEGEND}\n"
             "Mark = Schwab mark when available, else bid/ask mid, else model value. "
             "Last = last trade, else prior close when live quote is unavailable. "
             "Theta is daily decay per share. IV is annualized %.\n"

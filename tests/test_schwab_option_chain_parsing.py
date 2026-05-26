@@ -79,7 +79,8 @@ def test_option_chain_markdown_uses_nearest_expiration_and_greeks():
 
     assert "Underlying: AAPL @ $200.12" in markdown
     assert "Expiration: 2026-06-20 (30 DTE)" in markdown
-    assert "per share" in markdown
+    assert "sell cash-secured put" in markdown
+    assert "sell covered call" in markdown
     assert "Call Mark" in markdown
     assert "200.00" in markdown
     assert "0.48" in markdown

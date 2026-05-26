@@ -20,6 +20,15 @@ from app.models.schwab_option_chain_models import OptionChain, OptionContract
 
 DEFAULT_OPTION_CHAIN_STRIKE_COUNT = 10
 
+OPTION_CHAIN_BID_ASK_LEGEND = (
+    "Schwab option chain bid/ask (per share; ×100 per contract): "
+    "put bid = sell cash-secured put (premium collected); "
+    "put ask = buy a put (pay to open long or buy to close a short put); "
+    "call bid = sell covered call (premium collected); "
+    "call ask = buy a call (pay to open long or buy to close a short call). "
+    "Closing a short option uses ask; opening a new short uses bid."
+)
+
 
 def _valid_price(value: float | None) -> float | None:
     if value is None or value <= 0:
@@ -466,7 +475,8 @@ def format_held_option_contracts_markdown(
         lines.append(
             f"- {put_call} ${strike:g} exp {expiration.isoformat()} ({side} {qty:g}, {days_to_exp} DTE): "
             f"underlying {underlying_label} | bid/ask/mark "
-            f"{bid or '—'}/{ask or '—'}/{mark or '—'} | "
+            f"{bid or '—'}/{ask or '—'}/{mark or '—'} "
+            f"(bid=sell-to-open premium, ask=buy-to-close cost for shorts) | "
             f"delta {format_greek_value(greeks.delta, source=greeks.delta_source)} | "
             f"theta {format_greek_value(greeks.theta, source='broker', precision=3)} | "
             f"IV {format_greek_value(greeks.iv_percent, source=greeks.iv_source, suffix='%')} | "

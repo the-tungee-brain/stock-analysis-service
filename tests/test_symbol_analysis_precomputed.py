@@ -135,7 +135,6 @@ def test_symbol_analysis_precomputed_builds_roll_close_hold_paths():
     assert outcome.roll.cash_picture.loss_on_closed_put_per_contract == 65.0
     assert outcome.roll_cash_picture is not None
     assert outcome.roll_cash_picture.net_cash_after_roll_per_contract == 315.0
-    assert outcome.roll_cash_picture.summary is not None
     assert outcome.hold.in_the_money is False
     assert outcome.hold.assignment_note is not None
     assert "NVDA at $220.00" in outcome.hold.assignment_note
@@ -259,9 +258,6 @@ def test_build_roll_cash_picture_math():
     assert picture.roll_net_per_contract == -56.0
     assert picture.net_cash_after_roll_per_contract == 146.0
     assert picture.loss_on_closed_put_per_contract == -85.0
-    assert picture.summary is not None
-    assert "$146" in picture.summary
-    assert "$85" in picture.summary
 
 
 def test_symbol_analysis_v1_envelope_serializes_camel_case():
