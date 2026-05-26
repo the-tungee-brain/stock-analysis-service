@@ -126,6 +126,16 @@ def test_symbol_analysis_precomputed_builds_roll_close_hold_paths():
     assert outcome.roll is not None
     assert outcome.roll.open_leg.strike == 205.0
     assert outcome.roll.net_credit_per_contract == 115.0
+    assert outcome.roll.cash_picture is not None
+    assert outcome.roll.cash_picture.entry_premium_per_contract == 200.0
+    assert outcome.roll.cash_picture.close_cost_per_contract == 135.0
+    assert outcome.roll.cash_picture.open_collect_per_contract == 250.0
+    assert outcome.roll.cash_picture.roll_net_per_contract == 115.0
+    assert outcome.roll.cash_picture.net_cash_after_roll_per_contract == 315.0
+    assert outcome.roll.cash_picture.loss_on_closed_put_per_contract == 65.0
+    assert outcome.roll_cash_picture is not None
+    assert outcome.roll_cash_picture.net_cash_after_roll_per_contract == 315.0
+    assert outcome.roll_cash_picture.summary is not None
     assert outcome.hold.in_the_money is False
     assert outcome.hold.assignment_note is not None
     assert "NVDA at $220.00" in outcome.hold.assignment_note
@@ -236,6 +246,22 @@ def test_precomputed_synthesizes_roll_suggestions_from_scorecard():
     outcome = precomputed.held_option_outcomes[0]
     assert outcome.roll is not None
     assert any(c.path == "roll" for c in outcome.compare_paths)
+
+
+def test_build_roll_cash_picture_math():
+    picture = SymbolAnalysisPrecomputedService._build_roll_cash_picture(
+        entry_premium_per_contract=202.0,
+        close_cost_per_contract=287.0,
+        open_collect_per_contract=231.0,
+    )
+
+    assert picture is not None
+    assert picture.roll_net_per_contract == -56.0
+    assert picture.net_cash_after_roll_per_contract == 146.0
+    assert picture.loss_on_closed_put_per_contract == -85.0
+    assert picture.summary is not None
+    assert "$146" in picture.summary
+    assert "$85" in picture.summary
 
 
 def test_symbol_analysis_v1_envelope_serializes_camel_case():

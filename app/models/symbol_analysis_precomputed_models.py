@@ -37,6 +37,32 @@ class OptionLegOutcome(BaseModel):
     )
 
 
+class RollCashPicture(BaseModel):
+    """Roll cash ledger: original premium through close/open legs to net cash."""
+
+    model_config = _PRECOMPUTED_MODEL_CONFIG
+
+    entry_premium_per_contract: float | None = Field(
+        default=None, serialization_alias="entryPremiumPerContract"
+    )
+    close_cost_per_contract: float | None = Field(
+        default=None, serialization_alias="closeCostPerContract"
+    )
+    open_collect_per_contract: float | None = Field(
+        default=None, serialization_alias="openCollectPerContract"
+    )
+    roll_net_per_contract: float | None = Field(
+        default=None, serialization_alias="rollNetPerContract"
+    )
+    net_cash_after_roll_per_contract: float | None = Field(
+        default=None, serialization_alias="netCashAfterRollPerContract"
+    )
+    loss_on_closed_put_per_contract: float | None = Field(
+        default=None, serialization_alias="lossOnClosedPutPerContract"
+    )
+    summary: str | None = None
+
+
 class RollPathOutcome(BaseModel):
     model_config = _PRECOMPUTED_MODEL_CONFIG
 
@@ -49,6 +75,9 @@ class RollPathOutcome(BaseModel):
         default=None, serialization_alias="netCreditPerContract"
     )
     is_net_credit: bool = Field(default=True, serialization_alias="isNetCredit")
+    cash_picture: RollCashPicture | None = Field(
+        default=None, serialization_alias="cashPicture"
+    )
 
 
 class ClosePathOutcome(BaseModel):
@@ -110,6 +139,9 @@ class HeldOptionOutcomes(BaseModel):
     drivers: HeldOptionDecisionDrivers
     current_leg: OptionLegOutcome = Field(serialization_alias="currentLeg")
     roll: RollPathOutcome | None = None
+    roll_cash_picture: RollCashPicture | None = Field(
+        default=None, serialization_alias="rollCashPicture"
+    )
     close: ClosePathOutcome
     hold: HoldPathOutcome
     compare_paths: list[ComparePathOption] = Field(
