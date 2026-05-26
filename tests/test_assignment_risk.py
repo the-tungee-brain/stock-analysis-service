@@ -110,6 +110,20 @@ def test_build_action_prompt_for_assignment_risk():
     assert "cash-secured puts" in prompt.lower()
 
 
+def test_natural_assignment_risk_prompt_avoids_report_template():
+    prompt = _build_action_prompt(
+        AnalysisAction.ASSIGNMENT_RISK,
+        "the portfolio",
+        None,
+        natural_delivery=True,
+    )
+    assert "assignment" in prompt.lower()
+    assert "precomputed assignment risk scan" in prompt.lower()
+    assert "Cover these points" not in prompt
+    assert "1. **Expiring short options**" not in prompt
+    assert "open with what you'd do first" in prompt.lower()
+
+
 def test_build_symbol_prompt_includes_assignment_risk_block():
     account = _make_account()
     positions = [_make_position(symbol="AAPL")]

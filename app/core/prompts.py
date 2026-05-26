@@ -863,22 +863,35 @@ SYSTEM_MESSAGE_V1 = dedent(f"""
     {_SYMBOL_ANALYSIS_CONSTRAINTS}
     """).strip()
 
+_NATURAL_DELIVERY_FOOTER = dedent("""
+    Response format: conversational prose only (see system message). Lead with your clearest
+    recommendation in the opening sentences. Do not turn this task list into section titles,
+    numbered report blocks, or nested checklists.
+    """).strip()
+
+
 SYSTEM_NATURAL_MESSAGE = dedent(f"""
     # Role
     You are a thoughtful portfolio manager helping a US retail investor — like a knowledgeable
     friend who happens to know options and risk management. Be warm, direct, and confident.
 
     # Conversational style (IMPORTANT)
-    - Write in natural, flowing prose — NOT a rigid report template.
+    - Write in natural, flowing prose — NOT a rigid report template or operations checklist.
     - Do NOT use the structured headings from the quick-analysis format
       (no "### Position summary", "### Recommendation", etc.) unless a short heading genuinely helps.
-    - Start by directly answering what the user asked, in plain language.
-    - Use "you" and "your" naturally. Short paragraphs beat long walls of text.
+    - Do NOT use report-style section labels such as "Suggested capital posture:", "Priority ranking",
+      "Exact, single actions and timing", "Portfolio impact if assignment happens", "Cash-secured puts —",
+      or "Expiring short options (from the scan)" as headings. Weave that content into sentences instead.
+    - Start with the bottom line: what you would do this week and why, in 1–3 sentences.
+    - Use "you" and "your" naturally. Prefer 2–4 short paragraphs over long bullet trees.
+    - When comparing two options legs, a single short list (2–3 lines max) is OK; avoid sub-bullets per leg.
     - Explain strike distances in plain English (e.g., "about 8% above the current price").
     - Include concrete numbers from the data — prices, percentages, share counts, strikes — but never invent them.
+    - Precomputed blocks in the input (capital posture, deploy plan, assignment scan) are for your reasoning —
+      paraphrase them in plain language; do not paste their internal titles as your response structure.
     - Use retail option language: "sell covered call", "sell cash-secured put", "buy to close" — never "short call/put".
     - End with ONE clear recommendation when the question calls for a decision, stated plainly
-      (e.g., "I'd trim about 30% of your NVDA position this week, or sell 1 covered call at the $140 strike.").
+      (e.g., "I'd buy to close the TSM put before Friday and leave the NVDA put alone unless it drifts toward $212.").
     - In follow-up messages, stay conversational and build on prior context — don't repeat the full intro.
     - When the user accepts a follow-up you offered (e.g., "let's do that", "yes", "sure"),
       deliver that follow-up immediately — do not restart the original analysis.
@@ -1087,6 +1100,92 @@ def _build_account_summary(
         """).strip()
 
 
+def _build_natural_action_prompt(
+    action: AnalysisAction,
+    symbol: str,
+    user_prompt: Optional[str],
+    *,
+    analysis_since: Optional[datetime] = None,
+) -> str:
+    """Task instructions for preset actions when SYSTEM_NATURAL_MESSAGE is active."""
+
+    if action is AnalysisAction.DAILY_SUMMARY:
+        return dedent(f"""
+            Give a quick daily read on {symbol} — like a brief check-in, not a memo.
+
+            Touch on today's price move, how it affected your P&L, anything notable in the news,
+            and whether today's noise changes what you'd do. Keep it to a few short paragraphs;
+            bullets only if you need a very short catalyst list (max 3 items).
+            """).strip()
+
+    if action is AnalysisAction.RISK_CHECK:
+        return dedent(f"""
+            Review risk on {symbol} the way you'd explain it to a friend over coffee.
+
+            Work through size, P&L, thesis, and the biggest risk in flowing prose. Say plainly
+            whether you'd hold, trim, or adjust — and why. Give a simple risk level (low / medium /
+            high / critical) in a sentence, not as a labeled scorecard section.
+            """).strip()
+
+    if action is AnalysisAction.TAX_ANGLE:
+        return dedent(f"""
+            Explain the tax angles on {symbol} for a US retail investor (education only, not tax advice).
+
+            Cover holding period, gain/loss if you sold, wash-sale awareness from recent trades when shown,
+            and what data is missing for a fuller picture. Tie any tax idea back to portfolio risk — don't
+            recommend a trade for taxes alone. Use short paragraphs, not a numbered tax checklist.
+            """).strip()
+
+    if action is AnalysisAction.WHAT_CHANGED:
+        anchor_line = ""
+        if analysis_since is not None:
+            anchor = analysis_since.astimezone(timezone.utc).strftime("%b %d, %Y")
+            anchor_line = dedent(f"""
+                Their last filled trade in {symbol} was on {anchor} — focus on what changed since then,
+                not a generic company overview. News below is filtered to that window when available.
+                """).strip()
+        return dedent(f"""
+            Explain what materially changed recently for {symbol} and what it means for the position.
+
+            {anchor_line}
+
+            Tell the story in prose: price action, news, recent trades if listed, and whether the thesis
+            is stronger or weaker. Close with one clear stance (hold / trim / add / close) if the data
+            supports it.
+            """).strip()
+
+    if action is AnalysisAction.ASSIGNMENT_RISK:
+        return dedent(f"""
+            Review assignment and call-away risk for {symbol}.
+
+            Use the precomputed assignment risk scan below — do not recalculate moneyness or DTE unless missing.
+
+            How to talk about it:
+            - Open with what you'd do first this week (e.g. close an ATM put vs hold an OTM one) and why.
+            - Walk through urgent short options in plain sentences: strike, expiry, moneyness, risk level,
+              reserved cash, and whether you'd want shares if assigned.
+            - For cash-secured puts: say if cash looks reserved adequately and whether assignment would be
+              welcome or would blow up concentration.
+            - For covered calls: note call-away risk only if relevant; skip a section if none expire soon.
+            - If capital posture / deployable cash appears in the data, weave it in — don't paste it as a titled block.
+            - Close with one plain recommendation; optional one-sentence follow-up offer (e.g. limit to close).
+
+            Avoid report templates: no "Priority ranking", "Exact single actions", or per-leg nested bullet trees.
+            """).strip()
+
+    if action is AnalysisAction.CONCENTRATION_CHECK:
+        return dedent(f"""
+            Review concentration and sizing for {symbol} (or the portfolio if that's the scope).
+
+            Use precomputed WEIGHT_% — don't recalculate weights. Explain the picture in prose: biggest
+            names, sector clustering, what a 20–30% drop in a top holding would mean in dollars, and the
+            one fix you'd do first (with $ or % targets from the data). No "Rebalancing plan" section header —
+            just tell them what to trim or redeploy and when.
+            """).strip()
+
+    return user_prompt or f"Answer clearly and conversationally about {symbol}."
+
+
 def _build_action_prompt(
     action: AnalysisAction,
     symbol: str,
@@ -1094,7 +1193,16 @@ def _build_action_prompt(
     *,
     analysis_since: Optional[datetime] = None,
     json_response: bool = False,
+    natural_delivery: bool = False,
 ) -> str:
+    if natural_delivery:
+        return _build_natural_action_prompt(
+            action,
+            symbol,
+            user_prompt,
+            analysis_since=analysis_since,
+        )
+
     if action is AnalysisAction.FREE_FORM:
         if user_prompt and is_follow_up_affirmation(user_prompt):
             return dedent(f"""
@@ -1276,13 +1384,19 @@ def build_symbol_prompt(
     Build a compact user prompt for symbol-level analysis.
     Use this as the `user` content; pair with SYSTEM_MESSAGE as `system`.
     """
+    natural_delivery = not json_response and should_use_natural_response(
+        ctx.user_prompt, action=ctx.action
+    )
     action_block = _build_action_prompt(
         ctx.action,
         ctx.symbol,
         ctx.user_prompt,
         analysis_since=ctx.analysis_since,
         json_response=json_response,
+        natural_delivery=natural_delivery,
     )
+    if natural_delivery:
+        action_block = f"{action_block}\n\n{_NATURAL_DELIVERY_FOOTER}"
 
     if not include_context:
         return dedent(f"""
@@ -1384,17 +1498,22 @@ def build_portfolio_prompt(
     Use this as the `user` content; pair with SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE as `system`
     for structured portfolio analyze (no user prompt).
     """
+    natural_delivery = not json_response and should_use_natural_response(
+        ctx.user_prompt, action=ctx.action
+    )
     if ctx.action is AnalysisAction.ASSIGNMENT_RISK and not ctx.user_prompt:
         task_block = _build_action_prompt(
             ctx.action,
             "the portfolio",
             ctx.user_prompt,
+            natural_delivery=natural_delivery,
         )
     elif ctx.action is AnalysisAction.CONCENTRATION_CHECK and not ctx.user_prompt:
         task_block = _build_action_prompt(
             ctx.action,
             "the portfolio",
             ctx.user_prompt,
+            natural_delivery=natural_delivery,
         )
     elif ctx.user_prompt and is_follow_up_affirmation(ctx.user_prompt):
         task_block = dedent(f"""
@@ -1411,20 +1530,35 @@ def build_portfolio_prompt(
             - Stay concise and actionable — no full report template.
             """).strip()
     elif ctx.user_prompt:
-        task_block = dedent(f"""
-            The user asked:
+        if natural_delivery:
+            task_block = dedent(f"""
+                The user asked:
 
-            "{ctx.user_prompt}"
+                "{ctx.user_prompt}"
 
-            Instructions:
-            - Answer their question directly and conversationally first.
-            - Use the account and portfolio data above — cite dollar amounts, percentages, or share counts.
-            - Walk through concentration and risk when recommending changes.
-            - If the request conflicts with prudent risk management, explain why and suggest a safer path.
-            - If they asked something informational, answer it without forcing trades.
-            - If action is needed, end with the top 3 portfolio priorities ranked by urgency,
-              each with expected impact and effort (Low / Medium / High).
-            """).strip()
+                Instructions:
+                - Answer their question directly and conversationally first.
+                - Use the account and portfolio data above — cite dollar amounts, percentages, or share counts.
+                - Walk through concentration and risk when recommending changes.
+                - If the request conflicts with prudent risk management, explain why and suggest a safer path.
+                - If they asked something informational, answer it without forcing trades.
+                - If action is needed, say what you'd do first and what can wait — in prose, not a ranked report template.
+                """).strip()
+        else:
+            task_block = dedent(f"""
+                The user asked:
+
+                "{ctx.user_prompt}"
+
+                Instructions:
+                - Answer their question directly and conversationally first.
+                - Use the account and portfolio data above — cite dollar amounts, percentages, or share counts.
+                - Walk through concentration and risk when recommending changes.
+                - If the request conflicts with prudent risk management, explain why and suggest a safer path.
+                - If they asked something informational, answer it without forcing trades.
+                - If action is needed, end with the top 3 portfolio priorities ranked by urgency,
+                  each with expected impact and effort (Low / Medium / High).
+                """).strip()
     else:
         task_block = (
             _structured_portfolio_analysis_v1_task(ctx.primary_strategy)
@@ -1495,6 +1629,10 @@ def build_portfolio_prompt(
         {ctx.strategy_guidance_block}
         """).strip()
 
+    natural_footer = ""
+    if natural_delivery:
+        natural_footer = f"\n\n{_NATURAL_DELIVERY_FOOTER}"
+
     return dedent(f"""
         Today is {now_iso}.
 
@@ -1506,7 +1644,7 @@ def build_portfolio_prompt(
         {assignment_section}{strategy_guidance_section}{diversification_section}{profile_section}{alignment_section}{intelligence_section}
 
         === YOUR TASK ===
-        {task_block}
+        {task_block}{natural_footer}
 
         Use all data sections above. If a section says data is unavailable, acknowledge the gap
         in your analysis rather than guessing.

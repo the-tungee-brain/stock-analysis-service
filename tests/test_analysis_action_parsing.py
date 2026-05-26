@@ -109,6 +109,23 @@ def test_should_use_natural_response_for_preset_actions(
     assert should_use_natural_response(prompt, action=action) is expected
 
 
+def test_build_portfolio_prompt_assignment_risk_uses_natural_task():
+    from app.core.prompts import PortfolioContext, build_portfolio_prompt
+
+    ctx = PortfolioContext(
+        account=_make_account(),
+        positions=[_make_position()],
+        action=AnalysisAction.ASSIGNMENT_RISK,
+        user_prompt=None,
+        assignment_risk_block="TSM put | HIGH",
+    )
+    prompt = build_portfolio_prompt(ctx)
+    assert "ASSIGNMENT RISK SCAN" in prompt
+    assert "Cover these points" not in prompt
+    assert "conversational prose only" in prompt
+    assert "open with what you'd do first" in prompt.lower()
+
+
 def test_structured_portfolio_analyze_uses_allocation_prompt_path():
     from app.core.prompts import (
         PortfolioContext,
