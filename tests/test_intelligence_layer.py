@@ -10,6 +10,7 @@ from app.models.company_research_models import (
 )
 from app.models.intelligence_models import (
     IntelligenceSignal,
+    OptionRollSuggestion,
     PeerComparison,
     PeerMetric,
     SymbolIntelligence,
@@ -204,6 +205,36 @@ def test_symbol_intelligence_serializes_camel_case_aliases():
     assert "dataGaps" in payload
     assert payload["peerComparison"]["targetSymbol"] == "AAPL"
     assert "peer_comparison" not in payload
+
+
+def test_format_intelligence_block_renders_roll_suggestions():
+    intelligence = SymbolIntelligence(
+        symbol="NVDA",
+        roll_suggestions=[
+            OptionRollSuggestion(
+                side="put",
+                current_strike=212.5,
+                current_expiration="2026-05-29",
+                suggested_strike=200.0,
+                suggested_expiration="2026-06-06",
+                current_delta=-0.44,
+                suggested_delta=-0.28,
+                estimated_credit=0.45,
+                rationale=(
+                    "Buy to close $212.5 put exp 2026-05-29 (delta -0.44, bid/ask 1.20/1.35) "
+                    "→ sell $200 put exp 2026-06-06 (delta -0.28, bid/ask 2.50/2.70, OI 1,200); "
+                    "estimated net credit ~$0.45/contract"
+                ),
+            )
+        ],
+    )
+
+    block = PromptEnrichmentService.format_intelligence_block(intelligence)
+
+    assert "Precomputed roll suggestions" in block
+    assert "$212.5" in block
+    assert "$200" in block
+    assert "delta -0.28" in block
 
 
 def test_format_intelligence_block_renders_peer_table():

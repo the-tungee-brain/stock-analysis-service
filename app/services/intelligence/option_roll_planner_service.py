@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.broker.option_chain_table import quoted_ask, quoted_bid
 from app.models.intelligence_models import (
     OptionRollSuggestion,
     OptionsScorecard,
@@ -72,15 +73,38 @@ class OptionRollPlannerService:
             if alternative is None:
                 continue
 
+            current_bid = quoted_bid(current_contract)
+            current_ask = quoted_ask(current_contract)
             estimated_credit = OptionRollPlannerService._estimate_roll_credit(
-                current_contract_bid=getattr(current_contract, "bidPrice", None),
+                current_contract_bid=current_bid,
                 alternative_ask=alternative.ask,
             )
 
+            close_delta = getattr(current_contract, "delta", None)
             rationale = (
-                f"Roll short {side} from ${strike:g} ({expiration[:10]}) to "
-                f"${alternative.strike:g} ({alternative.expiration[:10]}) "
-                f"for better delta/OI profile"
+                f"Buy to close ${strike:g} {side} exp {expiration[:10]}"
+                + (
+                    f" (delta {close_delta:.2f}"
+                    if close_delta is not None
+                    else " (delta n/a"
+                )
+                + (
+                    f", bid/ask {current_bid:.2f}/{current_ask:.2f})"
+                    if current_bid is not None and current_ask is not None
+                    else ")"
+                )
+                + f" → sell ${alternative.strike:g} {side} exp {alternative.expiration[:10]}"
+                + (
+                    f" (delta {alternative.delta:.2f}"
+                    if alternative.delta is not None
+                    else " (delta n/a"
+                )
+                + (
+                    f", bid/ask {alternative.bid:.2f}/{alternative.ask:.2f}, "
+                    f"OI {alternative.open_interest:,})"
+                    if alternative.bid is not None and alternative.ask is not None
+                    else ")"
+                )
             )
             if estimated_credit is not None:
                 rationale += f"; estimated net credit ~${estimated_credit:.2f}/contract"
@@ -92,7 +116,7 @@ class OptionRollPlannerService:
                     current_expiration=expiration,
                     suggested_strike=alternative.strike,
                     suggested_expiration=alternative.expiration,
-                    current_delta=getattr(current_contract, "delta", None),
+                    current_delta=close_delta,
                     suggested_delta=alternative.delta,
                     estimated_credit=estimated_credit,
                     rationale=rationale,

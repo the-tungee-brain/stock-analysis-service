@@ -32,6 +32,7 @@ from app.models.finnhub_news_models import NewsResponse
 from app.models.company_research_models import ResearchContext, FundamentalMetric, SecRatioTrendPoint, NewsHeadline
 from app.models.intelligence_models import (
     MarketNewsItem,
+    OptionRollSuggestion,
     OptionsScorecard,
     PeerComparison,
     PortfolioDigest,
@@ -932,6 +933,13 @@ class PromptEnrichmentService:
             if scorecard_block:
                 sections.append(scorecard_block)
 
+        if intelligence.roll_suggestions:
+            roll_block = PromptEnrichmentService.format_roll_suggestions_block(
+                intelligence.roll_suggestions
+            )
+            if roll_block:
+                sections.append(roll_block)
+
         return "\n\n".join(sections) if sections else None
 
     @staticmethod
@@ -978,8 +986,7 @@ class PromptEnrichmentService:
 
         if scorecard.covered_call_candidates:
             call_lines = [
-                f"- ${c.strike:g} exp {c.expiration[:10]}: delta={c.delta:.2f}, "
-                f"OI={c.open_interest:,}, score={c.score:.2f} — {c.rationale}"
+                PromptEnrichmentService._format_scorecard_candidate_line(c)
                 for c in scorecard.covered_call_candidates
             ]
             sections.append(
@@ -988,8 +995,7 @@ class PromptEnrichmentService:
 
         if scorecard.csp_candidates:
             put_lines = [
-                f"- ${c.strike:g} exp {c.expiration[:10]}: delta={c.delta:.2f}, "
-                f"OI={c.open_interest:,}, score={c.score:.2f} — {c.rationale}"
+                PromptEnrichmentService._format_scorecard_candidate_line(c)
                 for c in scorecard.csp_candidates
             ]
             sections.append(
@@ -999,6 +1005,47 @@ class PromptEnrichmentService:
         if len(sections) == 1:
             return None
         return "\n\n".join(sections)
+
+    @staticmethod
+    def _format_scorecard_candidate_line(candidate) -> str:
+        quote_bits: list[str] = []
+        if candidate.bid is not None and candidate.ask is not None:
+            quote_bits.append(f"bid/ask {candidate.bid:.2f}/{candidate.ask:.2f}")
+        elif candidate.mark is not None:
+            quote_bits.append(f"mark {candidate.mark:.2f}")
+        if candidate.iv is not None:
+            quote_bits.append(f"IV {candidate.iv:.1f}%")
+        if candidate.theta is not None:
+            quote_bits.append(f"theta {candidate.theta:.3f}")
+        quote_text = f", {', '.join(quote_bits)}" if quote_bits else ""
+        delta_text = (
+            f"delta={candidate.delta:.2f}"
+            if candidate.delta is not None
+            else "delta=n/a"
+        )
+        return (
+            f"- ${candidate.strike:g} exp {candidate.expiration[:10]}: {delta_text}, "
+            f"OI={candidate.open_interest:,}, score={candidate.score:.2f}{quote_text} — "
+            f"{candidate.rationale}"
+        )
+
+    @staticmethod
+    def format_roll_suggestions_block(
+        suggestions: list[OptionRollSuggestion] | None,
+    ) -> str | None:
+        if not suggestions:
+            return None
+
+        lines = [
+            "## Precomputed roll suggestions (prefer these legs when recommending a roll)",
+            "Each line is a two-leg order: buy to close the current short option, then sell the new one.",
+        ]
+        for suggestion in suggestions:
+            side_label = "covered call" if suggestion.side == "call" else "cash-secured put"
+            lines.append(
+                f"- **{side_label} roll:** {suggestion.rationale}"
+            )
+        return "\n".join(lines)
 
     @staticmethod
     def format_macro_market_block(
