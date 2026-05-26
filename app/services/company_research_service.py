@@ -244,7 +244,19 @@ class CompanyResearchService:
         except Exception:
             return None
         if item is None:
+            if (
+                self.etf_research_service is not None
+                and self.etf_research_service.is_etf_symbol(symbol=symbol)
+            ):
+                return "ETF"
             return None
+        if item.asset_type:
+            return item.asset_type
+        if (
+            self.etf_research_service is not None
+            and self.etf_research_service.is_etf_symbol(symbol=symbol)
+        ):
+            return "ETF"
         return item.asset_type
 
     @staticmethod

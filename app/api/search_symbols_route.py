@@ -7,7 +7,11 @@ from typing import List
 router = APIRouter()
 
 
-@router.get("/symbols/search", response_model=List[TickerSymbolItem])
+@router.get(
+    "/symbols/search",
+    response_model=List[TickerSymbolItem],
+    response_model_by_alias=True,
+)
 def search_symbols(
     q: str = Query(..., min_length=1),
     limit: int = Query(10, ge=1, le=100),

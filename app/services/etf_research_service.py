@@ -16,6 +16,10 @@ class EtfResearchService:
         self.securitiesdb_adapter = securitiesdb_adapter
         self.fundamentals_builder = fundamentals_builder
 
+    def is_etf_symbol(self, symbol: str) -> bool:
+        payload = self.securitiesdb_adapter.get_etf_holdings(symbol=symbol)
+        return payload is not None
+
     def build_holdings_context(
         self,
         symbol: str,

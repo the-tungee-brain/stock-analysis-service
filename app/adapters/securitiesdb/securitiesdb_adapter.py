@@ -30,17 +30,17 @@ class SecuritiesDbAdapter:
             headers["Authorization"] = f"Bearer {api_key}"
         return headers
 
-    def get_etf_holdings(self, ticker: str) -> dict[str, Any] | None:
-        symbol = ticker.strip().upper()
-        if not symbol:
+    def get_etf_holdings(self, symbol: str) -> dict[str, Any] | None:
+        symbol_upper = symbol.strip().upper()
+        if not symbol_upper:
             return None
 
-        cache_key = f"etf_holdings:{symbol}"
+        cache_key = f"etf_holdings:{symbol_upper}"
         cached = self._cache.get(cache_key)
         if cached is not None:
             return cached
 
-        url = f"{self.BASE_URL}/etfs/{symbol}/holdings"
+        url = f"{self.BASE_URL}/etfs/{symbol_upper}/holdings"
         timeout = float(os.getenv("SECURITIESDB_TIMEOUT_SECONDS", "15"))
         response = self.session.get(url, headers=self._headers(), timeout=timeout)
 
