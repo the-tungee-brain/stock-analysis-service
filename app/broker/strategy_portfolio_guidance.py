@@ -19,6 +19,140 @@ WHEEL_LIKE = frozenset(
     }
 )
 
+_WHEEL_DEPLOYABLE_VS_CSP_RATIO = 0.15
+
+
+def _underweight_on_list_symbols(
+    ranked: list[tuple[str, float, float]],
+    strategy_set: set[str],
+    single_limit: float,
+) -> list[str]:
+    threshold = single_limit * 0.75
+    return [
+        symbol
+        for symbol, _, weight in ranked
+        if symbol in strategy_set and weight < threshold
+    ]
+
+
+def _format_wheel_suggested_capital_posture(
+    *,
+    cash: float,
+    csp_reserved: float,
+    cash_after_csp: float,
+    min_cash_buffer: float,
+    deployable_cash: float,
+    liquidation: float,
+    short_puts: list[str],
+    overweight: list[str],
+    list_not_held: list[str],
+    underweight_on_list: list[str],
+) -> list[str]:
+    buffer_pct = (min_cash_buffer / liquidation) * 100.0 if liquidation > 0 else 5.0
+    put_symbols = ", ".join(short_puts) if short_puts else "none"
+    lines = [
+        "",
+        "### Suggested capital posture (precomputed — cite these $ figures in the response)",
+    ]
+
+    modest_vs_csp = (
+        csp_reserved > 0
+        and deployable_cash < csp_reserved * _WHEEL_DEPLOYABLE_VS_CSP_RATIO
+    )
+
+    if deployable_cash <= 0:
+        lines.extend(
+            [
+                f"- Recommended action: Hold — keep ${cash:,.0f} cash intact; "
+                f"do not sell a new cash-secured put or add shares until deployable cash is positive.",
+                f"- Math: ${cash:,.0f} cash − ${csp_reserved:,.0f} tied to open puts "
+                f"− ${min_cash_buffer:,.0f} safety buffer ({buffer_pct:.0f}% of portfolio) "
+                f"= $0 deployable.",
+                f"- Open put underlyings: {put_symbols}.",
+                "- Why this is the right move: every dollar is already spoken for by "
+                "assignment reserves or the minimum buffer — new premium trades add risk without flexibility.",
+            ]
+        )
+        if overweight:
+            lines.append(
+                f"- Unlock capital first: trim {overweight[0]} (at/above profile max) "
+                "before considering new option income."
+            )
+        return lines
+
+    if modest_vs_csp:
+        revisit_threshold = csp_reserved * _WHEEL_DEPLOYABLE_VS_CSP_RATIO
+        lines.extend(
+            [
+                f"- Recommended action: Hold the ${deployable_cash:,.0f} deployable buffer — "
+                "pause new cash-secured puts this week unless an existing obligation comes off first.",
+                f"- ${csp_reserved:,.0f} is already earmarked for open puts on {put_symbols}; "
+                f"only ${deployable_cash:,.0f} remains after CSP reserves and a "
+                f"${min_cash_buffer:,.0f} ({buffer_pct:.0f}%) safety buffer.",
+                "- Why this is the right move: deployable cash is thin relative to put reserves — "
+                "adding another cash-secured put would leave little room if assigned or if the market dips.",
+                f"- Revisit when: a put expires, you add cash, or deployable cash rises above "
+                f"~${revisit_threshold:,.0f} (15% of CSP reserves).",
+            ]
+        )
+        if underweight_on_list:
+            lines.append(
+                f"- If deployable cash increases later, first candidates for a staged put: "
+                f"{', '.join(underweight_on_list[:3])} (on strategy list, under max weight)."
+            )
+        elif list_not_held:
+            lines.append(
+                f"- If deployable cash increases later, watchlist entries to consider first: "
+                f"{', '.join(list_not_held[:3])}."
+            )
+        return lines
+
+    if overweight:
+        lines.extend(
+            [
+                f"- Recommended action: Hold ${deployable_cash:,.0f} deployable cash and trim "
+                f"{overweight[0].split()[0]} before selling new puts or adding size.",
+                f"- ${csp_reserved:,.0f} CSP reserves on {put_symbols}; "
+                f"${deployable_cash:,.0f} deployable after buffer.",
+                "- Why: concentration at/above the profile max outweighs deploying spare cash into new premium risk.",
+            ]
+        )
+        return lines
+
+    if list_not_held and underweight_on_list:
+        target = underweight_on_list[0]
+        lines.extend(
+            [
+                f"- Recommended action: Optional staged cash-secured put on {target} using "
+                f"up to ${deployable_cash:,.0f} — keep the ${min_cash_buffer:,.0f} buffer untouched.",
+                f"- ${csp_reserved:,.0f} CSP reserves on {put_symbols}; "
+                f"${deployable_cash:,.0f} deployable after buffer.",
+                f"- On strategy list but not yet held (for later): {', '.join(list_not_held[:4])}.",
+            ]
+        )
+        return lines
+
+    if list_not_held:
+        lines.extend(
+            [
+                f"- Recommended action: Hold ${deployable_cash:,.0f} deployable cash or enter "
+                f"one on-list name via a small cash-secured put (e.g. {list_not_held[0]}) — "
+                f"do not exceed ${deployable_cash:,.0f}.",
+                f"- ${csp_reserved:,.0f} CSP reserves on {put_symbols}.",
+            ]
+        )
+        return lines
+
+    lines.extend(
+        [
+            f"- Recommended action: Hold ${deployable_cash:,.0f} deployable cash unless rolling "
+            "or managing existing puts — no urgent deploy required.",
+            f"- ${csp_reserved:,.0f} CSP reserves on {put_symbols}; "
+            f"${deployable_cash:,.0f} deployable after ${min_cash_buffer:,.0f} buffer.",
+        ]
+    )
+    return lines
+
 
 def _portfolio_cash_snapshot(
     *,
@@ -88,6 +222,9 @@ def format_strategy_portfolio_guidance_block(
         short_puts = _short_put_underlyings(positions)
         list_not_held = sorted(strategy_set - held_symbols)
         held_not_on_list = sorted(held_symbols - strategy_set)
+        underweight_on_list = _underweight_on_list_symbols(
+            ranked, strategy_set, single_limit
+        )
 
         lines.extend(
             [
@@ -149,13 +286,30 @@ def format_strategy_portfolio_guidance_block(
             )
 
         lines.extend(
+            _format_wheel_suggested_capital_posture(
+                cash=cash,
+                csp_reserved=csp_reserved,
+                cash_after_csp=cash_after_csp,
+                min_cash_buffer=min_cash_buffer,
+                deployable_cash=deployable_cash,
+                liquidation=liquidation,
+                short_puts=short_puts,
+                overweight=overweight,
+                list_not_held=list_not_held,
+                underweight_on_list=underweight_on_list,
+            )
+        )
+
+        lines.extend(
             [
                 "",
                 "### How to write the response (wheel)",
-                "- Do NOT recommend ETF core deploys or cite an ETF allocation gap — not applicable.",
-                "- Lead with CSP reserves, deployable cash, and whether any name breaches the max weight.",
-                "- Ranked actions should be: trim/hold/covered call/roll/pause new CSPs — tied to symbols in the data.",
+                "- Lead with **Suggested capital posture (precomputed)** — copy its $ figures and recommended action.",
+                "- Do NOT mention ETF deploy plans, allocation gaps, or that any internal block is missing.",
+                "- Do NOT recommend ETF core deploys — not applicable to wheel.",
+                "- Ranked actions: trim/hold/covered call/roll/pause new CSPs — tied to symbols in the data.",
                 "- Mention assignment risk on short-put underlyings when relevant.",
+                "- Holding cash is a valid #1 move — explain it with CSP reserved $ and deployable $, not meta-commentary.",
             ]
         )
 

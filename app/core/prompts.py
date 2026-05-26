@@ -270,13 +270,12 @@ def _portfolio_v1_decision_order(
     }:
         return dedent("""
         Decision order (wheel / CSP / covered call):
-        1. Read **STRATEGY ANALYSIS FRAMEWORK** and CSP reserves / deployable cash in DIVERSIFICATION SUMMARY.
+        1. Read **Suggested capital posture (precomputed)** and CSP / deployable cash in STRATEGY ANALYSIS FRAMEWORK.
         2. If any name is at/above profile max single-name % → rank a trim or risk-reducing covered call first.
-        3. If deployable cash is low vs CSP reserves → hold buffer and pause new cash-secured puts unless an
-           underweight, on-list name clearly qualifies.
-        4. If deployable cash is available and an on-list name is underweight → staged CSP or share add (with $).
-        5. Off-list holdings (e.g., TSM): one brief bullet only — evaluate on merits, not list membership.
-        6. Do NOT recommend ETF core deploys — ETF allocation gap and precomputed deploy plan do not apply.
+        3. If capital posture recommends hold/pause → that is often the #1 action; cite CSP reserved $ and deployable $.
+        4. If capital posture allows a staged CSP on an underweight, on-list name → size with deployable $ (keep buffer).
+        5. Off-list holdings: one brief bullet only — evaluate on merits, not list membership.
+        6. ETF allocation gap / ETF deploy plan blocks are not used for wheel — never tell the user a deploy plan is missing.
         """).strip()
 
     if primary_strategy == InvestmentStrategy.ETF_CORE:
@@ -362,8 +361,11 @@ def _structured_portfolio_analysis_v1_task(
         InvestmentStrategy.COVERED_CALL,
     }:
         summary_hint += (
-            " Mention CSP reserved cash vs deployable cash when recommending holds or new puts."
+            " Use **Suggested capital posture (precomputed)** $ figures — hold/pause can be the #1 move."
         )
+
+    json_overlay = _structured_v1_json_rules_overlay(primary_strategy)
+    json_overlay_section = f"\n\n{json_overlay}" if json_overlay else ""
 
     return dedent(f"""
         Analyze this portfolio for diversification, concentration risk, and smarter capital deployment.
@@ -381,7 +383,9 @@ def _structured_portfolio_analysis_v1_task(
 
         {TICKER_SOURCING_RULES}
 
-        {AMOUNT_SOURCING_RULES}
+        {_amount_sourcing_rules(primary_strategy)}
+
+        {USER_FACING_LANGUAGE_RULES}{json_overlay_section}
 
         Use WEIGHT_% in the positions table and precomputed blocks in DIVERSIFICATION SUMMARY /
         STRATEGY ANALYSIS FRAMEWORK / PORTFOLIO INTELLIGENCE as authoritative. Do not recalculate weights unless WEIGHT_% is N/A.
@@ -508,6 +512,68 @@ AMOUNT_SOURCING_RULES = dedent("""
     - If a needed input is missing, state the gap and give a range or % — do not invent placeholder $.
     """).strip()
 
+WHEEL_AMOUNT_SOURCING_RULES = dedent("""
+    # Dollar amounts and sizing (wheel / CSP / covered call — use this investor's data only)
+    - Copy $ figures from **Suggested capital posture (precomputed)**, CSP reserved cash, and
+      deployable cash lines in STRATEGY ANALYSIS FRAMEWORK and DIVERSIFICATION SUMMARY.
+    - recommendedAction for hold/pause: use an imperative title with deployable $, e.g.
+      "Hold $2,400 deployable buffer — pause new cash-secured puts" — never "consider improving diversification".
+    - recommendedAction.reason: cite CSP reserved $, open put underlyings, and why holding preserves
+      assignment flexibility — not why a deploy plan is absent.
+    - Trim/add plans: cite current weight %, profile max, and $ from top holdings lines.
+    - Never reference ETF deploy plans or tell the user a deploy plan is missing — wheel accounts use
+      **Suggested capital posture (precomputed)** instead.
+    - If a needed input is missing, note the data gap briefly — do not invent placeholder $.
+    """).strip()
+
+USER_FACING_LANGUAGE_RULES = dedent("""
+    # User-facing language (CRITICAL — summary, recommendedAction, sections)
+    - Write for the investor, not for engineers. Never mention internal block names such as
+      "precomputed deploy plan", "STRATEGY ANALYSIS FRAMEWORK", "DIVERSIFICATION SUMMARY", or
+      phrases like "no deploy plan is shown" / "there is no precomputed deploy plan".
+    - Never justify a recommendation by saying a data block is missing or does not apply.
+    - Explain holds and pauses with concrete numbers: cash $, CSP reserved $, deployable $, weights, symbols.
+    - "Hold cash" and "pause new cash-secured puts" are decisive actions — state them confidently with $ amounts.
+    """).strip()
+
+
+def _amount_sourcing_rules(
+    primary_strategy: InvestmentStrategy | None,
+) -> str:
+    if primary_strategy in {
+        InvestmentStrategy.WHEEL,
+        InvestmentStrategy.CSP_INCOME,
+        InvestmentStrategy.COVERED_CALL,
+    }:
+        return WHEEL_AMOUNT_SOURCING_RULES
+    return AMOUNT_SOURCING_RULES
+
+
+def _structured_v1_json_rules_overlay(
+    primary_strategy: InvestmentStrategy | None,
+) -> str:
+    if primary_strategy in {
+        InvestmentStrategy.WHEEL,
+        InvestmentStrategy.CSP_INCOME,
+        InvestmentStrategy.COVERED_CALL,
+    }:
+        return dedent("""
+            Portfolio JSON overrides (wheel / CSP / covered call):
+            - summary: max 3 sentences; sentence 1 must state the #1 move using $ from
+              **Suggested capital posture (precomputed)** (hold, pause puts, trim, or staged CSP).
+              Shape: "Hold $[DEPLOYABLE_CASH] in reserve — $[CSP_RESERVED] backs open puts on [SYMBOLS];
+              pause new cash-secured puts until [condition from capital posture]."
+            - recommendedAction.title: imperative with deployable or CSP reserved $ — hold/pause is valid.
+            - Never mention ETF deploy plans or absent internal blocks in any JSON string field.
+            """).strip()
+    if primary_strategy == InvestmentStrategy.ETF_CORE:
+        return dedent("""
+            Portfolio JSON overrides (ETF core):
+            - summary sentence 1 must include total ETF core weight % and deploy $ from
+              **Suggested deploy plan (precomputed)** or ETF gap "~$X to buy" lines when present.
+            """).strip()
+    return ""
+
 PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
     # Portfolio diversification framework (follow this order for portfolio-level analysis)
 
@@ -557,6 +623,7 @@ PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
     - ETF core → allocation drift vs target weights is the primary lens when ETF gap data is present.
     - Dividend → avoid yield chasing; note concentration in dividend names.
     - Wheel / CSP / covered call → honor max single-name %; do not sell puts on overweight underlyings.
+      Use **Suggested capital posture (precomputed)** for hold/deploy guidance — never mention absent ETF deploy plans.
     - Conservative → favor broad ETFs and higher cash buffer; aggressive → allow higher single names but still flag >30%.
 
     ## Step 6 — Options strategies (secondary)
@@ -678,6 +745,8 @@ _PORTFOLIO_ALLOCATION_CORE = dedent(f"""
     {TICKER_SOURCING_RULES}
 
     {AMOUNT_SOURCING_RULES}
+
+    {USER_FACING_LANGUAGE_RULES}
 
     {PORTFOLIO_DIVERSIFICATION_RULES}
 
