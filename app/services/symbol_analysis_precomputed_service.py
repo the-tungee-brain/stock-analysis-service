@@ -1,0 +1,400 @@
+from __future__ import annotations
+
+from datetime import date
+
+from app.broker.option_chain_table import (
+    fair_option_price,
+    lookup_option_contract,
+    quoted_ask,
+    quoted_bid,
+)
+from app.broker.option_greeks import resolve_option_greeks, sanitize_delta
+from app.broker.option_utils import (
+    parse_put_call_from_option_symbol,
+    position_expiration_date,
+    position_strike_price,
+)
+from app.broker.position_metrics import (
+    portfolio_liquidation_value,
+    position_open_profit_loss,
+    position_open_profit_loss_pct,
+    position_portfolio_weight_pct,
+)
+from app.models.intelligence_models import OptionRollSuggestion, SymbolIntelligence
+from app.models.schwab_models import Position, SchwabAccounts
+from app.models.schwab_option_chain_models import OptionChain
+from app.models.symbol_analysis_precomputed_models import (
+    ClosePathOutcome,
+    HeldOptionDecisionDrivers,
+    HeldOptionOutcomes,
+    HoldPathOutcome,
+    OptionLegOutcome,
+    RollPathOutcome,
+    SymbolAnalysisPrecomputed,
+)
+from app.services.intelligence.options_scoring_service import OptionsScoringService
+
+OPTION_CONTRACT_MULTIPLIER = 100.0
+PNL_ACTION_TRIGGER_PCT = -30.0
+ASSIGNMENT_DELTA_THRESHOLD = OptionsScoringService.ASSIGNMENT_DELTA_THRESHOLD
+
+
+class SymbolAnalysisPrecomputedService:
+    @staticmethod
+    def build(
+        *,
+        symbol: str,
+        account: SchwabAccounts,
+        positions: list[Position],
+        intelligence: SymbolIntelligence | None,
+        option_chain: OptionChain | None,
+        underlying_price: float | None = None,
+    ) -> SymbolAnalysisPrecomputed | None:
+        symbol_upper = symbol.strip().upper()
+        held_short_options = SymbolAnalysisPrecomputedService._short_options_for_symbol(
+            positions, symbol_upper
+        )
+        if not held_short_options and intelligence is None:
+            return None
+
+        if underlying_price is None and intelligence and intelligence.options_scorecard:
+            underlying_price = intelligence.options_scorecard.underlying_price
+        if underlying_price is None and option_chain is not None:
+            underlying_price = option_chain.underlyingPrice or (
+                option_chain.underlying.last
+                if option_chain.underlying and option_chain.underlying.last
+                else None
+            )
+
+        portfolio_value = portfolio_liquidation_value(
+            account=account, positions=positions
+        )
+        roll_suggestions = (
+            list(intelligence.roll_suggestions) if intelligence is not None else []
+        )
+        held_outcomes: list[HeldOptionOutcomes] = []
+
+        for position in held_short_options:
+            outcome = SymbolAnalysisPrecomputedService._build_held_option_outcomes(
+                position=position,
+                symbol=symbol_upper,
+                option_chain=option_chain,
+                underlying_price=underlying_price,
+                portfolio_value=portfolio_value,
+                roll_suggestions=roll_suggestions,
+            )
+            if outcome is not None:
+                held_outcomes.append(outcome)
+
+        if (
+            not held_outcomes
+            and intelligence is None
+            and not roll_suggestions
+        ):
+            return None
+
+        return SymbolAnalysisPrecomputed(
+            symbol=symbol_upper,
+            underlying_price=underlying_price,
+            options_scorecard=(
+                intelligence.options_scorecard if intelligence is not None else None
+            ),
+            roll_suggestions=roll_suggestions,
+            held_option_outcomes=held_outcomes,
+        )
+
+    @staticmethod
+    def _short_options_for_symbol(
+        positions: list[Position], symbol_upper: str
+    ) -> list[Position]:
+        matched: list[Position] = []
+        for position in positions:
+            if position.instrument.assetType != "OPTION":
+                continue
+            if position.shortQuantity <= 0:
+                continue
+            underlying = (
+                position.instrument.underlyingSymbol
+                or position.instrument.symbol
+                or ""
+            ).upper()
+            if underlying.split()[0] == symbol_upper:
+                matched.append(position)
+        return matched
+
+    @staticmethod
+    def _build_held_option_outcomes(
+        *,
+        position: Position,
+        symbol: str,
+        option_chain: OptionChain | None,
+        underlying_price: float | None,
+        portfolio_value: float | None,
+        roll_suggestions: list[OptionRollSuggestion],
+    ) -> HeldOptionOutcomes | None:
+        instrument = position.instrument
+        put_call = instrument.putCall or parse_put_call_from_option_symbol(
+            instrument.symbol or ""
+        )
+        expiration_date = position_expiration_date(position)
+        strike = position_strike_price(position) or instrument.strikePrice
+        if put_call is None or expiration_date is None or strike is None:
+            return None
+
+        contracts = position.shortQuantity
+        side = "call" if put_call == "CALL" else "put"
+        expiration_iso = expiration_date.isoformat()
+
+        contract = None
+        if option_chain is not None:
+            contract = lookup_option_contract(
+                option_chain,
+                expiration=expiration_date,
+                strike=strike,
+                put_call=put_call,
+            )
+
+        bid = quoted_bid(contract)
+        ask = quoted_ask(contract)
+        mark = fair_option_price(contract)
+        greeks = resolve_option_greeks(
+            contract,
+            chain=option_chain,
+            underlying_price=underlying_price,
+            put_call=put_call,
+            strike=strike,
+            expiration=expiration_date,
+        )
+        delta = sanitize_delta(greeks.delta if greeks else None)
+        dte = max((expiration_date - date.today()).days, 0)
+
+        entry_per_share = position.averagePrice or position.averageShortPrice
+        open_pnl = position_open_profit_loss(position)
+        open_pnl_pct = position_open_profit_loss_pct(position)
+        weight_pct = position_portfolio_weight_pct(position, portfolio_value)
+
+        current_leg = OptionLegOutcome(
+            put_call=put_call,
+            side=side,
+            strike=strike,
+            expiration=expiration_iso,
+            contracts=contracts,
+            days_to_expiration=dte,
+            delta=delta,
+            bid=bid,
+            ask=ask,
+            mark=mark,
+            cash_per_contract=round(ask * OPTION_CONTRACT_MULTIPLIER, 2)
+            if ask is not None
+            else None,
+            cash_direction="pay" if ask is not None else None,
+        )
+
+        close = ClosePathOutcome(
+            cost_per_share=ask,
+            cost_per_contract=round(ask * OPTION_CONTRACT_MULTIPLIER, 2)
+            if ask is not None
+            else None,
+            open_pnl=open_pnl,
+        )
+
+        itm = None
+        assignment_note = None
+        if underlying_price is not None:
+            if put_call == "PUT":
+                itm = underlying_price < strike
+                assignment_note = (
+                    f"Spot ${underlying_price:.2f} below ${strike:g} strike — "
+                    "assignment to buy shares is possible if still ITM at expiration."
+                    if itm
+                    else f"Spot ${underlying_price:.2f} above ${strike:g} strike — "
+                    "may expire worthless if OTM at expiration."
+                )
+            else:
+                itm = underlying_price > strike
+                assignment_note = (
+                    f"Spot ${underlying_price:.2f} above ${strike:g} strike — "
+                    "shares may be called away if still ITM at expiration."
+                    if itm
+                    else f"Spot ${underlying_price:.2f} below ${strike:g} strike — "
+                    "may expire worthless if OTM at expiration."
+                )
+
+        hold = HoldPathOutcome(
+            days_to_expiration=dte,
+            delta=delta,
+            underlying_price=underlying_price,
+            in_the_money=itm,
+            assignment_note=assignment_note,
+        )
+
+        roll = SymbolAnalysisPrecomputedService._build_roll_path(
+            roll_suggestions=roll_suggestions,
+            strike=strike,
+            expiration_iso=expiration_iso,
+            side=side,
+            put_call=put_call,
+            contracts=contracts,
+            option_chain=option_chain,
+            close_bid=bid,
+            close_ask=ask,
+            close_mark=mark,
+            close_dte=dte,
+            close_delta=delta,
+        )
+
+        drivers = HeldOptionDecisionDrivers(
+            portfolio_weight_pct=weight_pct,
+            open_pnl=open_pnl,
+            open_pnl_pct=open_pnl_pct,
+            entry_premium_per_share=entry_per_share,
+            entry_premium_per_contract=(
+                round(entry_per_share * OPTION_CONTRACT_MULTIPLIER, 2)
+                if entry_per_share and entry_per_share > 0
+                else None
+            ),
+            action_trigger=SymbolAnalysisPrecomputedService._action_trigger(
+                open_pnl_pct=open_pnl_pct,
+                delta=delta,
+                dte=dte,
+            ),
+        )
+
+        return HeldOptionOutcomes(
+            drivers=drivers,
+            current_leg=current_leg,
+            roll=roll,
+            close=close,
+            hold=hold,
+        )
+
+    @staticmethod
+    def _action_trigger(
+        *,
+        open_pnl_pct: float | None,
+        delta: float | None,
+        dte: int,
+    ) -> str | None:
+        triggers: list[str] = []
+        if open_pnl_pct is not None and open_pnl_pct <= PNL_ACTION_TRIGGER_PCT:
+            triggers.append(f"open P/L {open_pnl_pct:+.1f}% (loss rule)")
+        if delta is not None and abs(delta) >= ASSIGNMENT_DELTA_THRESHOLD:
+            triggers.append(f"delta {delta:.2f} (assignment proximity)")
+        if dte <= 3:
+            triggers.append(f"{dte} DTE (near expiration)")
+        if not triggers:
+            return None
+        return "; ".join(triggers)
+
+    @staticmethod
+    def _build_roll_path(
+        *,
+        roll_suggestions: list[OptionRollSuggestion],
+        strike: float,
+        expiration_iso: str,
+        side: str,
+        put_call: str,
+        contracts: float,
+        option_chain: OptionChain | None,
+        close_bid: float | None,
+        close_ask: float | None,
+        close_mark: float | None,
+        close_dte: int,
+        close_delta: float | None,
+    ) -> RollPathOutcome | None:
+        suggestion = SymbolAnalysisPrecomputedService._match_roll_suggestion(
+            roll_suggestions,
+            strike=strike,
+            expiration_iso=expiration_iso,
+            side=side,
+        )
+        if suggestion is None:
+            return None
+
+        open_expiration = date.fromisoformat(suggestion.suggested_expiration[:10])
+        open_contract = None
+        if option_chain is not None:
+            open_contract = lookup_option_contract(
+                option_chain,
+                expiration=open_expiration,
+                strike=suggestion.suggested_strike,
+                put_call=put_call,
+            )
+        open_bid = quoted_bid(open_contract)
+        open_ask = quoted_ask(open_contract)
+        open_mark = fair_option_price(open_contract)
+        open_delta = sanitize_delta(
+            open_contract.delta if open_contract is not None else suggestion.suggested_delta
+        )
+        open_dte = OptionsScoringService._expiration_dte(suggestion.suggested_expiration)
+
+        close_leg = OptionLegOutcome(
+            put_call=put_call,
+            side=side,
+            strike=suggestion.current_strike,
+            expiration=suggestion.current_expiration[:10],
+            contracts=contracts,
+            days_to_expiration=close_dte,
+            delta=close_delta if close_delta is not None else suggestion.current_delta,
+            bid=close_bid,
+            ask=close_ask,
+            mark=close_mark,
+            cash_per_contract=round(close_ask * OPTION_CONTRACT_MULTIPLIER, 2)
+            if close_ask is not None
+            else None,
+            cash_direction="pay" if close_ask is not None else None,
+        )
+        open_leg = OptionLegOutcome(
+            put_call=put_call,
+            side=side,
+            strike=suggestion.suggested_strike,
+            expiration=suggestion.suggested_expiration[:10],
+            contracts=contracts,
+            days_to_expiration=open_dte,
+            delta=open_delta,
+            bid=open_bid,
+            ask=open_ask,
+            mark=open_mark,
+            cash_per_contract=round(open_bid * OPTION_CONTRACT_MULTIPLIER, 2)
+            if open_bid is not None
+            else None,
+            cash_direction="collect" if open_bid is not None else None,
+        )
+
+        net_per_share = (
+            round(open_bid - close_ask, 2)
+            if open_bid is not None and close_ask is not None
+            else suggestion.estimated_credit
+        )
+        net_per_contract = (
+            round(net_per_share * OPTION_CONTRACT_MULTIPLIER, 2)
+            if net_per_share is not None
+            else None
+        )
+
+        return RollPathOutcome(
+            close_leg=close_leg,
+            open_leg=open_leg,
+            net_credit_per_share=net_per_share,
+            net_credit_per_contract=net_per_contract,
+            is_net_credit=net_per_share is None or net_per_share >= 0,
+        )
+
+    @staticmethod
+    def _match_roll_suggestion(
+        roll_suggestions: list[OptionRollSuggestion],
+        *,
+        strike: float,
+        expiration_iso: str,
+        side: str,
+    ) -> OptionRollSuggestion | None:
+        exp = expiration_iso[:10]
+        for suggestion in roll_suggestions:
+            if suggestion.side != side:
+                continue
+            if abs(suggestion.current_strike - strike) >= 0.01:
+                continue
+            if suggestion.current_expiration[:10] != exp:
+                continue
+            return suggestion
+        return None

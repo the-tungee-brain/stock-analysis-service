@@ -46,6 +46,9 @@ from app.services.market_service import MarketService
 from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.schwab_auth_service import SchwabAuthService
 from app.broker.order_utils import is_order_within_days
+from app.services.symbol_analysis_precomputed_service import (
+    SymbolAnalysisPrecomputedService,
+)
 from app.services.transaction_service import RECENT_ACTIVITY_DAYS, TransactionService
 
 if TYPE_CHECKING:
@@ -500,7 +503,7 @@ class PortfolioAnalysisService:
                 symbol=symbol
             )
 
-        research_context_block, intelligence_block, has_options_scorecard = await asyncio.to_thread(
+        research_context_block, intelligence_block, has_options_scorecard, symbol_intelligence = await asyncio.to_thread(
             self._build_research_bundle,
             symbol=symbol,
             action=action,
@@ -568,6 +571,20 @@ class PortfolioAnalysisService:
             else:
                 investment_profile_block = base_block
 
+        underlying_price = (
+            market_snapshots.get(symbol).last
+            if symbol in market_snapshots and market_snapshots[symbol].last is not None
+            else None
+        )
+        precomputed = SymbolAnalysisPrecomputedService.build(
+            symbol=symbol,
+            account=account,
+            positions=positions,
+            intelligence=symbol_intelligence,
+            option_chain=option_chains,
+            underlying_price=underlying_price,
+        )
+
         return SymbolContext(
             symbol=symbol,
             account=account,
@@ -584,6 +601,7 @@ class PortfolioAnalysisService:
             action=action,
             assignment_risk_block=assignment_risk_block,
             analysis_since=analysis_since,
+            precomputed=precomputed,
         )
 
     @staticmethod
@@ -625,7 +643,8 @@ class PortfolioAnalysisService:
         option_chain,
         orders: list | None,
         research_context_block: str | None = None,
-    ) -> tuple[str | None, str | None, bool]:
+    ) -> tuple[str | None, str | None, bool, SymbolIntelligence | None]:
+        intelligence: SymbolIntelligence | None = None
         try:
             news_lookback_days = (
                 self._news_lookback_days(since)
@@ -638,7 +657,7 @@ class PortfolioAnalysisService:
             )
             ctx = self.portfolio_intelligence_service.attach_enriched_news(ctx)
         except Exception:
-            return research_context_block, None, False
+            return research_context_block, None, False, None
 
         if research_context_block is None:
             research_context_block = (
@@ -675,7 +694,7 @@ class PortfolioAnalysisService:
         except Exception:
             intelligence_block = None
 
-        return research_context_block, intelligence_block, has_options_scorecard
+        return research_context_block, intelligence_block, has_options_scorecard, intelligence
 
     def _build_macro_market_context_block(
         self,

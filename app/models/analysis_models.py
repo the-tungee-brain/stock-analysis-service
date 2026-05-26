@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.models.symbol_analysis_precomputed_models import SymbolAnalysisPrecomputed
 
 
 class StructuredAnalysisActionLLM(BaseModel):
@@ -26,3 +30,12 @@ class PortfolioAnalysisV1LLMResponse(BaseModel):
     summary: str
     recommendedAction: StructuredAnalysisActionLLM
     sections: list[StructuredAnalysisSectionLLM]
+
+
+class SymbolAnalysisV1Envelope(BaseModel):
+    """Symbol/portfolio analyze v1: LLM narrative plus optional server-side outcomes."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    analysis: PortfolioAnalysisV1LLMResponse
+    precomputed: SymbolAnalysisPrecomputed | None = None

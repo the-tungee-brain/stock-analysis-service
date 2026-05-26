@@ -5,7 +5,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from textwrap import dedent
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
+
+if TYPE_CHECKING:
+    from app.models.symbol_analysis_precomputed_models import SymbolAnalysisPrecomputed
 
 from app.models.schwab_models import Position, SchwabAccounts
 from app.models.strategy_models import InvestmentStrategy
@@ -149,6 +152,7 @@ class SymbolContext(BaseAnalysisContext):
     investment_profile_block: Optional[str] = None
     recent_transactions: Optional[str] = None
     analysis_since: Optional[datetime] = None
+    precomputed: SymbolAnalysisPrecomputed | None = None
 
 
 OPTION_PREMIUM_GUIDANCE = (
@@ -401,9 +405,10 @@ def _structured_symbol_analysis_v1_task(symbol: str) -> str:
         Populate the JSON schema:
         - summary: 2-3 sentence position read (size, P&L, thesis).
         - recommendedAction: the one clear trade or hold decision; set symbol to "{symbol}" when relevant.
-        - sections: 2-4 sections with plain-text titles such as "Position snapshot",
-          "Recommendation rationale", "Execution plan", "Risk/reward" — never use # or ### in titles.
-          Use bullets for concrete numbers and timing.
+        - sections: include a section titled "Outcome comparison" when PRECOMPUTED OUTCOMES appear
+          in the user message — use those $ figures verbatim for roll vs close vs hold; do not recalculate.
+          Other section titles: "Position snapshot", "Recommendation rationale", "Execution plan",
+          "Risk/reward" — never use # or ### in titles. Use bullets for concrete numbers and timing.
         """).strip()
 
 
@@ -1539,6 +1544,14 @@ def build_symbol_prompt(
       {profile_block}
         """).strip() + "\n\n"
 
+    precomputed_section = ""
+    if json_response and ctx.precomputed is not None:
+        precomputed_json = ctx.precomputed.model_dump_json(by_alias=True, indent=2)
+        precomputed_section = dedent(f"""
+      === PRECOMPUTED OUTCOMES (AUTHORITATIVE $ MATH — cite verbatim in Outcome comparison) ===
+      {precomputed_json}
+        """).strip() + "\n\n"
+
     return dedent(f"""
       Today is {now_iso}.
 
@@ -1568,7 +1581,7 @@ def build_symbol_prompt(
       === PRECOMPUTED INTELLIGENCE (SIGNALS, PEERS, TIMELINE) ===
       {intelligence_block or "No precomputed intelligence signals provided."}
 
-      {transactions_section}{assignment_section}{profile_section}=== OPTION DATA (HELD CONTRACTS + CHAIN) ===
+      {transactions_section}{assignment_section}{profile_section}{precomputed_section}=== OPTION DATA (HELD CONTRACTS + CHAIN) ===
       {option_block}
 
       === YOUR TASK ===

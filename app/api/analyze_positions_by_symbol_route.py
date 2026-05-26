@@ -18,6 +18,7 @@ from app.dependencies.service_dependencies import (
 from openai.types.shared import ResponsesModel
 from app.core.prompts import (
     AnalysisAction,
+    SymbolContext,
     SYSTEM_NATURAL_MESSAGE,
     system_message_for_structured_analysis,
     system_message_for_structured_v1_analysis,
@@ -26,7 +27,10 @@ from app.core.prompts import (
 )
 from app.core.analysis_schema import wants_structured_analysis_v1
 from app.core.llm_routes import LLMRoute
-from app.models.analysis_models import PortfolioAnalysisV1LLMResponse
+from app.models.analysis_models import (
+    PortfolioAnalysisV1LLMResponse,
+    SymbolAnalysisV1Envelope,
+)
 from app.auth.dependencies import get_current_user_id
 from app.core.llm_config import settings
 
@@ -157,7 +161,12 @@ async def analyze_positions_by_symbol(
                 model=request.model or settings.OPENAI_MODEL,
                 max_output_tokens=settings.MAX_OUTPUT_TOKENS_STREAM,
             )
-            payload = parsed.model_dump_json()
+            precomputed = ctx.precomputed if isinstance(ctx, SymbolContext) else None
+            envelope = SymbolAnalysisV1Envelope(
+                analysis=parsed,
+                precomputed=precomputed,
+            )
+            payload = envelope.model_dump_json(by_alias=True)
             assistant_content_parts.append(payload)
             yield payload
             return
