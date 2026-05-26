@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -95,3 +96,31 @@ def test_generate_blocking_delegates_to_output_text_extractor():
     )
 
     assert text == '{"summary":"done"}'
+
+
+def test_generate_stream_yields_openai_deltas_incrementally():
+    events = [
+        SimpleNamespace(type="response.output_text.delta", delta="I'd "),
+        SimpleNamespace(type="response.output_text.delta", delta="close "),
+        SimpleNamespace(type="response.output_text.delta", delta="TSM."),
+        SimpleNamespace(type="response.output_text.done"),
+    ]
+
+    adapter = OpenAIAdapter(client=MagicMock())
+    adapter.client.responses.create.return_value = events
+
+    async def collect() -> list[str]:
+        chunks: list[str] = []
+        async for chunk in adapter.generate_stream(
+            model="gpt-4.1-mini",
+            system_prompt="system",
+            user_prompt=[{"role": "user", "content": "user"}],
+        ):
+            chunks.append(chunk)
+        return chunks
+
+    chunks = asyncio.run(collect())
+
+    assert chunks == ["I'd ", "close ", "TSM."]
+    adapter.client.responses.create.assert_called_once()
+    assert adapter.client.responses.create.call_args.kwargs.get("stream") is True

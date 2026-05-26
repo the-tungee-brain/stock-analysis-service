@@ -1,6 +1,9 @@
-from typing import Any, AsyncGenerator, Dict, List, Optional, Type
+from __future__ import annotations
 
 import asyncio
+import threading
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Type
+
 from openai import OpenAI
 from openai.types.shared import ResponsesModel
 from pydantic import BaseModel
@@ -12,6 +15,8 @@ from app.core.openai_model_utils import (
     resolve_stream_max_output_tokens,
     stream_request_extras,
 )
+
+StreamQueueItem = tuple[Literal["chunk", "done", "error"], Any]
 
 
 class OpenAIAdapter(BaseLLM):
@@ -51,54 +56,72 @@ class OpenAIAdapter(BaseLLM):
         delta = getattr(event, "delta", "")
         return str(delta) if delta else ""
 
-    def _iter_stream_chunks(
+    @staticmethod
+    def _enqueue_stream_item(
+        loop: asyncio.AbstractEventLoop,
+        queue: asyncio.Queue[StreamQueueItem],
+        item: StreamQueueItem,
+    ) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, item)
+
+    def _produce_response_stream(
         self,
         *,
         model: Optional[ResponsesModel],
         input_messages: List[Dict[str, Any]],
         max_output_tokens: int | None,
-    ) -> tuple[list[str], bool, str | None]:
-        resolved_tokens = resolve_stream_max_output_tokens(
-            model=model,
-            max_output_tokens=max_output_tokens,
-        )
-        stream = self.client.responses.create(
-            model=model or settings.OPENAI_MODEL,
-            input=input_messages,
-            stream=True,
-            max_output_tokens=resolved_tokens,
-            **stream_request_extras(model),
-        )
-
-        chunks: list[str] = []
+        loop: asyncio.AbstractEventLoop,
+        queue: asyncio.Queue[StreamQueueItem],
+    ) -> None:
         incomplete = False
         error_message: str | None = None
+        saw_text = False
 
-        for event in stream:
-            event_type = getattr(event, "type", "")
+        try:
+            resolved_tokens = resolve_stream_max_output_tokens(
+                model=model,
+                max_output_tokens=max_output_tokens,
+            )
+            stream = self.client.responses.create(
+                model=model or settings.OPENAI_MODEL,
+                input=input_messages,
+                stream=True,
+                max_output_tokens=resolved_tokens,
+                **stream_request_extras(model),
+            )
 
-            delta = self._extract_text_delta(event)
-            if delta:
-                chunks.append(delta)
+            for event in stream:
+                event_type = getattr(event, "type", "")
 
-            if event_type in {"response.failed", "error"}:
-                message = getattr(event, "message", None) or getattr(
-                    event, "error", None
-                )
-                error_message = str(message) if message else "Unknown model error"
-                break
+                delta = self._extract_text_delta(event)
+                if delta:
+                    saw_text = True
+                    self._enqueue_stream_item(loop, queue, ("chunk", delta))
 
-            if event_type == "response.incomplete":
-                incomplete = True
-                break
+                if event_type in {"response.failed", "error"}:
+                    message = getattr(event, "message", None) or getattr(
+                        event, "error", None
+                    )
+                    error_message = str(message) if message else "Unknown model error"
+                    break
 
-            if event_type in {
-                "response.output_text.done",
-                "response.text.done",
-            }:
-                break
+                if event_type == "response.incomplete":
+                    incomplete = True
+                    break
 
-        return chunks, incomplete, error_message
+                if event_type in {
+                    "response.output_text.done",
+                    "response.text.done",
+                }:
+                    break
+
+            self._enqueue_stream_item(
+                loop,
+                queue,
+                ("done", (incomplete, error_message, saw_text)),
+            )
+        except Exception as exc:
+            self._enqueue_stream_item(loop, queue, ("error", exc))
 
     async def generate_stream(
         self,
@@ -118,32 +141,48 @@ class OpenAIAdapter(BaseLLM):
             *user_prompt,
         ]
 
+        queue: asyncio.Queue[StreamQueueItem] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        thread = threading.Thread(
+            target=self._produce_response_stream,
+            kwargs={
+                "model": model,
+                "input_messages": input_messages,
+                "max_output_tokens": max_output_tokens,
+                "loop": loop,
+                "queue": queue,
+            },
+            daemon=True,
+        )
+        thread.start()
+
         try:
-            chunks, incomplete, error_message = await asyncio.to_thread(
-                self._iter_stream_chunks,
-                model=model,
-                input_messages=input_messages,
-                max_output_tokens=max_output_tokens,
-            )
-        except Exception as exc:
-            yield f"Sorry, the model request failed: {exc}"
-            return
+            while True:
+                kind, payload = await queue.get()
 
-        if error_message and not chunks:
-            yield f"Sorry, the model could not finish: {error_message}"
-            return
+                if kind == "chunk":
+                    yield payload
+                    continue
 
-        for chunk in chunks:
-            yield chunk
-            await asyncio.sleep(0)
+                if kind == "error":
+                    yield f"Sorry, the model request failed: {payload}"
+                    return
 
-        if incomplete and not chunks:
-            yield (
-                "Sorry, the model ran out of output budget before producing text. "
-                "Try again or switch to a faster model."
-            )
-        elif incomplete and chunks:
-            yield "\n\n*(Response may be truncated.)*"
+                incomplete, error_message, saw_text = payload
+                if error_message and not saw_text:
+                    yield f"Sorry, the model could not finish: {error_message}"
+                    return
+
+                if incomplete and not saw_text:
+                    yield (
+                        "Sorry, the model ran out of output budget before producing text. "
+                        "Try again or switch to a faster model."
+                    )
+                elif incomplete and saw_text:
+                    yield "\n\n*(Response may be truncated.)*"
+                return
+        finally:
+            thread.join(timeout=0.25)
 
     def generate_blocking(
         self,

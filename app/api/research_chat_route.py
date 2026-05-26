@@ -63,37 +63,6 @@ async def research_chat(
             media_type="text/plain; charset=utf-8",
         )
 
-    ctx = await asyncio.to_thread(
-        company_research_service.build_context,
-        symbol=symbol,
-    )
-
-    holdings_block = None
-    intelligence_block = None
-    try:
-        schwab_token = schwab_auth_service.get_valid_token_by_user_id(
-            user_id=user_id
-        )
-        account_map = portfolio_service.get_enriched_account(
-            access_token=schwab_token.access_token
-        )
-        account = account_map["account"]
-        positions = account.securitiesAccount.positions
-        holdings_block, intelligence_block = await asyncio.to_thread(
-            portfolio_analysis_service.build_research_chat_holdings_context,
-            user_id=user_id,
-            symbol=symbol,
-            account=account,
-            positions=positions,
-            access_token=schwab_token.access_token,
-        )
-    except SchwabReauthRequired:
-        holdings_block = None
-        intelligence_block = None
-    except Exception:
-        holdings_block = None
-        intelligence_block = None
-
     session_id, is_first_chat = chat_service.get_research_chat_session_id(
         user_id=user_id,
         symbol=symbol,
@@ -101,14 +70,6 @@ async def research_chat(
         model=request.model,
     )
     recent_messages = chat_service.get_chat_messages_by_session(session_id=session_id)
-
-    user_message = prompt_enrichment_service.build_research_chat_user_message(
-        ctx=ctx,
-        user_prompt=prompt,
-        include_context=is_first_chat,
-        holdings_block=holdings_block,
-        intelligence_block=intelligence_block,
-    )
 
     if session_id:
         chat_service.create_message(
@@ -120,6 +81,47 @@ async def research_chat(
     assistant_content_parts: List[str] = []
 
     async def streamer():
+        yield "Looking up company data and your question…\n\n"
+
+        ctx = await asyncio.to_thread(
+            company_research_service.build_context,
+            symbol=symbol,
+        )
+
+        holdings_block = None
+        intelligence_block = None
+        try:
+            schwab_token = schwab_auth_service.get_valid_token_by_user_id(
+                user_id=user_id
+            )
+            account_map = portfolio_service.get_enriched_account(
+                access_token=schwab_token.access_token
+            )
+            account = account_map["account"]
+            positions = account.securitiesAccount.positions
+            holdings_block, intelligence_block = await asyncio.to_thread(
+                portfolio_analysis_service.build_research_chat_holdings_context,
+                user_id=user_id,
+                symbol=symbol,
+                account=account,
+                positions=positions,
+                access_token=schwab_token.access_token,
+            )
+        except SchwabReauthRequired:
+            holdings_block = None
+            intelligence_block = None
+        except Exception:
+            holdings_block = None
+            intelligence_block = None
+
+        user_message = prompt_enrichment_service.build_research_chat_user_message(
+            ctx=ctx,
+            user_prompt=prompt,
+            include_context=is_first_chat,
+            holdings_block=holdings_block,
+            intelligence_block=intelligence_block,
+        )
+
         async for chunk in llm_service.analyze_option_position(
             model=request.model or settings.OPENAI_MODEL,
             system_prompt=RESEARCH_CHAT_SYSTEM_MESSAGE,
@@ -140,4 +142,8 @@ async def research_chat(
     return StreamingResponse(
         streamer(),
         media_type="text/plain; charset=utf-8",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )

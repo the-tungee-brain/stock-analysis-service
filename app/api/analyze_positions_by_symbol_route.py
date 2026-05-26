@@ -105,32 +105,6 @@ async def analyze_positions_by_symbol(
         user_prompt=request.prompt,
     )
 
-    ctx = await portfolio_analysis_service.build_analysis_context(
-        user_id=user_id,
-        account=request.account,
-        positions=positions,
-        session_id=request.session_id,
-        symbol=request.symbol,
-        user_prompt=request.prompt,
-        action=request.action,
-        include_market_data=include_context,
-    )
-
-    user_prompt = prompt_enrichment_service.build_portfolio_strategy_prompt(
-        ctx=ctx,
-        include_context=include_context,
-        json_response=json_v1,
-    )
-    if json_v1 and request.analysis_instructions:
-        user_prompt = {
-            "role": "user",
-            "content": (
-                user_prompt["content"]
-                + "\n\n"
-                + request.analysis_instructions.strip()
-            ),
-        }
-
     if session_id:
         chat_service.create_message(
             session_id=session_id,
@@ -141,6 +115,37 @@ async def analyze_positions_by_symbol(
     assistant_content_parts: List[str] = []
 
     async def streamer():
+        if json_v1:
+            yield "Reviewing your portfolio…\n\n"
+        else:
+            yield "Pulling together your holdings and market context…\n\n"
+
+        ctx = await portfolio_analysis_service.build_analysis_context(
+            user_id=user_id,
+            account=request.account,
+            positions=positions,
+            session_id=request.session_id,
+            symbol=request.symbol,
+            user_prompt=request.prompt,
+            action=request.action,
+            include_market_data=include_context,
+        )
+
+        user_prompt = prompt_enrichment_service.build_portfolio_strategy_prompt(
+            ctx=ctx,
+            include_context=include_context,
+            json_response=json_v1,
+        )
+        if json_v1 and request.analysis_instructions:
+            user_prompt = {
+                "role": "user",
+                "content": (
+                    user_prompt["content"]
+                    + "\n\n"
+                    + request.analysis_instructions.strip()
+                ),
+            }
+
         if json_v1:
             system_prompt = system_message_for_structured_v1_analysis(
                 symbol=request.symbol
@@ -183,4 +188,8 @@ async def analyze_positions_by_symbol(
     return StreamingResponse(
         streamer(),
         media_type="text/plain; charset=utf-8",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
