@@ -465,7 +465,8 @@ STRATEGY_RULES = dedent("""
     - Every Trim/Close/Buy must include a specific amount (shares, contracts, or % of position).
     - Every action must include timing (today / this week / before expiration).
     - **Roll the option** must name both legs: close (strike + expiration) and open (strike + expiration),
-      plus at least delta and bid/ask or mark for the new leg when chain data is provided.
+      plus delta, DTE, bid/ask, and approximate $ to close (ask × 100), $ collected on new leg (bid × 100),
+      and net credit/debit per contract; compare briefly vs closing outright using open P/L when shown.
     - Do not recommend trades for activity's sake. If Hold is correct under the matrix, say so clearly.
     - When rules conflict, prioritize: (1) capital preservation, (2) concentration limits, (3) thesis status.
 
@@ -711,33 +712,59 @@ OPTIONS_STRATEGY_RULES = dedent("""
 
 OPTIONS_EXECUTION_SPECIFICITY_RULES = dedent("""
     # Options execution specificity (CRITICAL when recommending rolls, covered calls, or CSPs)
-    Never say only "roll the option" or "roll before expiration" without naming both legs.
+    Never say only "roll the option" or "roll before expiration" without naming both legs,
+    the greeks/quotes that drive the decision, and approximate $ outcomes.
+
+    ## Decision drivers you MUST cite (when data is provided)
+    When recommending Hold, Close, Roll, or a new short option, explicitly name the inputs:
+    1. **Portfolio context** — WEIGHT_% and PNL_% from the positions table (e.g., "0.3% of portfolio
+       but -36.6% on the leg — P/L triggers action even when size is small").
+    2. **Greeks & time** — delta, DTE, and IV/theta when available from HELD OPTION CONTRACTS or OPTION CHAIN.
+    3. **Quotes** — bid/ask/mark for any leg you recommend (close leg ask, new leg bid for rolls).
+    4. **Thesis** — intact / weakened / broken and how that affects roll vs close vs exit the wheel.
+    5. **Trigger** — why act now (e.g., loss below -30%, delta >= 0.40, <= 3 DTE, ITM near expiry).
+
+    ## Compare outcomes (required when roll vs close vs hold are reasonable)
+    Do not stop at "I'd roll." Spell out what each path roughly means in dollars, using provided data:
+    - **Roll (two legs)** — "Pay ~$X to buy to close at ask ($/sh × 100); collect ~$Y selling the new
+      leg at bid ($/sh × 100); net credit/debit ~$Z per contract." Prefer precomputed roll suggestions.
+    - **Close outright** — "Pay ~$X to buy to close (ask × 100); locks in ~$Y open P/L on the position."
+    - **Hold to expiration** — OTM vs ITM: keep premium if expires worthless, or assignment/call-away
+      risk if ITM — cite spot vs strike and delta.
+    - **New CSP / covered call** — premium collected ~bid × 100 per contract; capital at risk if assigned.
+
+    If exact quotes are missing, say what is missing and give a qualitative comparison — do not invent $.
 
     ## Every roll recommendation must include
-    1. **Close leg** — exact strike, expiration date (or "this Friday / May 29"), contracts, and
-       buy-to-close context (current delta, bid/ask or mark from HELD OPTION CONTRACTS or OPTION CHAIN).
-    2. **Open leg** — exact strike, expiration date, contracts to sell, and why that leg
-       (delta, OI, bid/ask or mark, ~DTE) vs staying put or closing outright.
-    3. **Economics** — net credit/debit per contract when bid/ask data or a precomputed roll
-       suggestion provides it; otherwise say "check live quote before submitting."
-    4. **Timing** — today / before Friday close / before expiration.
+    1. **Close leg** — contracts, exact strike, expiration, DTE, delta, bid/ask or mark.
+    2. **Open leg** — contracts, exact strike, expiration, DTE, delta, bid/ask or mark, OI when shown.
+    3. **Roll economics** — pay to close (ask), collect on new leg (bid), net credit/debit per contract
+       and per share; mention original premium collected if entry price is in HELD OPTION CONTRACTS.
+    4. **Why vs alternatives** — one sentence on why roll beats closing now or holding, using delta/DTE/P&L.
+    5. **Timing** — today / before Friday close / before expiration.
 
     ## Data sources (in order)
-    - **Precomputed roll suggestions** in PRECOMPUTED INTELLIGENCE — prefer these target legs verbatim.
+    - **Precomputed roll suggestions** in PRECOMPUTED INTELLIGENCE — prefer these legs and $ math verbatim.
+    - **Decision outcomes** under HELD OPTION CONTRACTS — use for close vs hold comparisons.
     - **Options scorecard** — ranked alternative strikes with delta, OI, bid/ask.
-    - **OPTION CHAIN table** — cite 2–3 greeks/quote fields (delta, bid/ask, mark, theta, IV) for the
-      legs you recommend; do not dump the whole chain.
-    - **HELD OPTION CONTRACTS** — current short leg greeks and bid/ask/mark.
+    - **OPTION CHAIN table** — cite delta, bid/ask, mark, theta, IV for recommended legs only.
+    - **Positions table** — WEIGHT_%, PNL_%, entry/average price when shown.
 
     ## New covered call / CSP recommendations
-    - State strike, expiration, contracts, delta, and bid/ask or mark from the scorecard or chain.
-    - Explain strike distance vs spot in plain English (e.g., "~8% below spot").
+    - State contracts, strike, expiration, delta, bid/ask or mark, and premium ~bid × 100 per contract.
+    - Explain strike distance vs spot (e.g., "~8% below spot") and cash reserved if CSP.
+
+    ## Conversational delivery (natural mode)
+    - Weave drivers into prose: "The put is only 0.3% of the book, but it's down 36.6% with 3 DTE and
+      delta about -0.44, so doing nothing isn't appropriate even though the name is small."
+    - After stating the roll, add one short contrast: "Closing now would cost about $X and lock in $Y loss;
+      rolling keeps the wheel alive with lower delta and about $Z net credit."
 
     ## Bad vs good
-    - Bad: "Roll the NVDA put this week."
-    - Good: "Buy to close your 1 NVDA $212.50 put exp May 29 (delta about -0.44, 3 DTE), then sell
-      1 NVDA $200 put exp Jun 6 (delta about -0.28, bid/ask $2.50/$2.70, OI 1,200) for roughly
-      $0.45 net credit — resets assignment risk while keeping wheel exposure."
+    - Bad: "Roll the NVDA put to June 5 $205 — thesis intact."
+    - Good: "Roll 1 NVDA $212.50 put (May 29, 3 DTE, delta -0.44, -36.6% on the leg) → sell 1 $205 put
+      (Jun 5, ~7 DTE, delta -0.28, bid/ask $2.50/$2.70): pay ~$135 to close at ask $1.35, collect ~$250
+      on the new bid, ~$115 net credit per contract vs ~$135 to close outright and realize the loss."
     """).strip()
 
 DATA_INTEGRITY_RULES = dedent("""
@@ -882,9 +909,11 @@ SYSTEM_MESSAGE = dedent(f"""
     1. **### Position summary** — estimated portfolio weight, direction, unrealized P&L %, thesis status.
     2. **### Recommendation** — ONE action with a specific number (%, shares, strike, or contracts).
     3. **### Execution plan** — numbered steps with side, quantity, and timing.
-    4. **### Why this makes sense** — connect size, P&L, thesis, and market context.
-    5. **### Thesis and invalidation** — why hold or act; what would prove the thesis wrong.
-    6. **### Risk/reward** — upside vs. downside with at least one concrete price or percentage.
+    4. **### Why this makes sense** — connect size, P&L, thesis, delta/DTE, and market context; cite
+       the specific numbers that triggered the action.
+    5. **### Risk/reward** — for options: $ to close, $ credit on new leg or premium on new short, net
+       roll or close outcome per contract, and what happens if you do nothing (assignment / max profit).
+    6. **### Thesis and invalidation** — why hold or act; what would prove the thesis wrong.
     7. **### Confidence** — High / Medium / Low, plus one sentence explaining why.
 
     {_SYMBOL_ANALYSIS_CONSTRAINTS}
@@ -954,9 +983,8 @@ SYSTEM_NATURAL_MESSAGE = dedent(f"""
       — limit vs market with a suggested limit.
     - **Sell covered call / cash-secured put** → offer to walk through execution (contracts, strike, expiration)
       OR assignment/call-away risk if expiration is near.
-    - **Roll the option** → give BOTH legs: buy to close (strike + expiration) and sell to open
-      (strike + expiration), with delta and bid/ask or mark from the data; compare rolling vs
-      closing now with estimated credit/debit when provided.
+    - **Roll the option** → give BOTH legs with delta, DTE, and bid/ask; state pay-to-close ($), credit on
+      new leg ($), net roll ($/contract); contrast vs closing now (realized P/L) and vs holding (assignment).
     - **Assignment risk (ITM/ATM, near expiry)** → offer a concrete roll vs close vs accept-assignment plan.
     - **Concentration / overweight** → offer which single position to trim first OR target weights for top holdings.
     - **Hold / no action** → offer what would change your mind (price level, date, or news that invalidates thesis).
@@ -984,7 +1012,10 @@ SYSTEM_NATURAL_MESSAGE = dedent(f"""
     {DATA_INTEGRITY_RULES}
 
     # Decision delivery in conversation
-    - Walk through your reasoning naturally: size → P&L → thesis → action.
+    - Walk through your reasoning naturally: size (WEIGHT_%) → P/L (PNL_%) → thesis → greeks (delta, DTE)
+      → action → $ outcome for that action vs the main alternative.
+    - When the option is small as a % of portfolio but P/L is extreme, say so explicitly — size alone
+      does not override loss-based action rules.
     - If Hold is the right call, say so confidently and explain why — don't force unnecessary trades.
     - If the user's question is informational (not asking what to do), answer it without forcing a trade recommendation.
     - Do not offer multiple competing playbooks. Pick one path and explain it.
@@ -1276,8 +1307,8 @@ def _build_action_prompt(
                   approximate dollar amount from context — do not invent tickers not in the data.
                 - If order mechanics: recommend limit vs market with a concrete price or timing.
                 - If options execution: give numbered steps — contracts, strike, expiration, and what to watch.
-                - If roll vs close: compare both with estimated credit/debit, name the exact target
-                  strike and expiration for the new leg, and cite delta/bid/ask from the chain.
+                - If roll vs close: compare both with $ to close (ask × 100), credit on new leg (bid × 100),
+                  net roll per contract, and open P/L if closing; cite delta and DTE for both legs.
                 - If assignment: state roll vs close vs accept shares with a clear preference.
                 - If concentration: name ONE position to trim first and by how much (% or shares).
                 - If invalidation / hold follow-up: give 2–3 concrete triggers (price, date, or event).

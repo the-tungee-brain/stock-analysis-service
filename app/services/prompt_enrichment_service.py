@@ -1053,8 +1053,9 @@ class PromptEnrichmentService:
             return None
 
         lines = [
-            "## Precomputed roll suggestions (prefer these legs when recommending a roll)",
-            "Each line is a two-leg order: buy to close the current short option, then sell the new one.",
+            "## Precomputed roll suggestions (prefer these legs and $ math when recommending a roll)",
+            "Each line is a two-leg order: buy to close the current short option (pay ask), then sell the new one (collect bid).",
+            "Repeat the pay-to-close, collect-on-new-leg, and net credit/debit figures in your answer.",
         ]
         for suggestion in suggestions:
             side_label = "covered call" if suggestion.side == "call" else "cash-secured put"

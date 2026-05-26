@@ -82,8 +82,8 @@ class OptionRollPlannerService:
             current_bid = quoted_bid(current_contract)
             current_ask = quoted_ask(current_contract)
             estimated_credit = OptionRollPlannerService._estimate_roll_credit(
-                current_contract_bid=current_bid,
-                alternative_ask=alternative.ask,
+                current_contract_ask=current_ask,
+                alternative_bid=alternative.bid,
             )
 
             rationale = OptionRollPlannerService._build_rationale(
@@ -95,6 +95,8 @@ class OptionRollPlannerService:
                 current_ask=current_ask,
                 alternative=alternative,
                 estimated_credit=estimated_credit,
+                open_pnl=position.openProfitLoss,
+                entry_credit_per_share=position.averagePrice,
             )
 
             suggestions.append(
@@ -203,6 +205,8 @@ class OptionRollPlannerService:
         current_ask: float | None,
         alternative: OptionsStrikeCandidate,
         estimated_credit: float | None,
+        open_pnl: float | None = None,
+        entry_credit_per_share: float | None = None,
     ) -> str:
         alt_dte = OptionsScoringService._expiration_dte(alternative.expiration)
         rationale = (
@@ -233,17 +237,39 @@ class OptionRollPlannerService:
         if close_delta is not None and alternative.delta is not None:
             if abs(close_delta) > abs(alternative.delta):
                 rationale += "; lowers assignment delta"
+        if current_ask is not None:
+            rationale += f"; pay ~${current_ask * 100:,.0f}/contract to close (ask ${current_ask:.2f}/sh)"
+        if alternative.bid is not None:
+            rationale += (
+                f"; collect ~${alternative.bid * 100:,.0f}/contract on new leg "
+                f"(bid ${alternative.bid:.2f}/sh)"
+            )
         if estimated_credit is not None:
-            rationale += f"; estimated net credit ~${estimated_credit:.2f}/contract"
+            net_per_contract = estimated_credit * 100
+            if estimated_credit >= 0:
+                rationale += (
+                    f"; estimated net credit ~${estimated_credit:.2f}/sh "
+                    f"(~${net_per_contract:,.0f}/contract)"
+                )
+            else:
+                rationale += (
+                    f"; estimated net debit ~${abs(estimated_credit):.2f}/sh "
+                    f"(~${abs(net_per_contract):,.0f}/contract to roll)"
+                )
+        if open_pnl is not None:
+            rationale += f"; current open P/L ${open_pnl:,.0f}"
+        if entry_credit_per_share and entry_credit_per_share > 0:
+            rationale += (
+                f"; original premium collected ~${entry_credit_per_share * 100:,.0f}/contract"
+            )
         return rationale
 
     @staticmethod
     def _estimate_roll_credit(
         *,
-        current_contract_bid: float | None,
-        alternative_ask: float | None,
+        current_contract_ask: float | None,
+        alternative_bid: float | None,
     ) -> float | None:
-        if current_contract_bid is None or alternative_ask is None:
+        if current_contract_ask is None or alternative_bid is None:
             return None
-        credit = current_contract_bid - alternative_ask
-        return round(max(credit, 0.0), 2)
+        return round(alternative_bid - current_contract_ask, 2)

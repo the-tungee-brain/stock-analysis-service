@@ -7,6 +7,7 @@ import pytest
 from app.broker.option_chain_table import build_option_chain_table, format_held_option_contracts_markdown
 from app.broker.option_greeks import (
     estimate_delta_black_scholes,
+    format_short_option_decision_outcomes,
     normalize_iv_percent,
     resolve_option_greeks,
     sanitize_delta,
@@ -96,6 +97,29 @@ def test_format_held_option_contracts_includes_scenarios():
     assert "Profit scenarios" in markdown
     assert "delta -999" not in markdown
     assert "estimated" in markdown.lower() or "Black-Scholes" in markdown
+
+
+def test_format_short_option_decision_outcomes_includes_close_and_roll_math():
+    block = format_short_option_decision_outcomes(
+        put_call="PUT",
+        side="short",
+        strike=212.5,
+        underlying=220.0,
+        days_to_expiration=3,
+        contracts=1,
+        entry_credit_per_share=2.0,
+        mark_per_share=1.35,
+        bid=1.20,
+        ask=1.35,
+        delta=-0.44,
+        open_pnl=-730.0,
+    )
+
+    assert "Decision outcomes" in block
+    assert "pay ~$135" in block
+    assert "Delta -0.44" in block
+    assert "open P/L" in block
+    assert "Original premium collected" in block
 
 
 def test_estimate_delta_black_scholes_atm_call():

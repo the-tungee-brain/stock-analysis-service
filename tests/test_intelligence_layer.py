@@ -345,6 +345,14 @@ def test_symbol_intelligence_serializes_camel_case_aliases():
     assert "peer_comparison" not in payload
 
 
+def test_roll_planner_estimates_credit_from_new_bid_minus_close_ask():
+    credit = OptionRollPlannerService._estimate_roll_credit(
+        current_contract_ask=1.35,
+        alternative_bid=2.50,
+    )
+    assert credit == 1.15
+
+
 def test_format_intelligence_block_renders_roll_suggestions():
     intelligence = SymbolIntelligence(
         symbol="NVDA",

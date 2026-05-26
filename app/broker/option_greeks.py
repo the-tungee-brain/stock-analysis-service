@@ -205,3 +205,78 @@ def format_option_move_scenarios(
         "  Profit scenarios (first-order, using mark/cost and delta when available):\n"
     )
     return header + "\n".join(lines) + "\n"
+
+
+def format_short_option_decision_outcomes(
+    *,
+    put_call: str,
+    side: str,
+    strike: float,
+    underlying: float | None,
+    days_to_expiration: int,
+    contracts: float,
+    entry_credit_per_share: float | None,
+    mark_per_share: float | None,
+    bid: float | None,
+    ask: float | None,
+    delta: float | None,
+    open_pnl: float | None,
+) -> str:
+    if side != "short":
+        return ""
+
+    lines: list[str] = [
+        "  Decision outcomes (use these $ figures when comparing roll vs close vs hold; "
+        "multiply per-share quotes by 100 per contract):"
+    ]
+
+    if entry_credit_per_share and entry_credit_per_share > 0:
+        lines.append(
+            f"  Original premium collected: ~${entry_credit_per_share * 100:,.0f}/contract "
+            f"(${entry_credit_per_share:.2f}/sh at open)"
+        )
+
+    if open_pnl is not None:
+        lines.append(f"  Current open P/L on position: ${open_pnl:,.0f}")
+
+    if ask is not None:
+        lines.append(
+            f"  Close outright (buy to close at ask ${ask:.2f}/sh): "
+            f"pay ~${ask * 100:,.0f}/contract"
+        )
+    elif mark_per_share is not None:
+        lines.append(
+            f"  Close outright (mark ${mark_per_share:.2f}/sh): "
+            f"~${mark_per_share * 100:,.0f}/contract to exit"
+        )
+
+    if bid is not None and ask is not None:
+        lines.append(
+            f"  Roll math template: pay ~${ask * 100:,.0f} to close + collect ~${bid * 100:,.0f} "
+            f"on new short leg (bid on sell-to-open) → net per contract depends on new leg quote"
+        )
+
+    if underlying is not None:
+        if put_call.upper() == "PUT":
+            itm = underlying < strike
+            lines.append(
+                f"  Hold to expiration: spot ${underlying:.2f} vs ${strike:g} put — "
+                f"{'ITM (assignment to buy shares possible)' if itm else 'OTM (may expire worthless, keep premium if fully OTM)'}"
+            )
+        else:
+            itm = underlying > strike
+            lines.append(
+                f"  Hold to expiration: spot ${underlying:.2f} vs ${strike:g} call — "
+                f"{'ITM (shares may be called away)' if itm else 'OTM (may expire worthless, keep premium if fully OTM)'}"
+            )
+
+    if delta is not None:
+        lines.append(
+            f"  Delta {delta:.2f} ({days_to_expiration} DTE): primary driver for assignment proximity "
+            f"— cite this when explaining why to roll, close, or hold"
+        )
+
+    if len(lines) <= 1:
+        return ""
+
+    return "\n".join(lines) + "\n"

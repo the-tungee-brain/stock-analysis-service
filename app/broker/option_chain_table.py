@@ -6,6 +6,7 @@ from datetime import date, datetime
 from app.broker.option_greeks import (
     format_greek_value,
     format_option_move_scenarios,
+    format_short_option_decision_outcomes,
     resolve_option_greeks,
 )
 from app.broker.option_utils import (
@@ -429,6 +430,7 @@ def format_held_option_contracts_markdown(
         side = "long" if position.longQuantity > 0 else "short"
         mkt_val = position.marketValue
         pnl = position.openProfitLoss
+        entry_per_share = position.averagePrice or position.averageLongPrice
 
         if contract is None:
             lines.append(
@@ -455,6 +457,12 @@ def format_held_option_contracts_markdown(
         underlying_label = (
             f"${underlying_price:.2f}" if underlying_price is not None else "N/A"
         )
+        pnl_label = f", open P/L ${pnl:,.0f}" if pnl is not None else ""
+        entry_label = (
+            f", entry ${entry_per_share:.2f}/sh"
+            if entry_per_share and entry_per_share > 0
+            else ""
+        )
         lines.append(
             f"- {put_call} ${strike:g} exp {expiration.isoformat()} ({side} {qty:g}, {days_to_exp} DTE): "
             f"underlying {underlying_label} | bid/ask/mark "
@@ -462,9 +470,24 @@ def format_held_option_contracts_markdown(
             f"delta {format_greek_value(greeks.delta, source=greeks.delta_source)} | "
             f"theta {format_greek_value(greeks.theta, source='broker', precision=3)} | "
             f"IV {format_greek_value(greeks.iv_percent, source=greeks.iv_source, suffix='%')} | "
-            f"position MKT_VAL ${mkt_val:,.2f}"
+            f"position MKT_VAL ${mkt_val:,.2f}{entry_label}{pnl_label}"
         )
-        if underlying_price and mark:
+        if side == "short":
+            scenario_block = format_short_option_decision_outcomes(
+                put_call=put_call,
+                side=side,
+                strike=strike,
+                underlying=underlying_price,
+                days_to_expiration=days_to_exp,
+                contracts=qty,
+                entry_credit_per_share=entry_per_share,
+                mark_per_share=mark,
+                bid=bid,
+                ask=ask,
+                delta=greeks.delta,
+                open_pnl=pnl,
+            )
+        elif underlying_price and mark:
             scenario_block = format_option_move_scenarios(
                 put_call=put_call,
                 side=side,
@@ -475,8 +498,10 @@ def format_held_option_contracts_markdown(
                 mark_per_share=mark,
                 delta=greeks.delta,
             )
-            if scenario_block:
-                lines.append(scenario_block.rstrip())
+        else:
+            scenario_block = ""
+        if scenario_block:
+            lines.append(scenario_block.rstrip())
 
     if not lines:
         return "No held option contracts for this symbol."
