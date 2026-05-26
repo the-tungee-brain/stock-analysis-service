@@ -61,7 +61,7 @@ def test_diversification_summary_includes_cash_map_and_holding_review():
     assert "Suggested trim plan (precomputed" in block
     assert "NVDA:" in block
     assert "trim ~$" in block
-    assert "Total capital available to redeploy" in block
+    assert "Total cash available to invest" in block
 
 
 def test_diversification_summary_includes_top_holdings_and_cash():
@@ -81,7 +81,7 @@ def test_diversification_summary_includes_top_holdings_and_cash():
     assert "Top 1 / 3 / 5 weights" in block
     assert "NVDA" in block
     assert "Deployable cash" in block
-    assert "CRITICAL (>30%)" in block
+    assert "Too large — over 30% of portfolio" in block
 
 
 def test_diversification_summary_respects_profile_single_name_limit():
@@ -101,7 +101,7 @@ def test_diversification_summary_respects_profile_single_name_limit():
 
     assert block is not None
     assert "Single-name target from profile: 15% max" in block
-    assert "ELEVATED (15–20%)" in block
+    assert "Large — 15–20% of portfolio" in block
 
 
 def test_diversification_summary_includes_sector_weights():
@@ -122,7 +122,7 @@ def test_diversification_summary_includes_sector_weights():
 
     assert block is not None
     assert "Sector weights" in block
-    assert "SECTOR CRITICAL (>30%)" in block
+    assert "sector is over 30% of portfolio" in block
 
 
 def test_diversification_summary_includes_etf_core_gap():

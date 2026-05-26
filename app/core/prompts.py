@@ -647,16 +647,18 @@ PORTFOLIO_MONEY_DIVISION_RULES = dedent("""
     3. **Account for every dollar** — in "Where to put money smarter", assign deployable cash and
        any trim proceeds to specific tickers OR explicitly hold as buffer; no vague "consider diversifying."
     4. **Trims before adds** — if **Suggested trim plan (precomputed)** exists, rank trims first when
-       any name is HIGH/CRITICAL; show how freed $ combines with deployable cash.
+       any name is "Too large" or "Very large"; show how freed $ combines with deployable cash.
     5. **Deploy plan** — copy **Suggested deploy plan (precomputed)** per-ticker $ when present;
        otherwise split deployable cash across largest underweights using "~$X to buy" gap lines.
     6. **After picture** — for each ranked action, state expected weight change (e.g. "NVDA 35% → ~22%").
 
     ## Anti-patterns (never do these)
     - Generic advice without $ amounts from the precomputed blocks.
-    - Recommending a new buy while a top name is CRITICAL/HIGH without addressing the trim.
+    - Recommending a new buy while a top name is too large without addressing the trim.
     - Inventing tickers not in holding review, ETF gap, strategy list, or deploy plan.
     - Summarizing only top-1 concentration while ignoring other lines in holding review.
+    - Using internal jargon like "CRITICAL", "ROOM TO ADD", or "by weight" — use plain language
+      (e.g. "this stock is over 30% of your portfolio", "you can buy more of this one").
     """).strip()
 
 PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
@@ -671,10 +673,11 @@ PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
     - Use **Sector allocation** and **Market headlines (general, last 24h)** from PORTFOLIO INTELLIGENCE when present.
     - Treat short-put underlyings as intentional concentration (options overlay).
 
-    ## Step 2 — Single-name concentration
-    - Above 30% → MUST trim. Target under 20%. Do not recommend adding to that name.
-    - 20–30% → HIGH. Trim toward 15% before deploying new cash into correlated names.
-    - 15–20% → ELEVATED. Hold OK; do not add unless profile allows and name is under target.
+    ## Step 2 — Single-name concentration (use plain language with the investor)
+    - Above 30% → too large. Must trim. Target under 20%. Do not recommend adding to that name.
+    - 20–30% → very large. Trim toward 15% before putting new cash into similar names.
+    - 15–20% → getting large. OK to hold; do not add unless the name is still small vs their limit.
+    - Below half their per-stock limit → "Small position — room to add" if it fits their plan.
     - Below 15% → flexible for adds if it improves diversification.
 
     ## Step 3 — Sector and theme overlap

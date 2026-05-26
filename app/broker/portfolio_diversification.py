@@ -71,13 +71,13 @@ def _short_put_underlyings(positions: list[Position]) -> list[str]:
 
 def _concentration_flags(weight_pct: float, limit_pct: float) -> str:
     if weight_pct >= 30:
-        return "CRITICAL (>30%)"
+        return "Too large — over 30% of portfolio"
     if weight_pct >= 20:
-        return "HIGH (20–30%)"
+        return "Very large — 20–30% of portfolio"
     if weight_pct >= 15:
-        return "ELEVATED (15–20%)"
+        return "Large — 15–20% of portfolio"
     if weight_pct >= limit_pct:
-        return f"ABOVE TARGET (>{limit_pct:.0f}%)"
+        return f"Above your {limit_pct:.0f}% per-stock limit"
     return ""
 
 
@@ -111,20 +111,20 @@ def _holding_allocation_status(
     etf_target_pct: float | None = None,
 ) -> str:
     flag = _concentration_flags(weight_pct, single_limit)
-    if flag.startswith("CRITICAL") or flag.startswith("HIGH"):
+    if flag.startswith("Too large") or flag.startswith("Very large"):
         return flag
     if flag:
         return flag
     if etf_target_pct is not None:
         gap = etf_target_pct - weight_pct
         if gap > 1.0:
-            return f"UNDERWEIGHT ETF ({gap:+.1f} pp vs target)"
+            return "Below ETF target"
         if gap < -1.0:
-            return "OVERWEIGHT ETF"
-        return "ETF ON TARGET"
+            return "Above ETF target"
+        return "At ETF target"
     if weight_pct < single_limit * 0.5:
-        return "ROOM TO ADD (under half of max)"
-    return "OK"
+        return "Small position — room to add"
+    return "Good size"
 
 
 def _profile_single_name_limit(profile: UserInvestmentProfile | None) -> float:
@@ -205,7 +205,7 @@ def build_portfolio_allocation_precomputed(
             if trim_dollars >= 1.0:
                 total_trim_proceeds += trim_dollars
                 action_bits.append(
-                    f"trim ~${trim_dollars:,.0f} to reach ~{trim_target:.0f}%"
+                    f"Sell about ${trim_dollars:,.0f} to bring this closer to {trim_target:.0f}% of your portfolio"
                 )
                 trim_plan.append(
                     TrimPlanItem(
@@ -220,19 +220,23 @@ def build_portfolio_allocation_precomputed(
             buy_dollars = max((gap_pct / 100.0) * liquidation, 0.0)
             if gap_pct > 1.0 and buy_dollars >= 1.0:
                 action_bits.append(
-                    f"underweight ETF — gap ~${buy_dollars:,.0f} to target"
+                    f"Buy about ${buy_dollars:,.0f} more to reach your ETF target"
                 )
             elif gap_pct < -1.0:
                 action_bits.append(
-                    "overweight vs ETF target — trim before adding elsewhere"
+                    "Above your ETF target — trim this before buying elsewhere"
                 )
         if not action_bits:
             if weight >= 15:
-                action_bits.append("hold size; do not add until lower")
-            elif status == "ROOM TO ADD (under half of max)":
-                action_bits.append("candidate for new capital if strategy fits")
+                action_bits.append(
+                    "Already a big slice of your portfolio — don't add more yet"
+                )
+            elif status == "Small position — room to add":
+                action_bits.append(
+                    f"Still small vs your {single_name_limit:.0f}% per-stock limit — OK to buy more if it fits your plan"
+                )
             else:
-                action_bits.append("hold — no mandatory trim")
+                action_bits.append("Fine to hold — no trim needed")
 
         holdings.append(
             HoldingAllocationReview(
@@ -249,24 +253,24 @@ def build_portfolio_allocation_precomputed(
         CashMapStep(step=1, label="Cash in account", amount=round(cash, 2)),
         CashMapStep(
             step=2,
-            label="Less cash secured for open short puts",
+            label="Cash reserved for short puts",
             amount=round(csp_reserved, 2),
             is_subtraction=True,
         ),
         CashMapStep(
             step=3,
-            label="Cash after put reserves",
+            label="Cash left after put reserves",
             amount=round(cash_after_csp, 2),
         ),
         CashMapStep(
             step=4,
-            label=f"Less safety buffer ({min_cash_buffer_pct:.0f}% of portfolio)",
+            label=f"Emergency cash buffer ({min_cash_buffer_pct:.0f}% of portfolio)",
             amount=round(min_cash_buffer, 2),
             is_subtraction=True,
         ),
         CashMapStep(
             step=5,
-            label="Deployable cash today",
+            label="Cash you can invest today",
             amount=round(deployable_cash, 2),
         ),
     ]
@@ -275,12 +279,12 @@ def build_portfolio_allocation_precomputed(
             [
                 CashMapStep(
                     step=6,
-                    label="If overweight trims execute",
+                    label="If you trim oversized positions",
                     amount=round(total_trim_proceeds, 2),
                 ),
                 CashMapStep(
                     step=7,
-                    label="Total capital available to redeploy",
+                    label="Total cash available to invest",
                     amount=round(total_to_redeploy, 2),
                 ),
             ]
@@ -311,7 +315,7 @@ def build_portfolio_allocation_precomputed(
                     DeployPlanItem(
                         symbol=symbol_upper,
                         deploy_dollars=round(deploy_amount, 2),
-                        note=f"toward ~${gap_dollars:,.0f} gap to target",
+                        note=f"About ${gap_dollars:,.0f} below your target allocation",
                     )
                 )
 
@@ -435,9 +439,9 @@ def format_diversification_summary_block(
             symbols = ", ".join(sector_weight.symbols[:5])
             flag = ""
             if sector_weight.weight_pct >= 30:
-                flag = " — SECTOR CRITICAL (>30%)"
+                flag = " — sector is over 30% of portfolio"
             elif sector_weight.weight_pct >= 25:
-                flag = " — SECTOR HIGH (>25%)"
+                flag = " — sector is heavily weighted (over 25%)"
             lines.append(
                 f"- {sector}: {sector_weight.weight_pct:.1f}% ({symbols}){flag}"
             )
