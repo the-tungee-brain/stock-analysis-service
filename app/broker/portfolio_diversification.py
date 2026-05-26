@@ -367,20 +367,17 @@ def format_diversification_summary_block(
 
     c = precomputed.concentration
     lines = [
-        "## Portfolio concentration metrics",
-        f"- Liquidation value: ${c.liquidation_value:,.0f}",
-        f"- Cash: ${c.cash:,.0f} ({c.cash_pct:.1f}% of portfolio)",
-        f"- CSP reserved cash: ${c.csp_reserved:,.0f}",
-        f"- Cash after CSP reserves: ${c.cash_after_csp:,.0f}",
-        f"- Suggested min cash buffer ({precomputed.cash_map.min_cash_buffer_pct:.0f}%): "
-        f"${c.min_cash_buffer:,.0f}",
-        f"- Deployable cash (after CSP + buffer): ${c.deployable_cash:,.0f}",
-        f"- Distinct symbols (aggregated): {c.distinct_symbols}",
-        f"- Effective diversification (~1/HHI): {c.effective_names:.1f} names",
-        f"- Top 1 / 3 / 5 weights: {c.top1_pct:.1f}% / {c.top3_pct:.1f}% / {c.top5_pct:.1f}%",
-        f"- Single-name target from profile: {c.single_name_limit_pct:.0f}% max",
+        "Note: the user sees a money map card with cash buckets, holdings, and trim/deploy $. "
+        "Use this block for analysis only — do not repeat it verbatim in JSON output.",
         "",
-        "## Portfolio cash map (precomputed — walk the user through these buckets)",
+        "## Key numbers",
+        f"- Cash you can invest today: ${c.deployable_cash:,.0f}",
+        f"- CSP reserved cash: ${c.csp_reserved:,.0f}",
+        f"- Max per-stock limit (from profile): {c.single_name_limit_pct:.0f}%",
+        f"- Largest holding: {c.top1_pct:.1f}% of portfolio",
+        f"- Top 3 holdings combined: {c.top3_pct:.1f}%",
+        "",
+        "## Portfolio cash map (precomputed — for reasoning only)",
     ]
     for step in precomputed.cash_map.steps:
         if step.amount is None:
@@ -397,7 +394,7 @@ def format_diversification_summary_block(
         )
 
     lines.append(
-        "\n## Holding-by-holding review (precomputed — analyze each line; do not skip names)"
+        "\n## Holding-by-holding review (precomputed — for reasoning only)"
     )
     for holding in precomputed.holdings:
         lines.append(
@@ -422,15 +419,8 @@ def format_diversification_summary_block(
 
     liquidation = c.liquidation_value
     ranked = _aggregate_symbol_weights(positions, liquidation)
-    single_name_limit = c.single_name_limit_pct
     deployable_cash = c.deployable_cash
     total_trim_proceeds = precomputed.total_trim_proceeds
-
-    lines.append("\n## Top holdings by weight")
-    for symbol, market_value, weight in ranked[:10]:
-        flag = _concentration_flags(weight, single_name_limit)
-        suffix = f" — {flag}" if flag else ""
-        lines.append(f"- {symbol}: {weight:.1f}% (${market_value:,.0f}){suffix}")
 
     if sector_weights:
         lines.append("\n## Sector weights (from research snapshot)")

@@ -217,9 +217,10 @@ def test_portfolio_analysis_v1_prompt_uses_json_task_not_markdown_headings():
     assert "Populate the JSON schema" in prompt
     assert "decisive action plan" in prompt
     assert "recommendedAction" in prompt
+    assert "Do NOT add Portfolio cash map" in prompt
     assert "### Portfolio snapshot" not in prompt
     assert "### Portfolio snapshot" not in system_prompt
-    assert "plain text only" in system_prompt
+    assert "money map card" in system_prompt
     assert "DIVERSIFICATION SUMMARY" in prompt
 
     assert wants_structured_analysis_v1(
@@ -299,14 +300,14 @@ def test_portfolio_allocation_prompts_do_not_hardcode_example_etfs():
         AMOUNT_SOURCING_RULES,
         SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE,
         TICKER_SOURCING_RULES,
-        _STRUCTURED_V1_JSON_RULES,
+        _STRUCTURED_PORTFOLIO_V1_JSON_RULES,
     )
 
-    assert "SCHD and ~$1,310 BND" not in _STRUCTURED_V1_JSON_RULES
-    assert "into SCHD and BND" not in _STRUCTURED_V1_JSON_RULES
-    assert "$4,367" not in _STRUCTURED_V1_JSON_RULES
+    assert "SCHD and ~$1,310 BND" not in _STRUCTURED_PORTFOLIO_V1_JSON_RULES
+    assert "into SCHD and BND" not in _STRUCTURED_PORTFOLIO_V1_JSON_RULES
+    assert "$4,367" not in _STRUCTURED_PORTFOLIO_V1_JSON_RULES
     assert "$4,367" not in AMOUNT_SOURCING_RULES
-    assert "Suggested deploy plan" in _STRUCTURED_V1_JSON_RULES
+    assert "Suggested deploy plan" in _STRUCTURED_PORTFOLIO_V1_JSON_RULES
     assert "Suggested deploy plan" in AMOUNT_SOURCING_RULES
     assert "Ticker sourcing" in TICKER_SOURCING_RULES
     assert "Do NOT default to popular ETFs" in TICKER_SOURCING_RULES

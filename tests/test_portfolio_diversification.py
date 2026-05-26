@@ -78,9 +78,9 @@ def test_diversification_summary_includes_top_holdings_and_cash():
     )
 
     assert block is not None
-    assert "Top 1 / 3 / 5 weights" in block
+    assert "Key numbers" in block
     assert "NVDA" in block
-    assert "Deployable cash" in block
+    assert "Cash you can invest today" in block
     assert "Too large — over 30% of portfolio" in block
 
 
@@ -100,7 +100,7 @@ def test_diversification_summary_respects_profile_single_name_limit():
     )
 
     assert block is not None
-    assert "Single-name target from profile: 15% max" in block
+    assert "Max per-stock limit (from profile): 15% max" in block
     assert "Large — 15–20% of portfolio" in block
 
 
@@ -160,7 +160,7 @@ def test_diversification_summary_includes_etf_core_gap():
     assert "expense ratio 0.06%" in block
     assert "SCHD:" in block and "70% target" in block
     assert "BND:" in block and "30% target" in block
-    assert "Deployable cash" in block
+    assert "Deployable cash" in block or "Cash you can invest today" in block
     assert "Suggested deploy plan (precomputed" in block
 
 

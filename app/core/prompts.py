@@ -202,36 +202,43 @@ _STRUCTURED_V1_JSON_RULES = dedent("""
     - sections[].title must be plain text only — never prefix with #, ##, or ###.
     - Use plain English in string fields; use sections[].bullets for ranked steps or lists.
     - recommendedAction.symbol: ticker when the action targets one symbol; use "" when not applicable.
-    - Be decisive — this is a portfolio action plan, not a research memo or bullet diary.
-    - summary: max 3 sentences; sentence 1 must state the biggest problem AND your #1 recommended move
-      with a dollar amount or share count taken only from DIVERSIFICATION SUMMARY (deployable cash,
-      "Suggested deploy plan", "~$X to buy" gap lines, position $ values).
-      Shape (placeholder tokens only — substitute real values from the data blocks):
-      "Deploy [DEPLOYABLE_CASH] into the underweight tickers listed in the suggested deploy plan;
-      trim [SYMBOL] next if it stays above the profile max."
-    - recommendedAction.title: imperative and specific with dollar amounts copied from DIVERSIFICATION SUMMARY.
-      Shape: "Deploy [DEPLOYABLE_CASH] into [TICKER_A] and [TICKER_B]".
-      Bad: "Consider improving diversification".
-    - recommendedAction.reason: 1-2 sentences tying numbers from the data to impact — no hedging.
-    - When deployable cash and ETF allocation gap are both shown, recommendedAction must use the
-      **Suggested deploy plan (precomputed)** lines when present, or allocate deployable cash across
-      the largest underweights using each ticker's "~$X to buy" from the gap table.
+    """).strip()
+
+
+_STRUCTURED_PORTFOLIO_V1_JSON_RULES = dedent("""
+    Output rules (CRITICAL):
+    - Return ONLY valid JSON matching the required schema.
+    - Do not use markdown headings, code fences, or prose outside the JSON object.
+    - sections[].title must be plain text only — never prefix with #, ##, or ###.
+    - Use plain English in string fields; use sections[].bullets for ranked steps or lists.
+    - recommendedAction.symbol: ticker when the action targets one symbol; use "" when not applicable.
+    - Be decisive — this is a portfolio action plan, not a research memo or data transcript.
+
+    ## Do not duplicate the money map UI
+    The app renders a separate card with cash buckets, each holding's size/status, and trim/deploy $.
+    Use DIVERSIFICATION SUMMARY for reasoning only — do NOT transcribe those tables into JSON sections.
+
+    ## JSON fields
+    - summary: max 3 sentences; sentence 1 = biggest issue + your #1 move with a $ amount from the data.
+    - recommendedAction.title: imperative and specific (e.g. "Trim NVDA by ~$4,200 before adding elsewhere").
+    - recommendedAction.reason: 1-2 sentences on impact — no hedging; do not re-list every holding.
+    - sections: 1-3 items max. Prefer "Action plan (ranked)" and optionally "Risk if you do nothing"
+      or "Confidence". Do NOT include: Portfolio cash map, Gaps vs targets, Where to put money smarter,
+      Diversification diagnosis, Portfolio snapshot, Holdings review, Trim plan, or Deploy plan.
+    - "Action plan (ranked)": 2-4 bullets with timing (this week / this month) and priority — reference
+      tickers and $ from the data but do not re-walk the full cash map or holding-by-holding table.
+    - When **Suggested deploy plan (precomputed)** exists, recommendedAction must follow it; put timing
+      and trade-offs in sections, not a second copy of the deploy $ table.
     - Never invent dollar amounts or tickers — if a figure is not in the provided data blocks, omit it.
-    - Rank 2-4 bullets in "Action plan (ranked)" with timing (this week / this month) and expected impact.
-    - "Diversification diagnosis" must reference **Holding-by-holding review (precomputed)** — at least
-      the top 3–5 names with status and trim/hold/add call.
-    - "Where to put money smarter" must walk **Portfolio cash map (precomputed)** and assign every
-      redeployable dollar to a ticker or an explicit cash hold — no unallocated pool.
-    - Limit off-list commentary (e.g., TSM OK to hold) to one short bullet — never make it the lead action
-      unless concentration requires a trim.
+    - Limit off-list commentary to one short bullet — never make it the lead action unless concentration
+      requires a trim.
     """).strip()
 
 
 def system_message_for_structured_v1_analysis(*, symbol: Optional[str]) -> str:
-    base = (
-        SYSTEM_MESSAGE_V1 if symbol else SYSTEM_PORTFOLIO_ALLOCATION_V1_MESSAGE
-    )
-    return f"{base}\n\n{_STRUCTURED_V1_JSON_RULES}"
+    if symbol:
+        return f"{SYSTEM_MESSAGE_V1}\n\n{_STRUCTURED_V1_JSON_RULES}"
+    return f"{SYSTEM_PORTFOLIO_ALLOCATION_V1_MESSAGE}\n\n{_STRUCTURED_PORTFOLIO_V1_JSON_RULES}"
 
 
 _STRUCTURED_OUTPUT_HEADINGS = dedent("""
@@ -393,12 +400,11 @@ def _structured_portfolio_analysis_v1_task(
         - summary: max 3 sentences; {summary_hint}
         - recommendedAction: the single highest-impact next step — imperative title, concrete reason,
           symbol when one name (use "" for multi-symbol or cash-hold actions).
-        - sections: include "Portfolio cash map", "Gaps vs targets", "Where to put money smarter",
-          and "Action plan (ranked)".
-          Plain-text titles only — never use # or ###.
-          Use bullets for ranked steps (2-4) with timing and $ amounts from the data.
-          "Portfolio cash map" — numbered cash buckets from precomputed data.
-          "Where to put money smarter" — per-ticker $ adds/trims; account for 100% of redeployable cash.
+        - sections: 1-3 items max — "Action plan (ranked)" plus optionally "Risk if you do nothing"
+          or "Confidence". Plain-text titles only — never use # or ###.
+          Do NOT add Portfolio cash map, Gaps vs targets, Where to put money smarter, Diversification
+          diagnosis, or Portfolio snapshot — the app renders those in the money map card.
+          Action plan bullets: 2-4 timed steps with $ and tickers from the data; do not re-walk every holding.
 
         {decision_order}
 
@@ -636,29 +642,23 @@ def _structured_v1_json_rules_overlay(
     return ""
 
 PORTFOLIO_MONEY_DIVISION_RULES = dedent("""
-    # Portfolio money division (CRITICAL — in-depth, dollar-specific)
-    Treat portfolio analysis as a capital allocation memo, not a market commentary.
+    # Portfolio money division (CRITICAL — interpret, do not transcribe)
+    The user sees a **money map card** in the app (cash buckets, holdings, trim/deploy $).
+    DIVERSIFICATION SUMMARY is for your reasoning — do not copy those tables into JSON sections.
 
-    ## Required depth
-    1. **Cash map first** — walk through **Portfolio cash map (precomputed)** line by line:
-       cash → CSP reserves → buffer → deployable → (optional) trim proceeds → total to redeploy.
-    2. **Every major holding** — for each line in **Holding-by-holding review (precomputed)**,
-       state current %, status, and whether to trim, hold, or add — do not skip top names.
-    3. **Account for every dollar** — in "Where to put money smarter", assign deployable cash and
-       any trim proceeds to specific tickers OR explicitly hold as buffer; no vague "consider diversifying."
-    4. **Trims before adds** — if **Suggested trim plan (precomputed)** exists, rank trims first when
-       any name is "Too large" or "Very large"; show how freed $ combines with deployable cash.
-    5. **Deploy plan** — copy **Suggested deploy plan (precomputed)** per-ticker $ when present;
-       otherwise split deployable cash across largest underweights using "~$X to buy" gap lines.
-    6. **After picture** — for each ranked action, state expected weight change (e.g. "NVDA 35% → ~22%").
+    ## Required depth in JSON output
+    1. **One clear priority** — summary + recommendedAction name the #1 move with $ from the data.
+    2. **Ranked follow-ups** — "Action plan (ranked)" with 2–4 timed steps; skip re-listing every holding.
+    3. **Trims before adds** — if a trim plan exists, rank trims before new buys when a name is too large.
+    4. **Deploy plan** — when **Suggested deploy plan (precomputed)** exists, recommendedAction follows it;
+       sections add timing and trade-offs only, not a second deploy table.
+    5. **After picture** — one bullet may state expected weight change (e.g. "NVDA 35% → ~22%") when trimming.
 
     ## Anti-patterns (never do these)
+    - Repeating the cash map, holding-by-holding table, or trim/deploy $ lines in JSON sections.
     - Generic advice without $ amounts from the precomputed blocks.
     - Recommending a new buy while a top name is too large without addressing the trim.
     - Inventing tickers not in holding review, ETF gap, strategy list, or deploy plan.
-    - Summarizing only top-1 concentration while ignoring other lines in holding review.
-    - Using internal jargon like "CRITICAL", "ROOM TO ADD", or "by weight" — use plain language
-      (e.g. "this stock is over 30% of your portfolio", "you can buy more of this one").
     """).strip()
 
 PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
@@ -895,15 +895,12 @@ _PORTFOLIO_ALLOCATION_CONSTRAINTS = dedent("""
 
 _PORTFOLIO_V1_SECTION_TITLES = dedent("""
     # JSON section titles (plain text only — never use #, ##, or ###)
-    When filling sections[].title, use plain labels such as:
-    - Portfolio snapshot
-    - Diversification diagnosis
-    - Portfolio cash map
-    - Gaps vs targets
-    - Where to put money smarter
-    - Risk if you do nothing
+    The money map card already shows cash, holdings, and trim/deploy $. Use sections for interpretation only:
     - Action plan (ranked)
+    - Risk if you do nothing
     - Confidence
+    Do NOT use: Portfolio cash map, Gaps vs targets, Where to put money smarter, Diversification diagnosis,
+    Portfolio snapshot, Holdings review, Trim plan, Deploy plan.
     """).strip()
 
 SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE = dedent(f"""
