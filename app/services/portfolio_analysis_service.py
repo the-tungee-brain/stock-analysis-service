@@ -68,6 +68,7 @@ NEWS_ENRICH_ACTIONS = frozenset(
 ASSIGNMENT_RISK_WINDOW_DAYS = 14
 PORTFOLIO_RESEARCH_LIMIT = 8
 INTELLIGENCE_OPTION_STRIKE_COUNT = DEFAULT_OPTION_CHAIN_STRIKE_COUNT
+SYMBOL_ANALYZE_OPTION_STRIKE_COUNT = 15
 INTELLIGENCE_OPTION_LOOKAHEAD_DAYS = DEFAULT_OPTION_CHAIN_LOOKAHEAD_DAYS
 
 logger = logging.getLogger(__name__)
@@ -478,7 +479,7 @@ class PortfolioAnalysisService:
                 self.market_service.get_option_chains,
                 access_token=access_token,
                 symbol=symbol,
-                strike_count=INTELLIGENCE_OPTION_STRIKE_COUNT,
+                strike_count=SYMBOL_ANALYZE_OPTION_STRIKE_COUNT,
                 from_date=from_date,
                 to_date=to_date,
             ),
@@ -545,7 +546,7 @@ class PortfolioAnalysisService:
                 chain=option_chains,
                 action=action,
                 has_options_scorecard=has_options_scorecard,
-                strike_count=INTELLIGENCE_OPTION_STRIKE_COUNT,
+                strike_count=SYMBOL_ANALYZE_OPTION_STRIKE_COUNT,
                 positions=positions,
                 symbol=symbol,
                 underlying_iv_percent=(
