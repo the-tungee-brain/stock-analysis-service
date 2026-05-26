@@ -68,12 +68,12 @@ jobs:
               --network sas-net \
               -p 6379:6379 \
               -v redis-data:/data \
-              --memory=512m \
-              --memory-swap=512m \
+              --memory=768m \
+              --memory-swap=768m \
               --cpus=0.5 \
               --restart unless-stopped \
               redis:7-alpine \
-              redis-server --appendonly yes --requirepass "${{ secrets.REDIS_PASSWORD }}" --maxmemory 384mb --maxmemory-policy allkeys-lru
+              redis-server --appendonly yes --requirepass "${{ secrets.REDIS_PASSWORD }}" --maxmemory 512mb --maxmemory-policy allkeys-lru
 
             # Backend
             docker pull tungxd96/sas-server:latest
@@ -85,12 +85,14 @@ jobs:
               -p 8000:8000 \
               --memory=5g \
               --memory-swap=6g \
-              --cpus=3 \
-              -e GUNICORN_WORKERS=2 \
+              --cpus=3.5 \
+              -e GUNICORN_WORKERS=3 \
               -e GUNICORN_TIMEOUT=120 \
-              -e RESEARCH_FETCH_WORKERS=4 \
-              -e PEER_FETCH_WORKERS=2 \
-              -e RESEARCH_CONTEXT_CACHE_TTL_SECONDS=1800 \
+              -e RESEARCH_FETCH_WORKERS=6 \
+              -e PEER_FETCH_WORKERS=3 \
+              -e RESEARCH_CONTEXT_CACHE_TTL_SECONDS=3600 \
+              -e ENRICHED_NEWS_CACHE_TTL_SECONDS=1800 \
+              -e PORTFOLIO_BRIEF_CACHE_TTL_SECONDS=1800 \
               -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
               -e SCHWAB_CLIENT_ID="${{ secrets.SCHWAB_CLIENT_ID }}" \
               -e SCHWAB_CLIENT_SECRET="${{ secrets.SCHWAB_CLIENT_SECRET }}" \
