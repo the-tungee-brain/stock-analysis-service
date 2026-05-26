@@ -5,7 +5,7 @@ from datetime import date, datetime
 from app.adapters.cache.llm_output_cache import LLMOutputCache
 from app.core.llm_routes import LLMRoute
 from app.models.company_research_models import AISummary, ResearchContext
-from app.broker.option_chain_table import build_option_chain_table
+from app.broker.option_chain_table import build_option_chain_table, DEFAULT_OPTION_CHAIN_STRIKE_COUNT
 from app.broker.sector_labels import normalize_sector_label
 from app.models.intelligence_models import (
     CachedResearchSnippet,
@@ -34,7 +34,7 @@ from app.services.intelligence.options_scoring_service import OptionsScoringServ
 from app.services.intelligence.peer_comparison_service import PeerComparisonService
 from app.services.intelligence.signal_engine import SignalEngine, build_proactive_alerts
 
-INTELLIGENCE_OPTION_STRIKE_COUNT = 5
+INTELLIGENCE_OPTION_STRIKE_COUNT = DEFAULT_OPTION_CHAIN_STRIKE_COUNT
 TOP_HOLDINGS_COMPANY_NEWS_SYMBOL_LIMIT = 5
 TOP_HOLDINGS_COMPANY_NEWS_HEADLINES_PER_SYMBOL = 2
 COMPANY_NEWS_SUMMARY_MAX_LEN = 120

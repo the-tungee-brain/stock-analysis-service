@@ -65,7 +65,7 @@ def test_build_option_chain_preview_serializes_for_symbol_intelligence():
     assert preview is not None
     payload = preview.model_dump(mode="json", by_alias=True)
     assert payload["underlyingPrice"] == 200.12
-    assert payload["strikeCount"] == 5
+    assert payload["strikeCount"] == 10
     row_195 = next(row for row in payload["rows"] if row["strike"] == 195.0)
     assert row_195["call"]["bid"] == 8.5
     row_190 = next(row for row in payload["rows"] if row["strike"] == 190.0)

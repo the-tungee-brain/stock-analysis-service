@@ -2,6 +2,7 @@ from app.broker.option_chain_table import (
     OptionChainTable,
     build_option_chain_table,
     build_option_chain_tables_for_positions,
+    DEFAULT_OPTION_CHAIN_STRIKE_COUNT,
     format_held_option_contracts_markdown,
 )
 from app.broker.sector_labels import normalize_sector_label
@@ -712,7 +713,7 @@ class PromptEnrichmentService:
     def build_option_chain_markdown(
         self,
         chain: OptionChain,
-        strike_count: int = 5,
+        strike_count: int = DEFAULT_OPTION_CHAIN_STRIKE_COUNT,
         underlying_iv_percent: float | None = None,
     ) -> str:
         table = build_option_chain_table(
@@ -799,7 +800,7 @@ class PromptEnrichmentService:
         action: AnalysisAction,
         *,
         has_options_scorecard: bool = False,
-        strike_count: int = 10,
+        strike_count: int = DEFAULT_OPTION_CHAIN_STRIKE_COUNT,
         positions: list[Position] | None = None,
         symbol: str | None = None,
         underlying_iv_percent: float | None = None,

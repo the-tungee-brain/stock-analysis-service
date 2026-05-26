@@ -123,7 +123,7 @@ class OptionChainPreview(BaseModel):
     model_config = _INTELLIGENCE_MODEL_CONFIG
 
     expiration: str | None = None
-    strike_count: int = Field(default=5, serialization_alias="strikeCount")
+    strike_count: int = Field(default=10, serialization_alias="strikeCount")
     underlying_price: float | None = Field(
         default=None, serialization_alias="underlyingPrice"
     )

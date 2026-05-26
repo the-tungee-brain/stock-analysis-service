@@ -34,6 +34,7 @@ from app.models.intelligence_models import (
     ProactiveAlert,
     SymbolIntelligence,
 )
+from app.broker.option_chain_table import DEFAULT_OPTION_CHAIN_STRIKE_COUNT
 from app.models.schwab_models import Position, SchwabAccounts
 from app.models.schwab_option_chain_models import OptionChain
 from app.models.strategy_models import InvestmentStrategy, UserInvestmentProfile
@@ -66,8 +67,7 @@ NEWS_ENRICH_ACTIONS = frozenset(
 )
 ASSIGNMENT_RISK_WINDOW_DAYS = 14
 PORTFOLIO_RESEARCH_LIMIT = 8
-INTELLIGENCE_OPTION_STRIKE_COUNT = 5
-RESEARCH_CHAT_OPTION_STRIKE_COUNT = 10
+INTELLIGENCE_OPTION_STRIKE_COUNT = DEFAULT_OPTION_CHAIN_STRIKE_COUNT
 INTELLIGENCE_OPTION_LOOKAHEAD_DAYS = DEFAULT_OPTION_CHAIN_LOOKAHEAD_DAYS
 
 logger = logging.getLogger(__name__)
@@ -478,7 +478,7 @@ class PortfolioAnalysisService:
                 self.market_service.get_option_chains,
                 access_token=access_token,
                 symbol=symbol,
-                strike_count=20,
+                strike_count=INTELLIGENCE_OPTION_STRIKE_COUNT,
                 from_date=from_date,
                 to_date=to_date,
             ),
@@ -545,7 +545,7 @@ class PortfolioAnalysisService:
                 chain=option_chains,
                 action=action,
                 has_options_scorecard=has_options_scorecard,
-                strike_count=10,
+                strike_count=INTELLIGENCE_OPTION_STRIKE_COUNT,
                 positions=positions,
                 symbol=symbol,
                 underlying_iv_percent=(
@@ -1074,7 +1074,7 @@ class PortfolioAnalysisService:
                 access_token=access_token,
                 symbol=symbol_upper,
                 positions=symbol_positions,
-                strike_count=RESEARCH_CHAT_OPTION_STRIKE_COUNT,
+                strike_count=INTELLIGENCE_OPTION_STRIKE_COUNT,
             )
             underlying_iv_percent = None
             try:
@@ -1098,7 +1098,7 @@ class PortfolioAnalysisService:
                     chain=option_chain,
                     action=AnalysisAction.FREE_FORM,
                     has_options_scorecard=has_options_scorecard,
-                    strike_count=RESEARCH_CHAT_OPTION_STRIKE_COUNT,
+                    strike_count=INTELLIGENCE_OPTION_STRIKE_COUNT,
                     positions=symbol_positions or None,
                     symbol=symbol_upper,
                     underlying_iv_percent=underlying_iv_percent,

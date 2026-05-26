@@ -17,6 +17,8 @@ from app.broker.option_utils import (
 from app.models.schwab_models import Position
 from app.models.schwab_option_chain_models import OptionChain, OptionContract
 
+DEFAULT_OPTION_CHAIN_STRIKE_COUNT = 10
+
 
 def _valid_price(value: float | None) -> float | None:
     if value is None or value <= 0:
@@ -167,7 +169,7 @@ def _contracts_by_float_strike(
 def build_option_chain_table(
     chain: OptionChain,
     *,
-    strike_count: int = 5,
+    strike_count: int = DEFAULT_OPTION_CHAIN_STRIKE_COUNT,
     underlying_iv_percent: float | None = None,
 ) -> OptionChainTable | None:
     if not chain.callExpDateMap and not chain.putExpDateMap:
@@ -290,7 +292,7 @@ def build_option_chain_table_for_expiration(
     chain: OptionChain,
     expiration_key: str,
     *,
-    strike_count: int = 5,
+    strike_count: int = DEFAULT_OPTION_CHAIN_STRIKE_COUNT,
     focus_strikes: list[float] | None = None,
     underlying_iv_percent: float | None = None,
 ) -> OptionChainTable | None:
@@ -492,7 +494,7 @@ def build_option_chain_tables_for_positions(
     positions: list[Position],
     symbol: str,
     *,
-    strike_count: int = 5,
+    strike_count: int = DEFAULT_OPTION_CHAIN_STRIKE_COUNT,
     underlying_iv_percent: float | None = None,
 ) -> list[OptionChainTable]:
     symbol_upper = symbol.strip().upper()
