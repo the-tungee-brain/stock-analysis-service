@@ -16,6 +16,7 @@ from app.broker.option_delta_preference import (
     OptionDeltaBand,
     assignment_delta_threshold,
     resolve_option_delta_band,
+    resolve_option_strategy_preferences,
 )
 from app.models.schwab_models import Position
 from app.models.schwab_option_chain_models import OptionChain
@@ -38,6 +39,7 @@ class OptionRollPlannerService:
             return []
 
         band = delta_band or resolve_option_delta_band(profile)
+        prefs = resolve_option_strategy_preferences(profile)
 
         symbol_upper = symbol.upper()
         suggestions: list[OptionRollSuggestion] = []
@@ -85,6 +87,7 @@ class OptionRollPlannerService:
                 current_delta=close_delta,
                 candidates=candidates,
                 delta_band=band,
+                preferred_dte=prefs.preferred_dte_days,
             )
             if alternative is None:
                 continue
@@ -135,6 +138,7 @@ class OptionRollPlannerService:
         current_delta: float | None,
         candidates: list[OptionsStrikeCandidate],
         delta_band: OptionDeltaBand,
+        preferred_dte: int = 7,
     ) -> OptionsStrikeCandidate | None:
         if not candidates:
             return None
@@ -151,6 +155,7 @@ class OptionRollPlannerService:
                 current_exp=current_exp,
                 current_abs_delta=current_abs_delta,
                 delta_band=delta_band,
+                preferred_dte=preferred_dte,
             ),
             reverse=True,
         )
@@ -161,6 +166,7 @@ class OptionRollPlannerService:
             current_exp=current_exp,
             current_abs_delta=current_abs_delta,
             delta_band=delta_band,
+            preferred_dte=preferred_dte,
         )
         if best_score < 0:
             return None
@@ -175,6 +181,7 @@ class OptionRollPlannerService:
         current_exp: str,
         current_abs_delta: float | None,
         delta_band: OptionDeltaBand,
+        preferred_dte: int = 7,
     ) -> float:
         assignment_threshold = assignment_delta_threshold(delta_band)
         if candidate.side != side:
@@ -187,7 +194,10 @@ class OptionRollPlannerService:
 
         score = candidate.score
         candidate_dte = OptionsScoringService._expiration_dte(candidate.expiration)
-        score += OptionsScoringService._dte_score(candidate_dte) * 0.25
+        score += OptionsScoringService._dte_score(
+            candidate_dte,
+            preferred_dte=preferred_dte,
+        ) * 0.25
 
         if candidate.expiration[:10] > current_exp:
             score += 0.15

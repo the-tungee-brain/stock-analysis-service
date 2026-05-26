@@ -59,6 +59,22 @@ def test_resolve_option_delta_band_falls_back_to_risk_without_wheel():
     assert band.max_delta == 0.15
 
 
+def test_resolve_option_strategy_preferences_uses_wheel_dte():
+    from app.broker.option_delta_preference import resolve_option_strategy_preferences
+
+    profile = UserInvestmentProfile(
+        userId="user-1",
+        primaryStrategy=InvestmentStrategy.WHEEL,
+        riskTolerance="moderate",
+        wheel=WheelStrategyConfig(preferredDteDays=14),
+    )
+
+    prefs = resolve_option_strategy_preferences(profile)
+
+    assert prefs.preferred_dte_days == 14
+    assert prefs.delta_band.min_delta == 0.20
+
+
 def test_assignment_threshold_scales_with_band():
     conservative = default_delta_band_for_risk("conservative")
     moderate = default_delta_band_for_risk("moderate")

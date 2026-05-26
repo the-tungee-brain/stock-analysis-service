@@ -5,8 +5,12 @@ from datetime import date, datetime, timezone
 from app.broker.option_delta_preference import (
     DEFAULT_DELTA_BAND,
     OptionDeltaBand,
+    OptionStrategyPreferences,
     assignment_delta_threshold,
+    delta_band_distance,
+    delta_in_band,
     resolve_option_delta_band,
+    resolve_option_strategy_preferences,
 )
 from app.broker.option_greeks import sanitize_delta
 from app.models.strategy_models import UserInvestmentProfile
@@ -29,6 +33,7 @@ class OptionsScoringService:
     TARGET_DTE_MAX = 14
     MIN_SCORECARD_DTE = 1
     MAX_SCORECARD_DTE = 45
+    MAX_CANDIDATES_PER_SIDE = 3
 
     @staticmethod
     def build_scorecard(
@@ -38,8 +43,10 @@ class OptionsScoringService:
         short_put_strikes: list[float] | None = None,
         profile: UserInvestmentProfile | None = None,
         delta_band: OptionDeltaBand | None = None,
+        strategy_preferences: OptionStrategyPreferences | None = None,
     ) -> OptionsScorecard | None:
-        band = delta_band or resolve_option_delta_band(profile)
+        prefs = strategy_preferences or resolve_option_strategy_preferences(profile)
+        band = delta_band or prefs.delta_band
         assignment_threshold = assignment_delta_threshold(band)
         if not chain.callExpDateMap and not chain.putExpDateMap:
             return None
@@ -69,7 +76,7 @@ class OptionsScoringService:
                     underlying_price=underlying_price,
                     rationale_prefix="Covered call candidate",
                     expiration_key=exp_key,
-                    delta_band=band,
+                    strategy_preferences=prefs,
                 )
             )
             csps.extend(
@@ -79,12 +86,20 @@ class OptionsScoringService:
                     underlying_price=underlying_price,
                     rationale_prefix="Cash-secured put candidate",
                     expiration_key=exp_key,
-                    delta_band=band,
+                    strategy_preferences=prefs,
                 )
             )
 
-        covered_calls.sort(key=lambda item: item.score, reverse=True)
-        csps.sort(key=lambda item: item.score, reverse=True)
+        covered_calls = OptionsScoringService._select_top_strategy_candidates(
+            covered_calls,
+            band=band,
+            limit=OptionsScoringService.MAX_CANDIDATES_PER_SIDE,
+        )
+        csps = OptionsScoringService._select_top_strategy_candidates(
+            csps,
+            band=band,
+            limit=OptionsScoringService.MAX_CANDIDATES_PER_SIDE,
+        )
 
         assignment_flags: list[str] = []
         if short_call_strikes and underlying_price:
@@ -115,10 +130,38 @@ class OptionsScoringService:
 
         return OptionsScorecard(
             underlying_price=underlying_price,
-            covered_call_candidates=covered_calls[:3],
-            csp_candidates=csps[:3],
+            covered_call_candidates=covered_calls,
+            csp_candidates=csps,
             assignment_flags=assignment_flags,
         )
+
+    @staticmethod
+    def _select_top_strategy_candidates(
+        candidates: list[OptionsStrikeCandidate],
+        *,
+        band: OptionDeltaBand,
+        limit: int,
+    ) -> list[OptionsStrikeCandidate]:
+        if not candidates or limit <= 0:
+            return []
+
+        in_band = [c for c in candidates if delta_in_band(c.delta, band)]
+        in_band.sort(key=lambda item: item.score, reverse=True)
+        if len(in_band) >= limit:
+            return in_band[:limit]
+
+        selected = list(in_band)
+        remaining = [c for c in candidates if c not in selected]
+        remaining.sort(
+            key=lambda item: (delta_band_distance(item.delta, band), -item.score),
+        )
+        for candidate in remaining:
+            if len(selected) >= limit:
+                break
+            selected.append(candidate)
+
+        selected.sort(key=lambda item: item.score, reverse=True)
+        return selected[:limit]
 
     @staticmethod
     def _find_contract(
@@ -156,9 +199,13 @@ class OptionsScoringService:
         underlying_price: float | None,
         rationale_prefix: str,
         expiration_key: str | None = None,
-        delta_band: OptionDeltaBand | None = None,
+        strategy_preferences: OptionStrategyPreferences | None = None,
     ) -> list[OptionsStrikeCandidate]:
-        band = delta_band or DEFAULT_DELTA_BAND
+        prefs = strategy_preferences or OptionStrategyPreferences(
+            delta_band=DEFAULT_DELTA_BAND
+        )
+        band = prefs.delta_band
+        preferred_dte = prefs.preferred_dte_days
         candidates: list[OptionsStrikeCandidate] = []
 
         for strike_str, contract_list in contracts_by_strike.items():
@@ -195,7 +242,10 @@ class OptionsScoringService:
             oi_score = min(oi / 1000.0, 1.0)
             spread = OptionsScoringService._spread_pct(contract)
             spread_score = max(0.0, 1.0 - (spread or 0.0) / 0.15)
-            dte_score = OptionsScoringService._dte_score(days_to_expiration)
+            dte_score = OptionsScoringService._dte_score(
+                days_to_expiration,
+                preferred_dte=preferred_dte,
+            )
 
             score = (
                 delta_score * 0.40
@@ -227,7 +277,9 @@ class OptionsScoringService:
                     iv=contract.volatility,
                     score=round(score, 3),
                     rationale=(
-                        f"{rationale_prefix}: delta {delta:.2f}, {days_to_expiration} DTE, OI {oi:,}"
+                        f"{rationale_prefix} (target |delta| "
+                        f"{band.min_delta:.2f}–{band.max_delta:.2f}, ~{preferred_dte} DTE): "
+                        f"delta {delta:.2f}, {days_to_expiration} DTE, OI {oi:,}"
                         + (f", {moneyness}" if moneyness else "")
                     ),
                 )
@@ -264,19 +316,10 @@ class OptionsScoringService:
         return max(0.0, 1.0 - distance / half_width)
 
     @staticmethod
-    def _dte_score(days_to_expiration: int) -> float:
-        target_mid = (
-            OptionsScoringService.TARGET_DTE_MIN
-            + OptionsScoringService.TARGET_DTE_MAX
-        ) / 2.0
-        if days_to_expiration < OptionsScoringService.TARGET_DTE_MIN:
-            distance = OptionsScoringService.TARGET_DTE_MIN - days_to_expiration
-            return max(0.0, 0.5 - distance / 10.0)
-        if days_to_expiration > OptionsScoringService.TARGET_DTE_MAX:
-            distance = days_to_expiration - OptionsScoringService.TARGET_DTE_MAX
-            return max(0.0, 1.0 - distance / 20.0)
-        distance = abs(days_to_expiration - target_mid)
-        return max(0.0, 1.0 - distance / 7.0)
+    def _dte_score(days_to_expiration: int, *, preferred_dte: int) -> float:
+        distance = abs(days_to_expiration - preferred_dte)
+        window = max(preferred_dte, 7)
+        return max(0.0, 1.0 - distance / window)
 
     @staticmethod
     def _spread_pct(contract: OptionContract) -> float | None:

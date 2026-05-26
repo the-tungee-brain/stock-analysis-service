@@ -1014,19 +1014,21 @@ class PromptEnrichmentService:
         if scorecard.covered_call_candidates:
             call_lines = [
                 PromptEnrichmentService._format_scorecard_candidate_line(c)
-                for c in scorecard.covered_call_candidates
+                for c in scorecard.covered_call_candidates[:3]
             ]
             sections.append(
-                "### Top covered call candidates\n" + "\n".join(call_lines)
+                "### Top covered call candidates (max 3, ranked for saved strategy delta/DTE)\n"
+                + "\n".join(call_lines)
             )
 
         if scorecard.csp_candidates:
             put_lines = [
                 PromptEnrichmentService._format_scorecard_candidate_line(c)
-                for c in scorecard.csp_candidates
+                for c in scorecard.csp_candidates[:3]
             ]
             sections.append(
-                "### Top cash-secured put candidates\n" + "\n".join(put_lines)
+                "### Top cash-secured put candidates (max 3, ranked for saved strategy delta/DTE)\n"
+                + "\n".join(put_lines)
             )
 
         if len(sections) == 1:

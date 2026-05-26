@@ -43,6 +43,40 @@ def default_delta_band_for_risk(risk_tolerance: RiskTolerance | None) -> OptionD
     return RISK_DELTA_BANDS.get(risk_tolerance or "moderate", DEFAULT_DELTA_BAND)
 
 
+@dataclass(frozen=True)
+class OptionStrategyPreferences:
+    delta_band: OptionDeltaBand
+    preferred_dte_days: int = 7
+
+
+def resolve_option_strategy_preferences(
+    profile: UserInvestmentProfile | None,
+) -> OptionStrategyPreferences:
+    band = resolve_option_delta_band(profile)
+    preferred_dte = 7
+    if profile and profile.wheel and profile.wheel.preferred_dte_days:
+        preferred_dte = int(profile.wheel.preferred_dte_days)
+    return OptionStrategyPreferences(delta_band=band, preferred_dte_days=preferred_dte)
+
+
+def delta_in_band(delta: float | None, band: OptionDeltaBand) -> bool:
+    if delta is None:
+        return False
+    abs_delta = abs(delta)
+    return band.min_delta <= abs_delta <= band.max_delta
+
+
+def delta_band_distance(delta: float | None, band: OptionDeltaBand) -> float:
+    if delta is None:
+        return float("inf")
+    abs_delta = abs(delta)
+    if abs_delta < band.min_delta:
+        return band.min_delta - abs_delta
+    if abs_delta > band.max_delta:
+        return abs_delta - band.max_delta
+    return 0.0
+
+
 def resolve_option_delta_band(
     profile: UserInvestmentProfile | None,
 ) -> OptionDeltaBand:
