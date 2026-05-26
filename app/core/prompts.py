@@ -757,6 +757,10 @@ OPTIONS_STRATEGY_RULES = dedent("""
     - Prefer ~7 days to expiration when practical.
     - Strike selection: stock down → strike 5–10% above price; flat → at or slightly above price;
       up significantly → strike 8–12% above price.
+    - Match short-option |delta| to the investor's saved risk profile when stated in INVESTMENT PROFILE:
+      conservative 0.10–0.15 (lower assignment, lower premium), balanced 0.20–0.30 (wheel sweet spot),
+      aggressive 0.35+ (higher income, higher assignment risk). Use the profile's explicit target range
+      when provided.
     - Always say **"sell a covered call"** or **"sell 1 covered call at the $X strike"** — never "short call."
     - Disclose: upside capped above the strike, assignment risk, shares may be called away.
 
@@ -765,6 +769,7 @@ OPTIONS_STRATEGY_RULES = dedent("""
     - For open short puts, use the **RESERVED_CASH** column — cash set aside per position.
     - Account summary shows total CSP reserved cash and cash remaining after those reserves.
     - Appropriate when: user wants income, or would be happy owning shares at the strike price.
+    - Match short put |delta| to the investor's saved risk profile (see covered-call delta guidance above).
     - Always say **"sell a cash-secured put"** — never "short put" or "write a put."
     - Disclose: obligation to buy 100 shares per contract if assigned; profit limited to premium received.
 

@@ -477,6 +477,7 @@ class PortfolioAnalysisService:
             market_context_snapshots,
             option_chains,
             recent_transactions_block,
+            profile,
         ) = await asyncio.gather(
             asyncio.to_thread(
                 self.market_service.get_enriched_quote_snapshot,
@@ -506,6 +507,7 @@ class PortfolioAnalysisService:
                 orders=orders_for_analysis,
                 since=analysis_since,
             ),
+            asyncio.to_thread(self._get_investment_profile, user_id),
         )
 
         if self._should_auto_enrich_news(action):
@@ -522,6 +524,7 @@ class PortfolioAnalysisService:
             account=account,
             option_chain=option_chains,
             orders=orders_for_analysis,
+            profile=profile,
         )
 
         assignment_risk_block = None
@@ -571,7 +574,6 @@ class PortfolioAnalysisService:
             )
         )
 
-        profile = await asyncio.to_thread(self._get_investment_profile, user_id)
         investment_profile_block = None
         if profile is not None:
             base_block = PromptEnrichmentService.format_investment_profile_block(profile)
@@ -655,6 +657,7 @@ class PortfolioAnalysisService:
         option_chain,
         orders: list | None,
         research_context_block: str | None = None,
+        profile: UserInvestmentProfile | None = None,
     ) -> tuple[str | None, str | None, bool, SymbolIntelligence | None]:
         intelligence: SymbolIntelligence | None = None
         try:
@@ -692,6 +695,7 @@ class PortfolioAnalysisService:
                 since=since if action is AnalysisAction.WHAT_CHANGED else None,
                 option_chain=option_chain,
                 include_peers=self._include_peer_comparison(action),
+                profile=profile,
             )
             has_options_scorecard = (
                 self.prompt_enrichment_service.has_actionable_options_scorecard(
@@ -995,6 +999,8 @@ class PortfolioAnalysisService:
         if ctx is None:
             return SymbolIntelligence(symbol=symbol_upper, partial=True)
 
+        profile = self._get_investment_profile(user_id)
+
         try:
             return self.portfolio_intelligence_service.build_symbol_intelligence(
                 research=ctx,
@@ -1005,6 +1011,7 @@ class PortfolioAnalysisService:
                 option_chain=option_chain,
                 include_peers=True,
                 underlying_iv_percent=underlying_iv_percent,
+                profile=profile,
             )
         except Exception:
             logger.exception(

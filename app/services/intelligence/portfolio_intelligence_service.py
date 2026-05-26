@@ -23,6 +23,7 @@ from app.models.intelligence_models import (
 from app.models.schwab_market_models import PromptQuoteSnapshot
 from app.models.schwab_models import Position, SchwabAccounts
 from app.models.schwab_option_chain_models import OptionChain
+from app.models.strategy_models import UserInvestmentProfile
 from app.models.schwab_order_models import SchwabOrder
 from app.services.company_research_service import CompanyResearchService
 from app.services.enriched_news_service import EnrichedNewsService
@@ -134,6 +135,7 @@ class PortfolioIntelligenceService:
         option_chain: OptionChain | None = None,
         include_peers: bool = True,
         underlying_iv_percent: float | None = None,
+        profile: UserInvestmentProfile | None = None,
     ) -> SymbolIntelligence:
         research = self.attach_enriched_news(research)
 
@@ -171,6 +173,7 @@ class PortfolioIntelligenceService:
                 option_chain,
                 short_call_strikes=short_calls,
                 short_put_strikes=short_puts,
+                profile=profile,
             )
             option_chain_preview = _build_option_chain_preview(
                 option_chain,
@@ -181,6 +184,7 @@ class PortfolioIntelligenceService:
                 symbol=symbol,
                 option_chain=option_chain,
                 scorecard=options_scorecard,
+                profile=profile,
             )
 
         cached_research = self._load_cached_research(research)

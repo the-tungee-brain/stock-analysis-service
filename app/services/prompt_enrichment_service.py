@@ -1559,18 +1559,30 @@ class PromptEnrichmentService:
 
     @staticmethod
     def _risk_tolerance_rubric(risk_tolerance: str) -> str:
+        from app.broker.option_delta_preference import (
+            default_delta_band_for_risk,
+            format_delta_band_summary,
+        )
+
+        band = default_delta_band_for_risk(risk_tolerance)
+        delta_guidance = (
+            f"For short puts and covered calls, target {format_delta_band_summary(band)}."
+        )
         rubrics = {
             "conservative": (
                 "Prefer large-cap, lower-beta, established businesses with understandable "
-                "models. Avoid speculative small-caps, meme stocks, and leveraged products."
+                "models. Avoid speculative small-caps, meme stocks, and leveraged products. "
+                f"{delta_guidance}"
             ),
             "moderate": (
                 "Balance quality large-caps with selective mid-caps. Avoid extreme volatility "
-                "unless options experience is advanced and the strategy allows it."
+                "unless options experience is advanced and the strategy allows it. "
+                f"{delta_guidance}"
             ),
             "aggressive": (
                 "May include higher-beta growth names and larger drawdown candidates when they "
-                "still fit the strategy mechanics and liquidity requirements."
+                "still fit the strategy mechanics and liquidity requirements. "
+                f"{delta_guidance}"
             ),
         }
         return rubrics.get(risk_tolerance, rubrics["moderate"])
@@ -1657,34 +1669,39 @@ class PromptEnrichmentService:
 
     @staticmethod
     def _strategy_specific_guidance(profile, strategy) -> str:
+        from app.broker.option_delta_preference import resolve_option_delta_band
         from app.models.strategy_models import InvestmentStrategy
 
         if strategy == InvestmentStrategy.WHEEL:
             wheel = profile.wheel
+            band = resolve_option_delta_band(profile)
             delta = (
                 f"{wheel.target_delta_min:.2f}–{wheel.target_delta_max:.2f}"
                 if wheel
-                else "0.20–0.30"
+                else f"{band.min_delta:.2f}–{band.max_delta:.2f}"
             )
             dte = wheel.preferred_dte_days if wheel else 7
             max_pct = wheel.max_single_name_pct if wheel else 15.0
             return (
                 "Suggest U.S.-listed stocks suitable for the full wheel (CSP → assignment → "
-                f"covered call). Target put delta {delta}, ~{dte}-day DTE, max ~{max_pct:.0f}% "
+                f"covered call). Target put |delta| {delta} ({band.profile_label}: "
+                f"{band.description}), ~{dte}-day DTE, max ~{max_pct:.0f}% "
                 "per name — favor sector diversification and names the investor would own on "
                 "assignment."
             )
         if strategy == InvestmentStrategy.CSP_INCOME:
             wheel = profile.wheel
+            band = resolve_option_delta_band(profile)
             delta = (
                 f"{wheel.target_delta_min:.2f}–{wheel.target_delta_max:.2f}"
                 if wheel
-                else "0.20–0.30"
+                else f"{band.min_delta:.2f}–{band.max_delta:.2f}"
             )
             dte = wheel.preferred_dte_days if wheel else 7
             return (
                 "Suggest U.S.-listed stocks for cash-secured put income only (not full wheel). "
-                f"Target put delta {delta}, ~{dte}-day DTE. Prioritize liquid puts and "
+                f"Target put |delta| {delta} ({band.profile_label}: {band.description}), "
+                f"~{dte}-day DTE. Prioritize liquid puts and "
                 "businesses the investor would buy at a lower effective price if assigned."
             )
         if strategy == InvestmentStrategy.COVERED_CALL:
@@ -1734,9 +1751,14 @@ class PromptEnrichmentService:
         *,
         strategy=None,
     ) -> str:
+        from app.broker.option_delta_preference import (
+            format_delta_band_prompt_line,
+            resolve_option_delta_band,
+        )
         from app.models.strategy_models import InvestmentStrategy
 
         active_strategy = strategy or profile.primary_strategy
+        delta_band = resolve_option_delta_band(profile)
         lines = [
             f"- Primary strategy: {profile.primary_strategy.value if profile.primary_strategy else 'not set'}",
             f"- Active strategy for this request: {active_strategy.value if active_strategy else 'not set'}",
@@ -1744,6 +1766,13 @@ class PromptEnrichmentService:
             f"- Options experience: {profile.options_experience}",
             f"- Income vs growth: {profile.income_vs_growth}",
         ]
+
+        if profile.primary_strategy in {
+            InvestmentStrategy.WHEEL,
+            InvestmentStrategy.CSP_INCOME,
+            InvestmentStrategy.COVERED_CALL,
+        }:
+            lines.append(format_delta_band_prompt_line(delta_band))
 
         if profile.wheel:
             wheel = profile.wheel

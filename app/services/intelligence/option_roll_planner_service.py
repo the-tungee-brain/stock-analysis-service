@@ -12,8 +12,14 @@ from app.models.intelligence_models import (
     OptionsScorecard,
     OptionsStrikeCandidate,
 )
+from app.broker.option_delta_preference import (
+    OptionDeltaBand,
+    assignment_delta_threshold,
+    resolve_option_delta_band,
+)
 from app.models.schwab_models import Position
 from app.models.schwab_option_chain_models import OptionChain
+from app.models.strategy_models import UserInvestmentProfile
 from app.services.intelligence.options_scoring_service import OptionsScoringService
 
 
@@ -25,9 +31,13 @@ class OptionRollPlannerService:
         symbol: str,
         option_chain: OptionChain | None,
         scorecard: OptionsScorecard | None,
+        profile: UserInvestmentProfile | None = None,
+        delta_band: OptionDeltaBand | None = None,
     ) -> list[OptionRollSuggestion]:
         if option_chain is None or scorecard is None:
             return []
+
+        band = delta_band or resolve_option_delta_band(profile)
 
         symbol_upper = symbol.upper()
         suggestions: list[OptionRollSuggestion] = []
@@ -74,6 +84,7 @@ class OptionRollPlannerService:
                 current_expiration=expiration,
                 current_delta=close_delta,
                 candidates=candidates,
+                delta_band=band,
             )
             if alternative is None:
                 continue
@@ -123,6 +134,7 @@ class OptionRollPlannerService:
         current_expiration: str,
         current_delta: float | None,
         candidates: list[OptionsStrikeCandidate],
+        delta_band: OptionDeltaBand,
     ) -> OptionsStrikeCandidate | None:
         if not candidates:
             return None
@@ -138,6 +150,7 @@ class OptionRollPlannerService:
                 current_strike=current_strike,
                 current_exp=current_exp,
                 current_abs_delta=current_abs_delta,
+                delta_band=delta_band,
             ),
             reverse=True,
         )
@@ -147,6 +160,7 @@ class OptionRollPlannerService:
             current_strike=current_strike,
             current_exp=current_exp,
             current_abs_delta=current_abs_delta,
+            delta_band=delta_band,
         )
         if best_score < 0:
             return None
@@ -160,7 +174,9 @@ class OptionRollPlannerService:
         current_strike: float,
         current_exp: str,
         current_abs_delta: float | None,
+        delta_band: OptionDeltaBand,
     ) -> float:
+        assignment_threshold = assignment_delta_threshold(delta_band)
         if candidate.side != side:
             return -1.0
         if (
@@ -179,16 +195,12 @@ class OptionRollPlannerService:
         candidate_delta = sanitize_delta(candidate.delta)
         if current_abs_delta is not None and candidate_delta is not None:
             candidate_abs_delta = abs(candidate_delta)
-            if current_abs_delta >= OptionsScoringService.ASSIGNMENT_DELTA_THRESHOLD:
+            if current_abs_delta >= assignment_threshold:
                 if candidate_abs_delta < current_abs_delta:
                     score += 0.25
                 else:
                     score -= 0.15
-            if (
-                OptionsScoringService.TARGET_DELTA_MIN
-                <= candidate_abs_delta
-                <= OptionsScoringService.TARGET_DELTA_MAX
-            ):
+            if delta_band.min_delta <= candidate_abs_delta <= delta_band.max_delta:
                 score += 0.10
 
         return score

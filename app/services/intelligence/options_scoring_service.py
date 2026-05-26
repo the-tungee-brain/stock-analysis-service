@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
+from app.broker.option_delta_preference import (
+    DEFAULT_DELTA_BAND,
+    OptionDeltaBand,
+    assignment_delta_threshold,
+    resolve_option_delta_band,
+)
 from app.broker.option_greeks import sanitize_delta
+from app.models.strategy_models import UserInvestmentProfile
 from app.broker.option_chain_table import (
     fair_option_price,
     quoted_ask,
@@ -14,10 +21,10 @@ from app.models.schwab_option_chain_models import OptionChain, OptionContract
 
 
 class OptionsScoringService:
-    TARGET_DELTA_MIN = 0.18
-    TARGET_DELTA_MAX = 0.32
+    TARGET_DELTA_MIN = DEFAULT_DELTA_BAND.min_delta
+    TARGET_DELTA_MAX = DEFAULT_DELTA_BAND.max_delta
     MIN_OPEN_INTEREST = 100
-    ASSIGNMENT_DELTA_THRESHOLD = 0.40
+    ASSIGNMENT_DELTA_THRESHOLD = assignment_delta_threshold(DEFAULT_DELTA_BAND)
     TARGET_DTE_MIN = 5
     TARGET_DTE_MAX = 14
     MIN_SCORECARD_DTE = 1
@@ -29,7 +36,11 @@ class OptionsScoringService:
         *,
         short_call_strikes: list[float] | None = None,
         short_put_strikes: list[float] | None = None,
+        profile: UserInvestmentProfile | None = None,
+        delta_band: OptionDeltaBand | None = None,
     ) -> OptionsScorecard | None:
+        band = delta_band or resolve_option_delta_band(profile)
+        assignment_threshold = assignment_delta_threshold(band)
         if not chain.callExpDateMap and not chain.putExpDateMap:
             return None
 
@@ -58,6 +69,7 @@ class OptionsScoringService:
                     underlying_price=underlying_price,
                     rationale_prefix="Covered call candidate",
                     expiration_key=exp_key,
+                    delta_band=band,
                 )
             )
             csps.extend(
@@ -67,6 +79,7 @@ class OptionsScoringService:
                     underlying_price=underlying_price,
                     rationale_prefix="Cash-secured put candidate",
                     expiration_key=exp_key,
+                    delta_band=band,
                 )
             )
 
@@ -80,7 +93,7 @@ class OptionsScoringService:
                     chain, side="call", strike=strike
                 )
                 delta = sanitize_delta(call.delta if call else None)
-                if delta is not None and delta >= OptionsScoringService.ASSIGNMENT_DELTA_THRESHOLD:
+                if delta is not None and delta >= assignment_threshold:
                     assignment_flags.append(
                         f"Short call at ${strike:g} has delta {delta:.2f} — "
                         "elevated assignment risk."
@@ -93,7 +106,7 @@ class OptionsScoringService:
                 delta = sanitize_delta(put.delta if put else None)
                 if (
                     delta is not None
-                    and abs(delta) >= OptionsScoringService.ASSIGNMENT_DELTA_THRESHOLD
+                    and abs(delta) >= assignment_threshold
                 ):
                     assignment_flags.append(
                         f"Short put at ${strike:g} has delta {delta:.2f} — "
@@ -143,7 +156,9 @@ class OptionsScoringService:
         underlying_price: float | None,
         rationale_prefix: str,
         expiration_key: str | None = None,
+        delta_band: OptionDeltaBand | None = None,
     ) -> list[OptionsStrikeCandidate]:
+        band = delta_band or DEFAULT_DELTA_BAND
         candidates: list[OptionsStrikeCandidate] = []
 
         for strike_str, contract_list in contracts_by_strike.items():
@@ -176,7 +191,7 @@ class OptionsScoringService:
             ):
                 continue
 
-            delta_score = OptionsScoringService._delta_score(abs_delta)
+            delta_score = OptionsScoringService._delta_score(abs_delta, band=band)
             oi_score = min(oi / 1000.0, 1.0)
             spread = OptionsScoringService._spread_pct(contract)
             spread_score = max(0.0, 1.0 - (spread or 0.0) / 0.15)
@@ -242,13 +257,11 @@ class OptionsScoringService:
         return max((exp_date - today).days, 0)
 
     @staticmethod
-    def _delta_score(abs_delta: float) -> float:
-        target_mid = (
-            OptionsScoringService.TARGET_DELTA_MIN
-            + OptionsScoringService.TARGET_DELTA_MAX
-        ) / 2.0
+    def _delta_score(abs_delta: float, *, band: OptionDeltaBand) -> float:
+        target_mid = (band.min_delta + band.max_delta) / 2.0
+        half_width = max((band.max_delta - band.min_delta) / 2.0, 0.05)
         distance = abs(abs_delta - target_mid)
-        return max(0.0, 1.0 - distance / 0.2)
+        return max(0.0, 1.0 - distance / half_width)
 
     @staticmethod
     def _dte_score(days_to_expiration: int) -> float:
