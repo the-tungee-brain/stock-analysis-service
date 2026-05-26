@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from app.adapters.cache.research_context_cache import ResearchContextCache
 from app.builders.fundamentals_builder import FundamentalsBuilder
+from app.builders.ticker_symbol_builder import TickerSymbolBuilder
 from app.models.company_research_models import (
     EarningsContext,
     FundamentalMetric,
@@ -13,6 +14,7 @@ from app.models.company_research_models import (
 )
 from app.services.company_profile_service import CompanyProfileService
 from app.services.earnings_service import EarningsService
+from app.services.etf_research_service import EtfResearchService
 from app.services.enriched_news_service import EnrichedNewsService
 from app.services.market_service import MarketService
 from app.services.news_service import NewsService, finnhub_press_releases_enabled
@@ -30,6 +32,8 @@ class CompanyResearchService:
         earnings_service: EarningsService,
         research_context_cache: ResearchContextCache | None = None,
         enriched_news_service: EnrichedNewsService | None = None,
+        ticker_symbol_builder: TickerSymbolBuilder | None = None,
+        etf_research_service: EtfResearchService | None = None,
     ):
         self.company_profile_service = company_profile_service
         self.market_service = market_service
@@ -39,6 +43,8 @@ class CompanyResearchService:
         self.earnings_service = earnings_service
         self.research_context_cache = research_context_cache
         self.enriched_news_service = enriched_news_service
+        self.ticker_symbol_builder = ticker_symbol_builder
+        self.etf_research_service = etf_research_service
 
     @staticmethod
     def merge_fundamentals(
@@ -230,9 +236,48 @@ class CompanyResearchService:
             return context
         return context.model_copy(update={"enriched_news": summary})
 
+    def _resolve_asset_type(self, symbol: str) -> str | None:
+        if self.ticker_symbol_builder is None:
+            return None
+        try:
+            item = self.ticker_symbol_builder.get_by_symbol(symbol=symbol)
+        except Exception:
+            return None
+        if item is None:
+            return None
+        return item.asset_type
+
+    @staticmethod
+    def _is_etf(asset_type: str | None) -> bool:
+        return asset_type == "ETF"
+
+    def _build_etf_fundamentals(self, symbol: str) -> list[FundamentalMetric]:
+        metrics = self.fundamentals_builder.build_etf_metrics(symbol=symbol)
+        fundamentals: list[FundamentalMetric] = []
+        if metrics.get("dividend_yield"):
+            fundamentals.append(
+                FundamentalMetric(
+                    label="Dividend yield",
+                    value=metrics["dividend_yield"],
+                    note="Annual distributions as a share of the ETF price.",
+                )
+            )
+        if metrics.get("expense_ratio"):
+            fundamentals.append(
+                FundamentalMetric(
+                    label="Expense ratio",
+                    value=metrics["expense_ratio"],
+                    note="Annual fund operating costs as a share of assets.",
+                )
+            )
+        return fundamentals
+
     def _build_context(
         self, symbol: str, *, news_lookback_days: int = 7
     ) -> ResearchContext:
+        asset_type = self._resolve_asset_type(symbol)
+        is_etf = self._is_etf(asset_type)
+
         data_gaps: list[str] = []
 
         with ThreadPoolExecutor(
@@ -247,7 +292,7 @@ class CompanyResearchService:
                 self._run_loader,
                 "peers",
                 lambda: self.company_profile_service.get_peers(symbol=symbol),
-            )
+            ) if not is_etf else None
             future_performance = executor.submit(
                 self._run_loader,
                 "performance",
@@ -271,24 +316,47 @@ class CompanyResearchService:
             future_fundamentals = executor.submit(
                 self._run_loader,
                 "fundamentals",
-                lambda: self.fundamentals_builder.build(symbol=symbol),
+                lambda: (
+                    self._build_etf_fundamentals(symbol=symbol)
+                    if is_etf
+                    else self.fundamentals_builder.build(symbol=symbol)
+                ),
             )
-            future_sec = executor.submit(
-                self._run_loader,
-                "sec",
-                lambda: self._load_sec_context(symbol=symbol),
+            future_sec = (
+                None
+                if is_etf
+                else executor.submit(
+                    self._run_loader,
+                    "sec",
+                    lambda: self._load_sec_context(symbol=symbol),
+                )
             )
-            future_earnings = executor.submit(
-                self._run_loader,
-                "earnings",
-                lambda: self.earnings_service.build_research_context(symbol=symbol),
+            future_earnings = (
+                None
+                if is_etf
+                else executor.submit(
+                    self._run_loader,
+                    "earnings",
+                    lambda: self.earnings_service.build_research_context(symbol=symbol),
+                )
+            )
+            future_etf_holdings = (
+                executor.submit(
+                    self._run_loader,
+                    "etf_holdings",
+                    lambda: self.etf_research_service.build_holdings_context(
+                        symbol=symbol
+                    ),
+                )
+                if is_etf and self.etf_research_service is not None
+                else None
             )
 
             snapshot, gap = future_snapshot.result()
             if gap:
                 data_gaps.append(gap)
 
-            peers, gap = future_peers.result()
+            peers, gap = future_peers.result() if future_peers is not None else (None, None)
             if gap:
                 data_gaps.append(gap)
             peers = peers or []
@@ -314,7 +382,9 @@ class CompanyResearchService:
                 data_gaps.append(gap)
             fundamentals = fundamentals or []
 
-            sec_result, gap = future_sec.result()
+            sec_result, gap = (
+                future_sec.result() if future_sec is not None else (None, None)
+            )
             sec_fundamentals: list[FundamentalMetric] = []
             sec_ratio_trends: list[SecRatioTrendPoint] = []
             sec_recent_filings: list[SecFilingHeadline] = []
@@ -329,12 +399,21 @@ class CompanyResearchService:
                     sec_company_info,
                 ) = sec_result
 
-            earnings, gap = future_earnings.result()
+            earnings, gap = (
+                future_earnings.result() if future_earnings is not None else (None, None)
+            )
             if gap:
                 data_gaps.append(gap)
 
+            etf_holdings = None
+            if future_etf_holdings is not None:
+                etf_holdings, gap = future_etf_holdings.result()
+                if gap:
+                    data_gaps.append(gap)
+
         return ResearchContext(
             symbol=symbol.upper(),
+            asset_type=asset_type,
             snapshot=snapshot,
             performance=performance,
             news=news,
@@ -346,5 +425,6 @@ class CompanyResearchService:
             sec_company_info=sec_company_info,
             peers=peers,
             earnings=earnings,
+            etf_holdings=etf_holdings,
             data_gaps=data_gaps,
         )

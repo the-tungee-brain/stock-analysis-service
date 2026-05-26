@@ -14,6 +14,7 @@ from app.services.ticker_service import TickerService
 from app.services.sec_research_service import SecResearchService
 from app.services.transaction_service import TransactionService
 from app.services.earnings_service import EarningsService
+from app.services.etf_research_service import EtfResearchService
 from app.services.enriched_news_service import EnrichedNewsService
 from app.services.intelligence.portfolio_intelligence_service import (
     PortfolioIntelligenceService,
@@ -92,6 +93,10 @@ def get_portfolio_intelligence_service(request: Request) -> PortfolioIntelligenc
 
 def get_enriched_news_service(request: Request) -> EnrichedNewsService:
     return request.app.state.enriched_news_service
+
+
+def get_etf_research_service(request: Request) -> EtfResearchService:
+    return request.app.state.etf_research_service
 
 
 def get_portfolio_memory_service(request: Request) -> PortfolioMemoryService:

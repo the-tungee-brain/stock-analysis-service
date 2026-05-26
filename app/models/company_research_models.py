@@ -2,6 +2,16 @@ from pydantic import BaseModel, Field, HttpUrl
 from typing import Literal
 
 SentimentLabel = Literal["Bullish", "Neutral", "Bearish"]
+AssetType = Literal[
+    "STOCK",
+    "ETF",
+    "MUTUAL_FUND",
+    "INDEX",
+    "CRYPTO",
+    "ADR",
+    "BOND",
+    "OPTION",
+]
 
 
 class ResearchSnapshot(BaseModel):
@@ -108,8 +118,31 @@ class EarningsContext(BaseModel):
     last_revenue_surprise_pct: str | None = None
 
 
+class EtfHoldingItem(BaseModel):
+    ticker: str | None = None
+    name: str
+    weight_pct: float
+    sector: str | None = None
+    market_cap: str | None = None
+
+
+class EtfHoldingsContext(BaseModel):
+    ticker: str
+    total_holdings: int
+    aum: str | None = None
+    sector_breakdown: dict[str, float] = Field(default_factory=dict)
+    holdings: list[EtfHoldingItem] = Field(default_factory=list)
+    dividend_yield: str | None = None
+    expense_ratio: str | None = None
+    data_as_of: str | None = Field(default=None, serialization_alias="dataAsOf")
+    confidence_score: float | None = Field(
+        default=None, serialization_alias="confidenceScore"
+    )
+
+
 class ResearchContext(BaseModel):
     symbol: str
+    asset_type: AssetType | None = Field(default=None, serialization_alias="assetType")
     snapshot: ResearchSnapshot | None = None
     performance: PerformanceSnapshot | None = None
     news: list[NewsHeadline] = Field(default_factory=list)
@@ -122,4 +155,7 @@ class ResearchContext(BaseModel):
     sec_company_info: str | None = None
     peers: list[str] = Field(default_factory=list)
     earnings: EarningsContext | None = None
+    etf_holdings: EtfHoldingsContext | None = Field(
+        default=None, serialization_alias="etfHoldings"
+    )
     data_gaps: list[str] = Field(default_factory=list)

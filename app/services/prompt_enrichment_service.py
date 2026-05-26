@@ -31,7 +31,7 @@ from app.models.schwab_order_models import SchwabOrder
 from datetime import datetime, timezone
 from typing import List, Tuple, Dict, Any, Optional
 from app.models.finnhub_news_models import NewsResponse
-from app.models.company_research_models import ResearchContext, FundamentalMetric, SecRatioTrendPoint, NewsHeadline
+from app.models.company_research_models import ResearchContext, FundamentalMetric, SecRatioTrendPoint, NewsHeadline, EtfHoldingsContext
 from app.models.intelligence_models import (
     MarketNewsItem,
     OptionRollSuggestion,
@@ -308,9 +308,14 @@ class PromptEnrichmentService:
 
         if ctx.snapshot:
             s = ctx.snapshot
+            profile_heading = (
+                "## Fund profile"
+                if ctx.asset_type == "ETF"
+                else "## Company profile"
+            )
             sections.append(
                 dedent(f"""
-                ## Company profile
+                {profile_heading}
                 - Name: {s.name}
                 - Sector / industry: {s.sector}
                 - Country: {s.country}
@@ -321,7 +326,15 @@ class PromptEnrichmentService:
                 """).strip()
             )
         else:
-            sections.append("## Company profile\nNo live profile data available.")
+            profile_heading = (
+                "## Fund profile\nNo live profile data available."
+                if ctx.asset_type == "ETF"
+                else "## Company profile\nNo live profile data available."
+            )
+            sections.append(profile_heading)
+
+        if ctx.etf_holdings:
+            sections.append(self._format_etf_holdings_section(ctx.etf_holdings))
 
         if include_peers and ctx.peers:
             peer_list = ", ".join(ctx.peers[:8 if not compact else 5])
@@ -445,6 +458,48 @@ class PromptEnrichmentService:
             )
 
         return "\n\n".join(sections)
+
+    @staticmethod
+    def _format_etf_holdings_section(etf: EtfHoldingsContext) -> str:
+        lines = [
+            "## ETF composition (from fund holdings)",
+            f"- Total holdings: {etf.total_holdings}",
+        ]
+        if etf.aum:
+            lines.append(f"- Assets under management: {etf.aum}")
+        if etf.expense_ratio:
+            lines.append(f"- Expense ratio: {etf.expense_ratio}")
+        if etf.dividend_yield:
+            lines.append(f"- Dividend yield: {etf.dividend_yield}")
+        if etf.data_as_of:
+            lines.append(f"- Holdings as of: {etf.data_as_of[:10]}")
+        if etf.confidence_score is not None:
+            lines.append(f"- Data confidence score: {etf.confidence_score:.2f}")
+
+        if etf.sector_breakdown:
+            sector_lines = [
+                f"- {sector}: {weight:.2f}%"
+                for sector, weight in sorted(
+                    etf.sector_breakdown.items(),
+                    key=lambda item: item[1],
+                    reverse=True,
+                )
+            ]
+            lines.append("### Sector breakdown")
+            lines.extend(sector_lines)
+
+        if etf.holdings:
+            lines.append("### Top holdings")
+            lines.append("| Ticker | Name | Weight | Sector |")
+            lines.append("| --- | --- | --- | --- |")
+            for holding in etf.holdings[:15]:
+                ticker = holding.ticker or "—"
+                sector = holding.sector or "—"
+                lines.append(
+                    f"| {ticker} | {holding.name} | {holding.weight_pct:.2f}% | {sector} |"
+                )
+
+        return "\n".join(lines)
 
     def format_research_context_block(
         self,

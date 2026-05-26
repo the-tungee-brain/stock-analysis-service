@@ -4,22 +4,25 @@ from app.adapters.market.ticker_symbol_adapter import TickerSymbolAdapter
 from app.builders.ticker_symbol_builder import TickerSymbolBuilder
 
 
-def _mock_adapter_rows(rows: list[tuple[str, str | None]]) -> TickerSymbolAdapter:
+def _mock_adapter_rows(rows: list[tuple[str, str | None, str | None]]) -> TickerSymbolAdapter:
     adapter = TickerSymbolAdapter(client=MagicMock())
     mock_con = MagicMock()
     mock_cur = MagicMock()
     adapter.client.acquire.return_value = mock_con
     mock_con.cursor.return_value = mock_cur
-    mock_cur.description = [("SYMBOL",), ("TITLE",)]
+    mock_cur.description = [("SYMBOL",), ("TITLE",), ("ASSET_TYPE",)]
     mock_cur.fetchall.return_value = rows
     return adapter
 
 
-def test_dict_to_item_maps_title():
+def test_dict_to_item_maps_title_and_asset_type():
     adapter = TickerSymbolAdapter(client=MagicMock())
-    item = adapter.dict_to_item({"SYMBOL": "AAPL", "TITLE": "Apple Inc."})
-    assert item.symbol == "AAPL"
-    assert item.title == "Apple Inc."
+    item = adapter.dict_to_item(
+        {"SYMBOL": "SPY", "TITLE": "SPDR S&P 500", "ASSET_TYPE": "ETF"}
+    )
+    assert item.symbol == "SPY"
+    assert item.title == "SPDR S&P 500"
+    assert item.asset_type == "ETF"
 
 
 def test_get_by_keyword_empty_query_returns_empty_list():
@@ -28,7 +31,7 @@ def test_get_by_keyword_empty_query_returns_empty_list():
 
 
 def test_ticker_symbol_builder_returns_title_from_adapter():
-    adapter = _mock_adapter_rows([("AAPL", "Apple Inc.")])
+    adapter = _mock_adapter_rows([("AAPL", "Apple Inc.", "STOCK")])
     builder = TickerSymbolBuilder(ticker_symbol_adapter=adapter)
 
     results = builder.get_symbols_by_keyword("apple", limit=5)

@@ -13,3 +13,6 @@ class TickerSymbolBuilder:
         return self.ticker_symbol_adapter.get_by_keyword(
             keyword=keyword, limit=limit
         )
+
+    def get_by_symbol(self, symbol: str) -> TickerSymbolItem | None:
+        return self.ticker_symbol_adapter.get_by_symbol(symbol=symbol)

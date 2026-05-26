@@ -69,11 +69,13 @@ from app.services.user_service import UserService
 from app.services.ticker_service import TickerService
 from app.services.transaction_service import TransactionService
 from app.adapters.sec.sec_edgar_adapter import SecEdgarAdapter
+from app.adapters.securitiesdb.securitiesdb_adapter import SecuritiesDbAdapter
 from app.builders.sec_cik_builder import SecCikBuilder
 from app.builders.sec_financials_builder import SecFinancialsBuilder
 from app.builders.sec_ratios_builder import SecRatiosBuilder
 from app.services.sec_research_service import SecResearchService
 from app.services.earnings_service import EarningsService
+from app.services.etf_research_service import EtfResearchService
 from app.services.enriched_news_service import EnrichedNewsService
 from app.services.intelligence.peer_comparison_service import PeerComparisonService
 from app.services.intelligence.portfolio_intelligence_service import (
@@ -199,6 +201,7 @@ async def lifespan(app: FastAPI):
     fundamentals_builder = FundamentalsBuilder(market_data_adapter=yfinance_adapter)
     earnings_builder = EarningsBuilder(finnhub_adapter=finnhub_adapter)
     sec_edgar_adapter = SecEdgarAdapter.from_env(session=session)
+    securitiesdb_adapter = SecuritiesDbAdapter.from_env(session=session)
     sec_cik_builder = SecCikBuilder(sec_edgar_adapter=sec_edgar_adapter)
     sec_financials_builder = SecFinancialsBuilder()
     sec_ratios_builder = SecRatiosBuilder()
@@ -211,6 +214,10 @@ async def lifespan(app: FastAPI):
     sec_cik_builder._load_ticker_map()
     ticker_symbol_builder = TickerSymbolBuilder(
         ticker_symbol_adapter=ticker_symbol_adapter
+    )
+    etf_research_service = EtfResearchService(
+        securitiesdb_adapter=securitiesdb_adapter,
+        fundamentals_builder=fundamentals_builder,
     )
 
     news_service = NewsService(finnhub_builder=finnhub_builder)
@@ -260,6 +267,8 @@ async def lifespan(app: FastAPI):
         earnings_service=earnings_service,
         research_context_cache=research_context_cache,
         enriched_news_service=enriched_news_service,
+        ticker_symbol_builder=ticker_symbol_builder,
+        etf_research_service=etf_research_service,
     )
     peer_comparison_service = PeerComparisonService(
         yfinance_adapter=yfinance_adapter,
@@ -327,6 +336,7 @@ async def lifespan(app: FastAPI):
     app.state.enriched_news_service = enriched_news_service
     app.state.earnings_service = earnings_service
     app.state.sec_research_service = sec_research_service
+    app.state.etf_research_service = etf_research_service
     app.state.ticker_service = ticker_service
     app.state.transaction_service = transaction_service
     app.state.recent_orders_cache = recent_orders_cache
