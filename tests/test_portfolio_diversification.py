@@ -100,7 +100,7 @@ def test_diversification_summary_respects_profile_single_name_limit():
     )
 
     assert block is not None
-    assert "Max per-stock limit (from profile): 15% max" in block
+    assert "Max per-stock limit (from profile): 15%" in block
     assert "Large — 15–20% of portfolio" in block
 
 
