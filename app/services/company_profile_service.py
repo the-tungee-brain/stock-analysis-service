@@ -11,6 +11,10 @@ from app.models.company_research_models import ResearchSnapshot
 
 logger = logging.getLogger(__name__)
 
+FINNHUB_STOCK_LOGO_URL = (
+    "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/{symbol}.png"
+)
+
 
 class CompanyProfileService:
     def __init__(
@@ -92,7 +96,7 @@ class CompanyProfileService:
             changePct=change_pct,
             marketCap=self._format_market_cap_millions(profile.marketCapitalization),
             range52w=range_52w,
-            logo=profile.logo,
+            logo=self._normalize_logo_url(symbol, str(profile.logo)),
             weburl=profile.weburl,
         )
 
@@ -112,7 +116,7 @@ class CompanyProfileService:
         prev_close = self._previous_close_from_yfinance(info, history, price)
         change_pct = self._compute_change_pct(current=price, prev_close=prev_close)
         website = info.get("website") or f"https://finance.yahoo.com/quote/{symbol}"
-        logo = info.get("logo_url") or website
+        logo = self._normalize_logo_url(symbol, info.get("logo_url"))
 
         return ResearchSnapshot(
             symbol=symbol,
@@ -186,6 +190,28 @@ class CompanyProfileService:
     def format_52w_range(self, symbol: str) -> str:
         low, high = self.get_52w_range_yf(symbol)
         return f"${low:.2f} – ${high:.2f}"
+
+    @staticmethod
+    def _stock_logo_url(symbol: str) -> str:
+        return FINNHUB_STOCK_LOGO_URL.format(symbol=symbol.strip().upper())
+
+    @staticmethod
+    def _normalize_logo_url(symbol: str, candidate: str | None) -> str:
+        if candidate:
+            value = candidate.strip()
+            lower = value.lower()
+            if lower.startswith(("http://", "https://")) and (
+                ".png" in lower
+                or ".jpg" in lower
+                or ".jpeg" in lower
+                or ".svg" in lower
+                or ".webp" in lower
+                or ".gif" in lower
+                or "finnhubimage" in lower
+                or "/logo" in lower
+            ):
+                return value
+        return CompanyProfileService._stock_logo_url(symbol)
 
     @staticmethod
     def _format_market_cap_millions(mc: float) -> str:

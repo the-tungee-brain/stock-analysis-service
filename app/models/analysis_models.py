@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.portfolio_analysis_precomputed_models import PortfolioAnalysisPrecomputed
 from app.models.symbol_analysis_precomputed_models import SymbolAnalysisPrecomputed
 
 
@@ -39,3 +40,6 @@ class SymbolAnalysisV1Envelope(BaseModel):
 
     analysis: PortfolioAnalysisV1LLMResponse
     precomputed: SymbolAnalysisPrecomputed | None = None
+    portfolio_precomputed: PortfolioAnalysisPrecomputed | None = Field(
+        default=None, serialization_alias="portfolioPrecomputed"
+    )

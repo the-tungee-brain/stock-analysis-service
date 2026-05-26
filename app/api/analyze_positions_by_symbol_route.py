@@ -18,6 +18,7 @@ from app.dependencies.service_dependencies import (
 from openai.types.shared import ResponsesModel
 from app.core.prompts import (
     AnalysisAction,
+    PortfolioContext,
     SymbolContext,
     SYSTEM_NATURAL_MESSAGE,
     system_message_for_structured_analysis,
@@ -65,8 +66,9 @@ class AnalyzePositionsBySymbolRequest(BaseModel):
     description=(
         "Streams analysis text. When request.response_format is portfolio_analysis_v1 "
         "and there is no user-typed prompt, the stream body is JSON for "
-        "SymbolAnalysisV1Envelope: { analysis, precomputed }. Parse analysis for LLM "
-        "narrative; render precomputed.heldOptionOutcomes for Compare paths UI. "
+        "SymbolAnalysisV1Envelope: { analysis, precomputed, portfolioPrecomputed }. "
+        "Parse analysis for LLM narrative; render precomputed.heldOptionOutcomes for Compare paths UI "
+        "and portfolioPrecomputed for allocation UI. "
         "Response header X-Analysis-Envelope: symbol_analysis_v1 when JSON envelope is used."
     ),
 )
@@ -172,9 +174,13 @@ async def analyze_positions_by_symbol(
                 max_output_tokens=settings.MAX_OUTPUT_TOKENS_STREAM,
             )
             precomputed = ctx.precomputed if isinstance(ctx, SymbolContext) else None
+            portfolio_precomputed = (
+                ctx.portfolio_precomputed if isinstance(ctx, PortfolioContext) else None
+            )
             envelope = SymbolAnalysisV1Envelope(
                 analysis=parsed,
                 precomputed=precomputed,
+                portfolio_precomputed=portfolio_precomputed,
             )
             payload = envelope.model_dump_json(by_alias=True)
             assistant_content_parts.append(payload)

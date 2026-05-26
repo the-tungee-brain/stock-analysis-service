@@ -1,4 +1,7 @@
-from app.broker.portfolio_diversification import format_diversification_summary_block
+from app.broker.portfolio_diversification import (
+    build_portfolio_allocation_precomputed,
+    format_diversification_summary_block,
+)
 from app.models.intelligence_models import SectorWeight
 from app.models.strategy_models import (
     InvestmentStrategy,
@@ -17,6 +20,48 @@ def _account_with_cash(*, liquidation: float, cash: float):
         update={"currentBalances": current}
     )
     return account.model_copy(update={"securitiesAccount": securities})
+
+
+def test_build_portfolio_allocation_precomputed_returns_structured_plan():
+    account = _account_with_cash(liquidation=100_000, cash=15_000)
+    positions = [
+        _make_position(symbol="NVDA", market_value=35_000),
+        _make_position(symbol="AAPL", market_value=25_000),
+    ]
+
+    precomputed = build_portfolio_allocation_precomputed(
+        positions=positions,
+        account=account,
+    )
+
+    assert precomputed is not None
+    assert precomputed.cash_map.deployable_cash >= 0
+    assert len(precomputed.holdings) >= 2
+    assert precomputed.holdings[0].symbol == "NVDA"
+    assert precomputed.trim_plan
+    assert precomputed.cash_map.total_to_redeploy >= precomputed.cash_map.deployable_cash
+
+
+def test_diversification_summary_includes_cash_map_and_holding_review():
+    account = _account_with_cash(liquidation=100_000, cash=15_000)
+    positions = [
+        _make_position(symbol="NVDA", market_value=35_000),
+        _make_position(symbol="AAPL", market_value=25_000),
+        _make_position(symbol="MSFT", market_value=15_000),
+    ]
+
+    block = format_diversification_summary_block(
+        positions=positions,
+        account=account,
+    )
+
+    assert block is not None
+    assert "Portfolio cash map (precomputed" in block
+    assert "Holding-by-holding review (precomputed" in block
+    assert "Suggested trim plan (precomputed" in block
+    assert "NVDA:" in block
+    assert "trim ~$" in block
+    assert "Total capital available to redeploy" in block
 
 
 def test_diversification_summary_includes_top_holdings_and_cash():

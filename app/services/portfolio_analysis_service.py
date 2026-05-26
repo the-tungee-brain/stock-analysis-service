@@ -14,7 +14,10 @@ from app.broker.option_utils import (
     summarize_assignment_risk,
 )
 from app.adapters.user.user_investment_profile_adapter import UserInvestmentProfileAdapter
-from app.broker.portfolio_diversification import format_diversification_summary_block
+from app.broker.portfolio_diversification import (
+    build_portfolio_allocation_precomputed,
+    format_diversification_summary_block,
+)
 from app.broker.strategy_portfolio_guidance import format_strategy_portfolio_guidance_block
 from app.broker.strategy_symbol_alignment import (
     format_strategy_symbol_alignment_block,
@@ -347,6 +350,7 @@ class PortfolioAnalysisService:
             investment_profile_block = None
             strategy_alignment_block = None
             strategy_guidance_block = None
+            portfolio_precomputed = None
             profile = None
 
             if include_market_data:
@@ -404,6 +408,11 @@ class PortfolioAnalysisService:
                     profile=profile,
                     etf_fund_metrics=etf_fund_metrics,
                 )
+                portfolio_precomputed = build_portfolio_allocation_precomputed(
+                    positions=positions,
+                    account=account,
+                    profile=profile,
+                )
                 strategy_alignment_block = format_strategy_symbol_alignment_block(
                     positions=positions,
                     account=account,
@@ -428,6 +437,7 @@ class PortfolioAnalysisService:
                 strategy_alignment_block=strategy_alignment_block,
                 strategy_guidance_block=strategy_guidance_block,
                 primary_strategy=profile.primary_strategy if profile else None,
+                portfolio_precomputed=portfolio_precomputed if include_market_data else None,
             )
 
         if not include_market_data:

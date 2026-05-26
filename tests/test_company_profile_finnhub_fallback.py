@@ -42,6 +42,7 @@ def test_get_snapshot_uses_yfinance_before_finnhub():
     assert snapshot.name == "Apple Inc."
     assert snapshot.price == 200.0
     assert snapshot.sector == "Technology"
+    assert "finnhubimage/stock_logo/AAPL.png" in str(snapshot.logo)
     finnhub_builder.get_company_profile.assert_not_called()
     finnhub_builder.get_quote.assert_not_called()
 

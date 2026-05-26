@@ -6,6 +6,15 @@ from app.broker.option_utils import total_csp_reserved_cash
 from app.broker.position_metrics import portfolio_liquidation_value
 from app.broker.sector_labels import normalize_sector_label
 from app.models.intelligence_models import SectorWeight
+from app.models.portfolio_analysis_precomputed_models import (
+    CashMapStep,
+    DeployPlanItem,
+    HoldingAllocationReview,
+    PortfolioAnalysisPrecomputed,
+    PortfolioCashMap,
+    PortfolioConcentrationMetrics,
+    TrimPlanItem,
+)
 from app.models.schwab_models import Position, SchwabAccounts
 from app.models.strategy_models import InvestmentStrategy, UserInvestmentProfile
 
@@ -72,6 +81,52 @@ def _concentration_flags(weight_pct: float, limit_pct: float) -> str:
     return ""
 
 
+def _trim_target_weight_pct(weight_pct: float, single_limit: float) -> float | None:
+    if weight_pct >= 30:
+        return 20.0
+    if weight_pct >= 20:
+        return 15.0
+    if weight_pct >= single_limit:
+        return max(single_limit - 1.0, 10.0)
+    return None
+
+
+def _trim_dollars_to_target(
+    *,
+    market_value: float,
+    weight_pct: float,
+    target_weight_pct: float,
+    liquidation: float,
+) -> float:
+    if weight_pct <= target_weight_pct:
+        return 0.0
+    target_value = (target_weight_pct / 100.0) * liquidation
+    return max(round(market_value - target_value, 2), 0.0)
+
+
+def _holding_allocation_status(
+    *,
+    weight_pct: float,
+    single_limit: float,
+    etf_target_pct: float | None = None,
+) -> str:
+    flag = _concentration_flags(weight_pct, single_limit)
+    if flag.startswith("CRITICAL") or flag.startswith("HIGH"):
+        return flag
+    if flag:
+        return flag
+    if etf_target_pct is not None:
+        gap = etf_target_pct - weight_pct
+        if gap > 1.0:
+            return f"UNDERWEIGHT ETF ({gap:+.1f} pp vs target)"
+        if gap < -1.0:
+            return "OVERWEIGHT ETF"
+        return "ETF ON TARGET"
+    if weight_pct < single_limit * 0.5:
+        return "ROOM TO ADD (under half of max)"
+    return "OK"
+
+
 def _profile_single_name_limit(profile: UserInvestmentProfile | None) -> float:
     if profile and profile.wheel and profile.wheel.max_single_name_pct:
         return float(profile.wheel.max_single_name_pct)
@@ -82,14 +137,12 @@ def _profile_single_name_limit(profile: UserInvestmentProfile | None) -> float:
     return 15.0
 
 
-def format_diversification_summary_block(
+def build_portfolio_allocation_precomputed(
     *,
     positions: list[Position],
     account: SchwabAccounts,
-    sector_weights: list[SectorWeight] | None = None,
     profile: UserInvestmentProfile | None = None,
-    etf_fund_metrics: dict[str, EtfFundMetrics] | None = None,
-) -> str | None:
+) -> PortfolioAnalysisPrecomputed | None:
     if not positions:
         return None
 
@@ -116,19 +169,258 @@ def format_diversification_summary_block(
     hhi = sum((weight / 100.0) ** 2 for _, _, weight in ranked)
     effective_names = (1.0 / hhi) if hhi > 0 else len(ranked)
 
+    etf_targets: dict[str, float] = {}
+    if (
+        profile
+        and profile.primary_strategy == InvestmentStrategy.ETF_CORE
+        and profile.etf_core
+        and profile.etf_core.target_allocation
+    ):
+        etf_targets = {
+            symbol.upper(): target
+            for symbol, target in profile.etf_core.target_allocation.items()
+        }
+
+    holdings: list[HoldingAllocationReview] = []
+    trim_plan: list[TrimPlanItem] = []
+    total_trim_proceeds = 0.0
+
+    for symbol, market_value, weight in ranked[:12]:
+        etf_target = etf_targets.get(symbol)
+        status = _holding_allocation_status(
+            weight_pct=weight,
+            single_limit=single_name_limit,
+            etf_target_pct=etf_target,
+        )
+        action_bits: list[str] = []
+        trim_target = _trim_target_weight_pct(weight, single_name_limit)
+        trim_dollars = 0.0
+        if trim_target is not None:
+            trim_dollars = _trim_dollars_to_target(
+                market_value=market_value,
+                weight_pct=weight,
+                target_weight_pct=trim_target,
+                liquidation=liquidation,
+            )
+            if trim_dollars >= 1.0:
+                total_trim_proceeds += trim_dollars
+                action_bits.append(
+                    f"trim ~${trim_dollars:,.0f} to reach ~{trim_target:.0f}%"
+                )
+                trim_plan.append(
+                    TrimPlanItem(
+                        symbol=symbol,
+                        current_weight_pct=round(weight, 2),
+                        target_weight_pct=trim_target,
+                        trim_dollars=trim_dollars,
+                    )
+                )
+        if etf_target is not None:
+            gap_pct = etf_target - weight
+            buy_dollars = max((gap_pct / 100.0) * liquidation, 0.0)
+            if gap_pct > 1.0 and buy_dollars >= 1.0:
+                action_bits.append(
+                    f"underweight ETF — gap ~${buy_dollars:,.0f} to target"
+                )
+            elif gap_pct < -1.0:
+                action_bits.append(
+                    "overweight vs ETF target — trim before adding elsewhere"
+                )
+        if not action_bits:
+            if weight >= 15:
+                action_bits.append("hold size; do not add until lower")
+            elif status == "ROOM TO ADD (under half of max)":
+                action_bits.append("candidate for new capital if strategy fits")
+            else:
+                action_bits.append("hold — no mandatory trim")
+
+        holdings.append(
+            HoldingAllocationReview(
+                symbol=symbol,
+                weight_pct=round(weight, 2),
+                market_value=round(market_value, 2),
+                status=status,
+                action_summary="; ".join(action_bits),
+            )
+        )
+
+    total_to_redeploy = deployable_cash + total_trim_proceeds
+    cash_steps: list[CashMapStep] = [
+        CashMapStep(step=1, label="Cash in account", amount=round(cash, 2)),
+        CashMapStep(
+            step=2,
+            label="Less cash secured for open short puts",
+            amount=round(csp_reserved, 2),
+            is_subtraction=True,
+        ),
+        CashMapStep(
+            step=3,
+            label="Cash after put reserves",
+            amount=round(cash_after_csp, 2),
+        ),
+        CashMapStep(
+            step=4,
+            label=f"Less safety buffer ({min_cash_buffer_pct:.0f}% of portfolio)",
+            amount=round(min_cash_buffer, 2),
+            is_subtraction=True,
+        ),
+        CashMapStep(
+            step=5,
+            label="Deployable cash today",
+            amount=round(deployable_cash, 2),
+        ),
+    ]
+    if total_trim_proceeds > 0:
+        cash_steps.extend(
+            [
+                CashMapStep(
+                    step=6,
+                    label="If overweight trims execute",
+                    amount=round(total_trim_proceeds, 2),
+                ),
+                CashMapStep(
+                    step=7,
+                    label="Total capital available to redeploy",
+                    amount=round(total_to_redeploy, 2),
+                ),
+            ]
+        )
+
+    deploy_plan: list[DeployPlanItem] = []
+    if etf_targets:
+        underweight_gaps: list[tuple[str, float]] = []
+        weight_by_symbol = {symbol: weight for symbol, _, weight in ranked}
+        for symbol, target_pct in etf_targets.items():
+            current_pct = weight_by_symbol.get(symbol, 0.0)
+            gap_pct = target_pct - current_pct
+            buy_dollars = max((gap_pct / 100.0) * liquidation, 0.0)
+            if gap_pct > 1.0 and buy_dollars >= 1.0:
+                underweight_gaps.append((symbol, buy_dollars))
+        if underweight_gaps and total_to_redeploy > 0:
+            total_underweight_gap = sum(gap for _, gap in underweight_gaps)
+            remaining = total_to_redeploy
+            for index, (symbol_upper, gap_dollars) in enumerate(underweight_gaps):
+                if index == len(underweight_gaps) - 1:
+                    deploy_amount = remaining
+                else:
+                    deploy_amount = total_to_redeploy * (
+                        gap_dollars / total_underweight_gap
+                    )
+                    remaining -= deploy_amount
+                deploy_plan.append(
+                    DeployPlanItem(
+                        symbol=symbol_upper,
+                        deploy_dollars=round(deploy_amount, 2),
+                        note=f"toward ~${gap_dollars:,.0f} gap to target",
+                    )
+                )
+
+    return PortfolioAnalysisPrecomputed(
+        concentration=PortfolioConcentrationMetrics(
+            liquidation_value=round(liquidation, 2),
+            cash=round(cash, 2),
+            cash_pct=round((cash / liquidation) * 100.0, 2),
+            csp_reserved=round(csp_reserved, 2),
+            cash_after_csp=round(cash_after_csp, 2),
+            min_cash_buffer=round(min_cash_buffer, 2),
+            deployable_cash=round(deployable_cash, 2),
+            distinct_symbols=len(ranked),
+            effective_names=round(effective_names, 2),
+            top1_pct=round(top1, 2),
+            top3_pct=round(top3, 2),
+            top5_pct=round(top5, 2),
+            single_name_limit_pct=single_name_limit,
+        ),
+        cash_map=PortfolioCashMap(
+            steps=cash_steps,
+            deployable_cash=round(deployable_cash, 2),
+            trim_proceeds=round(total_trim_proceeds, 2) if total_trim_proceeds > 0 else None,
+            total_to_redeploy=round(total_to_redeploy, 2),
+            min_cash_buffer_pct=min_cash_buffer_pct,
+        ),
+        holdings=holdings,
+        trim_plan=trim_plan,
+        deploy_plan=deploy_plan,
+        total_trim_proceeds=round(total_trim_proceeds, 2),
+    )
+
+
+def format_diversification_summary_block(
+    *,
+    positions: list[Position],
+    account: SchwabAccounts,
+    sector_weights: list[SectorWeight] | None = None,
+    profile: UserInvestmentProfile | None = None,
+    etf_fund_metrics: dict[str, EtfFundMetrics] | None = None,
+) -> str | None:
+    precomputed = build_portfolio_allocation_precomputed(
+        positions=positions,
+        account=account,
+        profile=profile,
+    )
+    if precomputed is None:
+        return None
+
+    c = precomputed.concentration
     lines = [
         "## Portfolio concentration metrics",
-        f"- Liquidation value: ${liquidation:,.0f}",
-        f"- Cash: ${cash:,.0f} ({(cash / liquidation) * 100:.1f}% of portfolio)",
-        f"- CSP reserved cash: ${csp_reserved:,.0f}",
-        f"- Cash after CSP reserves: ${cash_after_csp:,.0f}",
-        f"- Suggested min cash buffer ({min_cash_buffer_pct:.0f}%): ${min_cash_buffer:,.0f}",
-        f"- Deployable cash (after CSP + buffer): ${deployable_cash:,.0f}",
-        f"- Distinct symbols (aggregated): {len(ranked)}",
-        f"- Effective diversification (~1/HHI): {effective_names:.1f} names",
-        f"- Top 1 / 3 / 5 weights: {top1:.1f}% / {top3:.1f}% / {top5:.1f}%",
-        f"- Single-name target from profile: {single_name_limit:.0f}% max",
+        f"- Liquidation value: ${c.liquidation_value:,.0f}",
+        f"- Cash: ${c.cash:,.0f} ({c.cash_pct:.1f}% of portfolio)",
+        f"- CSP reserved cash: ${c.csp_reserved:,.0f}",
+        f"- Cash after CSP reserves: ${c.cash_after_csp:,.0f}",
+        f"- Suggested min cash buffer ({precomputed.cash_map.min_cash_buffer_pct:.0f}%): "
+        f"${c.min_cash_buffer:,.0f}",
+        f"- Deployable cash (after CSP + buffer): ${c.deployable_cash:,.0f}",
+        f"- Distinct symbols (aggregated): {c.distinct_symbols}",
+        f"- Effective diversification (~1/HHI): {c.effective_names:.1f} names",
+        f"- Top 1 / 3 / 5 weights: {c.top1_pct:.1f}% / {c.top3_pct:.1f}% / {c.top5_pct:.1f}%",
+        f"- Single-name target from profile: {c.single_name_limit_pct:.0f}% max",
+        "",
+        "## Portfolio cash map (precomputed — walk the user through these buckets)",
     ]
+    for step in precomputed.cash_map.steps:
+        if step.amount is None:
+            continue
+        if step.is_subtraction:
+            lines.append(f"{step.step}. {step.label}: −${step.amount:,.0f}")
+        elif step.step in {5, 7}:
+            lines.append(f"{step.step}. = {step.label}: ${step.amount:,.0f}")
+        else:
+            lines.append(f"{step.step}. {step.label}: ${step.amount:,.0f}")
+    if precomputed.total_trim_proceeds <= 0:
+        lines.append(
+            "- No mandatory single-name trims precomputed — deployable cash is the main pool."
+        )
+
+    lines.append(
+        "\n## Holding-by-holding review (precomputed — analyze each line; do not skip names)"
+    )
+    for holding in precomputed.holdings:
+        lines.append(
+            f"- {holding.symbol}: {holding.weight_pct:.1f}% "
+            f"(${holding.market_value:,.0f}) — {holding.status} — "
+            f"{holding.action_summary}"
+        )
+
+    if precomputed.trim_plan:
+        lines.append(
+            "\n## Suggested trim plan (precomputed — rank before new buys when overweight)"
+        )
+        for item in precomputed.trim_plan:
+            lines.append(
+                f"- {item.symbol}: {item.current_weight_pct:.1f}% now → "
+                f"trim ~${item.trim_dollars:,.0f} "
+                f"(target ~{item.target_weight_pct:.0f}% of portfolio)"
+            )
+        lines.append(
+            f"- Total trim proceeds if executed: ~${precomputed.total_trim_proceeds:,.0f}"
+        )
+
+    liquidation = c.liquidation_value
+    ranked = _aggregate_symbol_weights(positions, liquidation)
+    single_name_limit = c.single_name_limit_pct
+    deployable_cash = c.deployable_cash
+    total_trim_proceeds = precomputed.total_trim_proceeds
 
     lines.append("\n## Top holdings by weight")
     for symbol, market_value, weight in ranked[:10]:
@@ -232,14 +524,23 @@ def format_diversification_summary_block(
                 )
             if underweight_gaps:
                 total_underweight_gap = sum(gap for _, gap in underweight_gaps)
+                total_redeploy = deployable_cash + total_trim_proceeds
                 lines.append(
                     "\n## Suggested deploy plan (precomputed from deployable cash + ETF gaps)"
                 )
-                for symbol_upper, gap_dollars in underweight_gaps:
-                    deploy_amount = deployable_cash * (gap_dollars / total_underweight_gap)
+                if total_trim_proceeds > 0:
                     lines.append(
-                        f"- {symbol_upper}: ${deploy_amount:,.0f} "
-                        f"(of ${deployable_cash:,.0f} deployable cash)"
+                        f"- Assume trims above free ~${total_trim_proceeds:,.0f}; "
+                        f"total to allocate this month: ~${total_redeploy:,.0f}"
+                    )
+                for item in precomputed.deploy_plan:
+                    note = f" ({item.note})" if item.note else ""
+                    lines.append(f"- {item.symbol}: ${item.deploy_dollars:,.0f}{note}")
+                if total_redeploy > total_underweight_gap:
+                    lines.append(
+                        f"- Remaining after closing ETF gaps: "
+                        f"~${max(total_redeploy - total_underweight_gap, 0):,.0f} — hold as buffer "
+                        "or add to largest underweight only if still below target."
                     )
 
     if profile and profile.primary_strategy == InvestmentStrategy.DIVIDEND:

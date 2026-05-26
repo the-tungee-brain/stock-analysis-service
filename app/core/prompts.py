@@ -8,6 +8,9 @@ from textwrap import dedent
 from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
+    from app.models.portfolio_analysis_precomputed_models import (
+        PortfolioAnalysisPrecomputed,
+    )
     from app.models.symbol_analysis_precomputed_models import SymbolAnalysisPrecomputed
 
 from app.models.schwab_models import Position, SchwabAccounts
@@ -140,6 +143,7 @@ class PortfolioContext(BaseAnalysisContext):
     strategy_alignment_block: Optional[str] = None
     strategy_guidance_block: Optional[str] = None
     primary_strategy: Optional[InvestmentStrategy] = None
+    portfolio_precomputed: PortfolioAnalysisPrecomputed | None = None
 
 
 @dataclass(kw_only=True)
@@ -214,6 +218,10 @@ _STRUCTURED_V1_JSON_RULES = dedent("""
       the largest underweights using each ticker's "~$X to buy" from the gap table.
     - Never invent dollar amounts or tickers — if a figure is not in the provided data blocks, omit it.
     - Rank 2-4 bullets in "Action plan (ranked)" with timing (this week / this month) and expected impact.
+    - "Diversification diagnosis" must reference **Holding-by-holding review (precomputed)** — at least
+      the top 3–5 names with status and trim/hold/add call.
+    - "Where to put money smarter" must walk **Portfolio cash map (precomputed)** and assign every
+      redeployable dollar to a ticker or an explicit cash hold — no unallocated pool.
     - Limit off-list commentary (e.g., TSM OK to hold) to one short bullet — never make it the lead action
       unless concentration requires a trim.
     """).strip()
@@ -245,6 +253,7 @@ _STRUCTURED_PORTFOLIO_OUTPUT_HEADINGS = dedent("""
     - Use these exact Markdown headings, in this order:
       ### Portfolio snapshot
       ### Diversification diagnosis
+      ### Portfolio cash map
       ### Gaps vs targets
       ### Where to put money smarter
       ### Risk if you do nothing
@@ -346,6 +355,10 @@ def _structured_portfolio_analysis_task(
         STRATEGY ANALYSIS FRAMEWORK / PORTFOLIO INTELLIGENCE as authoritative. Do not recalculate weights unless WEIGHT_% is N/A.
         If deployable cash is shown, end ### Where to put money smarter with a clear plan using
         that exact deployable cash figure and strategy-appropriate targets from the data blocks.
+        Walk **Portfolio cash map (precomputed)** and **Holding-by-holding review (precomputed)** —
+        analyze each top name; assign every redeployable dollar.
+
+        {PORTFOLIO_MONEY_DIVISION_RULES}
 
         {_STRUCTURED_PORTFOLIO_OUTPUT_HEADINGS}
         """).strip()
@@ -380,11 +393,16 @@ def _structured_portfolio_analysis_v1_task(
         - summary: max 3 sentences; {summary_hint}
         - recommendedAction: the single highest-impact next step — imperative title, concrete reason,
           symbol when one name (use "" for multi-symbol or cash-hold actions).
-        - sections: include "Gaps vs targets", "Where to put money smarter", and "Action plan (ranked)".
+        - sections: include "Portfolio cash map", "Gaps vs targets", "Where to put money smarter",
+          and "Action plan (ranked)".
           Plain-text titles only — never use # or ###.
           Use bullets for ranked steps (2-4) with timing and $ amounts from the data.
+          "Portfolio cash map" — numbered cash buckets from precomputed data.
+          "Where to put money smarter" — per-ticker $ adds/trims; account for 100% of redeployable cash.
 
         {decision_order}
+
+        {PORTFOLIO_MONEY_DIVISION_RULES}
 
         {TICKER_SOURCING_RULES}
 
@@ -617,11 +635,36 @@ def _structured_v1_json_rules_overlay(
             """).strip()
     return ""
 
+PORTFOLIO_MONEY_DIVISION_RULES = dedent("""
+    # Portfolio money division (CRITICAL — in-depth, dollar-specific)
+    Treat portfolio analysis as a capital allocation memo, not a market commentary.
+
+    ## Required depth
+    1. **Cash map first** — walk through **Portfolio cash map (precomputed)** line by line:
+       cash → CSP reserves → buffer → deployable → (optional) trim proceeds → total to redeploy.
+    2. **Every major holding** — for each line in **Holding-by-holding review (precomputed)**,
+       state current %, status, and whether to trim, hold, or add — do not skip top names.
+    3. **Account for every dollar** — in "Where to put money smarter", assign deployable cash and
+       any trim proceeds to specific tickers OR explicitly hold as buffer; no vague "consider diversifying."
+    4. **Trims before adds** — if **Suggested trim plan (precomputed)** exists, rank trims first when
+       any name is HIGH/CRITICAL; show how freed $ combines with deployable cash.
+    5. **Deploy plan** — copy **Suggested deploy plan (precomputed)** per-ticker $ when present;
+       otherwise split deployable cash across largest underweights using "~$X to buy" gap lines.
+    6. **After picture** — for each ranked action, state expected weight change (e.g. "NVDA 35% → ~22%").
+
+    ## Anti-patterns (never do these)
+    - Generic advice without $ amounts from the precomputed blocks.
+    - Recommending a new buy while a top name is CRITICAL/HIGH without addressing the trim.
+    - Inventing tickers not in holding review, ETF gap, strategy list, or deploy plan.
+    - Summarizing only top-1 concentration while ignoring other lines in holding review.
+    """).strip()
+
 PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
     # Portfolio diversification framework (follow this order for portfolio-level analysis)
 
     ## Step 1 — Read precomputed concentration data
     - Use **WEIGHT_%** in the positions table and **DIVERSIFICATION SUMMARY** — do not recalculate unless N/A.
+    - Start with **Portfolio cash map (precomputed)** and **Holding-by-holding review (precomputed)**.
     - State **ETF core weight in portfolio** clearly: total % in ETF core targets and each ETF's current % vs target.
     - When recommending ETF buys, cite each fund's **dividend yield** and **expense ratio** from **ETF fund metrics** —
       do not invent yield or fee figures.
@@ -641,16 +684,15 @@ PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
       when the data supports it — do not introduce new tickers absent from the provided blocks.
 
     ## Step 4 — Cash and deployment
-    - Start from **Deployable cash** in DIVERSIFICATION SUMMARY (after CSP reserves and a 5% buffer).
-    - Use that exact deployable cash figure — never invent round placeholder amounts.
-    - If **Suggested deploy plan (precomputed)** is present, use those per-ticker deploy $ amounts.
+    - Walk **Portfolio cash map (precomputed)** before recommending trades.
+    - Start from **Deployable cash** and add **trim proceeds** from **Suggested trim plan (precomputed)** when present.
+    - If **Suggested deploy plan (precomputed)** is present, use those per-ticker deploy $ amounts verbatim.
     - Else if ETF core allocation gap data is present, deploy cash toward the largest underweights listed there
-      using each ticker's **"~$X to buy"** from that table (scale if deployable cash < total gap).
-    - If any name is above 20%, prioritize trims before new buys — unless deployable cash is small vs
-      the concentration; then say both: trim X this week AND deploy remaining cash into the underweight
-      targets from the allocation gap (or hold cash if none are listed).
+      using each ticker's **"~$X to buy"** from that table (scale if total redeploy < total gap).
+    - If any name is above 20%, prioritize trims before new buys — show combined $ from trim + deployable cash.
     - Every trim/add recommendation must include **dollar amount** and **target weight %** when possible.
-    - If fully invested, give a ranked "next dollar" priority list instead of vague advice.
+    - In "Where to put money smarter", allocate 100% of redeployable $ across named tickers or state hold buffer.
+    - If fully invested, give a ranked "next dollar" priority list from holding review instead of vague advice.
     - Never end with observations only — always commit to a ranked deploy/trim plan.
 
     ## Step 5 — Respect saved investor preferences
@@ -828,6 +870,8 @@ _PORTFOLIO_ALLOCATION_CORE = dedent(f"""
 
     {PORTFOLIO_DIVERSIFICATION_RULES}
 
+    {PORTFOLIO_MONEY_DIVISION_RULES}
+
     {OPTIONS_LANGUAGE_RULES}
 
     {DATA_INTEGRITY_RULES}
@@ -846,6 +890,7 @@ _PORTFOLIO_V1_SECTION_TITLES = dedent("""
     When filling sections[].title, use plain labels such as:
     - Portfolio snapshot
     - Diversification diagnosis
+    - Portfolio cash map
     - Gaps vs targets
     - Where to put money smarter
     - Risk if you do nothing
@@ -860,12 +905,13 @@ SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE = dedent(f"""
     Use these exact Markdown headings, in this order:
 
     1. **### Portfolio snapshot** — liquidation value, cash %, top-3 weights, CSP footprint.
-    2. **### Diversification diagnosis** — single-name, sector, and theme concentration with cited %.
-    3. **### Gaps vs targets** — current vs target weights; flag breaches (>15%, >20%, >30%).
-    4. **### Where to put money smarter** — trim/add/cash plan with dollar amounts; deployable cash use.
-    5. **### Risk if you do nothing** — impact if a top holding or sector drops 20–30%.
-    6. **### Action plan (ranked)** — 2–4 steps with timing and diversification impact.
-    7. **### Confidence** — High / Medium / Low, plus one sentence on data gaps.
+    2. **### Diversification diagnosis** — walk **Holding-by-holding review (precomputed)** for top names.
+    3. **### Portfolio cash map** — numbered buckets from precomputed cash map (cash → deployable → redeploy total).
+    4. **### Gaps vs targets** — current vs target weights; flag breaches (>15%, >20%, >30%).
+    5. **### Where to put money smarter** — assign every redeployable $ to tickers or explicit buffer; include trims.
+    6. **### Risk if you do nothing** — impact if a top holding or sector drops 20–30%.
+    7. **### Action plan (ranked)** — 2–4 steps with timing and diversification impact.
+    8. **### Confidence** — High / Medium / Low, plus one sentence on data gaps.
 
     {_PORTFOLIO_ALLOCATION_CONSTRAINTS}
     """).strip()
