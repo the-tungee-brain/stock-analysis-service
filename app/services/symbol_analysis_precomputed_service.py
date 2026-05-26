@@ -408,9 +408,14 @@ class SymbolAnalysisPrecomputedService:
             )
 
         close_lines: list[str] = []
-        if close.cost_per_contract is not None:
+        if close.cost_per_contract is not None and close.open_pnl is not None:
+            close_lines.append(
+                f"Pay ~${close.cost_per_contract:,.0f} to buy to close; "
+                f"locks in open P/L ${close.open_pnl:,.0f}"
+            )
+        elif close.cost_per_contract is not None:
             close_lines.append(f"Pay ~${close.cost_per_contract:,.0f} to buy to close")
-        if close.open_pnl is not None:
+        elif close.open_pnl is not None:
             close_lines.append(f"Locks in open P/L ${close.open_pnl:,.0f}")
         if close_lines:
             options.append(
@@ -418,12 +423,13 @@ class SymbolAnalysisPrecomputedService:
             )
 
         hold_lines: list[str] = []
-        if hold.days_to_expiration is not None:
-            hold_lines.append(f"{hold.days_to_expiration} DTE remaining")
-        if hold.delta is not None:
-            hold_lines.append(f"Delta {hold.delta:.2f}")
         if hold.assignment_note:
             hold_lines.append(hold.assignment_note)
+        else:
+            if hold.days_to_expiration is not None:
+                hold_lines.append(f"{hold.days_to_expiration} DTE remaining")
+            if hold.delta is not None:
+                hold_lines.append(f"Delta {hold.delta:.2f}")
         if hold_lines:
             options.append(
                 ComparePathOption(path="hold", title="Hold to expiration", lines=hold_lines)

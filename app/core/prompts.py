@@ -406,11 +406,11 @@ def _structured_symbol_analysis_v1_task(symbol: str) -> str:
         - summary: 2-3 sentences — portfolio weight, P/L on the leg, thesis read, and your #1 move.
         - recommendedAction: one clear trade or hold; symbol = "{symbol}" when the action targets this name.
         - sections (plain-text titles only — no # or ###):
-          · "Outcome comparison" — REQUIRED when PRECOMPUTED OUTCOMES JSON is present: compare roll,
-            close, and hold using those $ figures verbatim; for hold on a short put, explain keep-premium
-            vs assignment at the strike (effective cost after premium). Use "{symbol} at $[price]" not "spot."
+          · Do NOT include "Outcome comparison" when PRECOMPUTED OUTCOMES JSON is present — comparePaths
+            renders in the UI. Put roll vs close vs hold rationale in recommendedAction.reason or
+            "Recommendation rationale" (prose, 2-3 sentences; no repeated path titles per line).
           · "Position snapshot" — size, P/L, key greeks/DTE if options.
-          · "Recommendation rationale" — why this action vs alternatives (one paragraph).
+          · "Recommendation rationale" — why this action vs alternatives (may include $ figures from JSON).
           · "Execution plan" — contracts, strikes, expirations, timing, limit-order guidance if helpful.
           · "Risk/reward" — what could go wrong and what changes your mind.
         """).strip()
@@ -515,7 +515,10 @@ _PROMPT_PRIORITY_RULES = dedent("""
 _PRECOMPUTED_OUTCOMES_RULES = dedent("""
     # Precomputed outcomes (when PRECOMPUTED OUTCOMES JSON appears in the user message)
     - That JSON is authoritative for roll / close / hold economics and comparePaths lines.
-    - Include a section titled "Outcome comparison" in JSON mode; align every $ figure with the JSON.
+    - comparePaths is rendered in the client UI — do NOT add an "Outcome comparison" section that
+      re-lists those lines or prefixes each bullet with "Close now:" / "Hold to expiration:".
+    - Explain why your recommended action beats the alternatives in recommendedAction.reason or
+      "Recommendation rationale" (2-3 sentences, prose — not a line-by-line copy of comparePaths).
     - **Hold short put (CSP):** cite ticker stock price vs put strike. Above strike → keep premium if
       still above at expiry. Below strike by expiry → assignment buys 100 shares at the strike (wheel);
       effective cost ≈ strike minus premium collected. Never say only "expires worthless."
@@ -904,8 +907,8 @@ _SYMBOL_V1_SECTION_TITLES = dedent("""
     # JSON section titles (plain text only — never use #, ##, or ###)
     When filling sections[].title, use plain labels such as:
     - Position snapshot
-    - Outcome comparison (required when PRECOMPUTED OUTCOMES JSON is in the user message)
-    - Recommendation rationale
+    - Recommendation rationale (include roll vs close vs hold when PRECOMPUTED OUTCOMES is present —
+      prose only; comparePaths renders separately in the UI)
     - Execution plan
     - Risk/reward
     - Confidence
@@ -1538,7 +1541,7 @@ def build_symbol_prompt(
     if json_response and ctx.precomputed is not None:
         precomputed_json = ctx.precomputed.model_dump_json(by_alias=True, indent=2)
         precomputed_section = dedent(f"""
-      === PRECOMPUTED OUTCOMES (AUTHORITATIVE $ MATH — copy in Outcome comparison; do not recalculate) ===
+      === PRECOMPUTED OUTCOMES (AUTHORITATIVE $ MATH — shown in Compare paths UI; do not re-list in sections) ===
       {precomputed_json}
         """).strip() + "\n\n"
 
