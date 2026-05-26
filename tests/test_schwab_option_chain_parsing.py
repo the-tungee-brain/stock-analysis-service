@@ -2,12 +2,33 @@ import json
 from pathlib import Path
 
 from app.core.prompts import AnalysisAction
-from app.models.schwab_option_chain_models import OptionChain
+from app.models.schwab_option_chain_models import OptionChain, OptionContract
 from app.services.intelligence.options_scoring_service import OptionsScoringService
 from app.services.prompt_enrichment_service import PromptEnrichmentService
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "schwab_option_chain_sample.json"
+
+
+def test_option_contract_accepts_schwab_chain_quote_field_names():
+    contract = OptionContract.model_validate(
+        {
+            "putCall": "CALL",
+            "symbol": "TSLA_081321C710",
+            "strikePrice": 710.0,
+            "expirationDate": "2021-08-13T20:00:00.000+00:00",
+            "daysToExpiration": 2,
+            "bid": 8.2,
+            "ask": 8.5,
+            "last": 8.25,
+            "mark": 8.35,
+        }
+    )
+
+    assert contract.bidPrice == 8.2
+    assert contract.askPrice == 8.5
+    assert contract.lastPrice == 8.25
+    assert contract.markPrice == 8.35
 
 
 def test_option_chain_model_validates_schwab_fixture():

@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional, Any
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class OptionDeliverable(BaseModel):
@@ -15,10 +15,18 @@ class OptionContract(BaseModel):
     description: Optional[str] = None
     exchangeName: Optional[str] = None
 
-    bidPrice: Optional[float] = None
-    askPrice: Optional[float] = None
-    lastPrice: Optional[float] = None
-    markPrice: Optional[float] = None
+    bidPrice: Optional[float] = Field(
+        default=None, validation_alias=AliasChoices("bidPrice", "bid")
+    )
+    askPrice: Optional[float] = Field(
+        default=None, validation_alias=AliasChoices("askPrice", "ask")
+    )
+    lastPrice: Optional[float] = Field(
+        default=None, validation_alias=AliasChoices("lastPrice", "last")
+    )
+    markPrice: Optional[float] = Field(
+        default=None, validation_alias=AliasChoices("markPrice", "mark")
+    )
 
     bidSize: Optional[int] = None
     askSize: Optional[int] = None
