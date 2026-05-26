@@ -123,7 +123,30 @@ def test_build_portfolio_prompt_assignment_risk_uses_natural_task():
     assert "ASSIGNMENT RISK SCAN" in prompt
     assert "Cover these points" not in prompt
     assert "conversational prose only" in prompt
-    assert "open with what you'd do first" in prompt.lower()
+    assert "talk like" in prompt.lower()
+    assert "avoid:" in prompt.lower() and "bottom line" in prompt.lower()
+
+
+def test_system_natural_message_discourages_report_openings():
+    from app.core.prompts import SYSTEM_NATURAL_MESSAGE
+
+    lowered = SYSTEM_NATURAL_MESSAGE.lower()
+    assert "never start with labels" in lowered
+    assert '"bottom line:"' in lowered
+    assert "start with the bottom line" not in lowered
+
+
+def test_natural_assignment_risk_task_discourages_bottom_line():
+    from app.core.prompts import _build_action_prompt
+
+    task = _build_action_prompt(
+        AnalysisAction.ASSIGNMENT_RISK,
+        "the portfolio",
+        None,
+        natural_delivery=True,
+    )
+    assert "bottom line" in task.lower()
+    assert "talk like" in task.lower()
 
 
 def test_structured_portfolio_analyze_uses_allocation_prompt_path():
