@@ -67,7 +67,8 @@ async def get_fundamentals(
         context_fingerprint=CompanyResearchService.context_fingerprint(ctx),
     )
     return FundamentalsBlock(
-        overviewNote=overview.overviewNote,
+        overview=overview,
+        overview_note=overview.at_a_glance,
         metrics=metrics,
         quarterly_financials=(
             financials_package.quarterly if financials_package else None

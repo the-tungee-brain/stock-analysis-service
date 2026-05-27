@@ -140,10 +140,21 @@ class FinancialsPackage(BaseModel):
     strength: FinancialStrength
 
 
+class FundamentalsOverview(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    at_a_glance: str = Field(serialization_alias="atAGlance")
+    valuation_take: str = Field(serialization_alias="valuationTake")
+    strengths: list[str] = Field(default_factory=list)
+    concerns: list[str] = Field(default_factory=list)
+    assumptions: str = ""
+
+
 class FundamentalsBlock(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    overviewNote: str
+    overview: FundamentalsOverview | None = None
+    overview_note: str = Field(default="", serialization_alias="overviewNote")
     metrics: list[FundamentalMetric]
     quarterly_financials: FinancialStatementsSnapshot | None = Field(
         default=None,
@@ -154,10 +165,6 @@ class FundamentalsBlock(BaseModel):
         serialization_alias="annualFinancials",
     )
     strength: FinancialStrength | None = None
-
-
-class FundamentalsOverview(BaseModel):
-    overviewNote: str
 
 
 class EarningsContext(BaseModel):

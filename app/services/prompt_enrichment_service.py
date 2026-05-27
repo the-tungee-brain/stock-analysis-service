@@ -1566,38 +1566,51 @@ class PromptEnrichmentService:
                 """
             ).strip()
 
+        is_etf = ctx.asset_type == "ETF"
+        valuation_guidance = (
+            "Explain expense ratio, yield, AUM/liquidity, and whether the fund looks like a "
+            "sensible core holding vs a niche bet for this investor profile."
+            if is_etf
+            else
+            "Explain whether the company looks cheap, fair, or expensive relative to its growth "
+            "and quality, using the provided metrics (P/E, margins, growth rates, etc.)."
+        )
+
         system_msg = dedent(
             f"""
             {RESEARCH_SYSTEM_PREAMBLE}
 
             # Your task
-            Write an in-depth fundamental analysis overview for a retail investor.
-            The structured metrics are provided separately — your job is ONLY to write the
-            **overviewNote**: a thorough narrative that helps the reader understand what the
-            numbers mean in context.
+            Write a scannable fundamental overview for a retail investor.
+            Structured metrics are shown separately — interpret what they mean; do not list
+            raw values verbatim.
 
-            # Depth requirements for overviewNote
-            - 8–12 sentences in plain English.
-            - Explain whether the company looks cheap, fair, or expensive relative to its growth
-              and quality, using the provided metrics (P/E, margins, growth rates, etc.).
-            - When SEC filed financials are provided, treat them as the authoritative source for
-              revenue, income, margins, balance sheet strength, and cash flow. Use market-data
-              estimates for valuation multiples (P/E, beta) that SEC filings do not provide.
-            - When yfinance statement tables are provided, use them for recent quarterly/annual
-              trends (revenue, margins, cash flow, leverage). Align your narrative with the
-              rule-based strength rating when present.
-            - Highlight the 2–3 most important fundamental strengths visible in the data.
-            - Highlight the 2–3 most important fundamental concerns or red flags.
-            - Compare margins, growth, and leverage to what you'd generally expect for this
-              sector (qualitatively — do not invent peer company numbers).
-            - Explain what assumptions an investor would need to believe for the current valuation
-              to make sense.
-            - Do NOT repeat the raw metric values verbatim in a list — weave them into the narrative.
-            - If metrics are missing or sparse, say so and discuss fundamentals conceptually.
+            # Source priority
+            - When SEC filed financials are provided, treat them as authoritative for revenue,
+              income, margins, balance sheet, and cash flow.
+            - Use market-data estimates for valuation multiples (P/E, beta) SEC filings lack.
+            - When yfinance statement tables are provided, use them for recent trends. Align with
+              the rule-based strength rating when present.
 
-            Return a single JSON object:
+            # Output shape (plain English, no markdown)
+            - **atAGlance**: 2–3 sentences. The single most important takeaway — quality, growth,
+              and valuation in one breath.
+            - **valuationTake**: 3–4 sentences. {valuation_guidance}
+            - **strengths**: 2–3 bullet strings. Each ≤ 28 words; one concrete idea per bullet.
+            - **concerns**: 2–3 bullet strings. Each ≤ 28 words; material risks or weaknesses.
+            - **assumptions**: 2–3 sentences. What an investor must believe for the current
+              {"fund profile" if is_etf else "valuation"} to make sense.
+
+            Compare margins, growth, and leverage qualitatively to sector norms — do not invent
+            peer numbers. If data is sparse, say so briefly.
+
+            Return a single JSON object with exactly these keys:
             {{
-              "overviewNote": "..."
+              "atAGlance": "...",
+              "valuationTake": "...",
+              "strengths": ["..."],
+              "concerns": ["..."],
+              "assumptions": "..."
             }}
 
             Do not include extra keys, markdown, or commentary outside the JSON.
