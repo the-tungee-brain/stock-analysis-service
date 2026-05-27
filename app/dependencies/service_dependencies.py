@@ -1,4 +1,5 @@
 from fastapi import Request
+from app.builders.yfinance_financials_builder import YFinanceFinancialsBuilder
 from app.services.llm_service import LLMService
 from app.services.market_service import MarketService
 from app.services.schwab_auth_service import SchwabAuthService
@@ -70,6 +71,10 @@ def get_company_profile_service(request: Request) -> CompanyProfileService:
 
 def get_company_research_service(request: Request) -> CompanyResearchService:
     return request.app.state.company_research_service
+
+
+def get_yfinance_financials_builder(request: Request) -> YFinanceFinancialsBuilder:
+    return request.app.state.yfinance_financials_builder
 
 
 def get_ticker_service(request: Request) -> TickerService:

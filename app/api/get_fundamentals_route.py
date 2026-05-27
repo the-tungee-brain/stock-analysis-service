@@ -1,6 +1,7 @@
 import asyncio
 
 from fastapi import APIRouter, Depends
+from app.builders.yfinance_financials_builder import YFinanceFinancialsBuilder
 from app.models.company_research_models import (
     FundamentalsBlock,
     FundamentalsOverview,
@@ -13,16 +14,24 @@ from app.dependencies.service_dependencies import (
     get_prompt_enrichment_service,
     get_llm_service,
     get_company_research_service,
+    get_yfinance_financials_builder,
 )
 
 router = APIRouter()
 
 
-@router.get("/research/fundamentals", response_model=FundamentalsBlock)
+@router.get(
+    "/research/fundamentals",
+    response_model=FundamentalsBlock,
+    response_model_by_alias=True,
+)
 async def get_fundamentals(
     symbol: str,
     company_research_service: CompanyResearchService = Depends(
         get_company_research_service
+    ),
+    yfinance_financials_builder: YFinanceFinancialsBuilder = Depends(
+        get_yfinance_financials_builder
     ),
     prompt_enrichment_service: PromptEnrichmentService = Depends(
         get_prompt_enrichment_service
@@ -37,8 +46,18 @@ async def get_fundamentals(
         ctx.sec_fundamentals,
         ctx.fundamentals,
     )
+
+    financials_package = None
+    if ctx.asset_type != "ETF":
+        financials_package = await asyncio.to_thread(
+            yfinance_financials_builder.build,
+            symbol=symbol,
+        )
+
     prompts = prompt_enrichment_service.build_fundamentals_prompt(
-        ctx=ctx, metrics=metrics
+        ctx=ctx,
+        metrics=metrics,
+        financials=financials_package,
     )
     overview = await llm_service.generate_from_prompts(
         prompts=prompts,
@@ -50,4 +69,11 @@ async def get_fundamentals(
     return FundamentalsBlock(
         overviewNote=overview.overviewNote,
         metrics=metrics,
+        quarterly_financials=(
+            financials_package.quarterly if financials_package else None
+        ),
+        annual_financials=(
+            financials_package.annual if financials_package else None
+        ),
+        strength=financials_package.strength if financials_package else None,
     )

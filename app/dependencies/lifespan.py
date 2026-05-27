@@ -55,6 +55,7 @@ from app.builders.performance_builder import PerformanceBuilder
 from app.builders.earnings_builder import EarningsBuilder
 from app.builders.ticker_symbol_builder import TickerSymbolBuilder
 from app.builders.fundamentals_builder import FundamentalsBuilder
+from app.builders.yfinance_financials_builder import YFinanceFinancialsBuilder
 
 from app.core.llm_config import settings
 from app.core.access_control import max_active_users
@@ -207,6 +208,9 @@ async def lifespan(app: FastAPI):
     )
     performance_builder = PerformanceBuilder(market_data_adapter=yfinance_adapter)
     fundamentals_builder = FundamentalsBuilder(market_data_adapter=yfinance_adapter)
+    yfinance_financials_builder = YFinanceFinancialsBuilder(
+        yfinance_adapter=yfinance_adapter
+    )
     earnings_builder = EarningsBuilder(
         yfinance_adapter=yfinance_adapter,
         finnhub_adapter=finnhub_adapter,
@@ -340,6 +344,7 @@ async def lifespan(app: FastAPI):
     app.state.http_session = session
     app.state.redis_client = redis_client
     app.state.yfinance_adapter = yfinance_adapter
+    app.state.yfinance_financials_builder = yfinance_financials_builder
     app.state.news_service = news_service
     app.state.prompt_enrichment_service = prompt_enrichment_service
     app.state.market_service = market_service

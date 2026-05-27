@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from typing import Literal
 
 SentimentLabel = Literal["Bullish", "Neutral", "Bearish"]
@@ -98,9 +98,62 @@ class SecRatioTrendPoint(BaseModel):
     revenue_growth_yoy: str | None = None
 
 
+class FinancialLineItem(BaseModel):
+    label: str
+    values: dict[str, float | None] = Field(default_factory=dict)
+
+
+class FinancialStatementsSnapshot(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    periods: list[str] = Field(default_factory=list)
+    income_statement: list[FinancialLineItem] = Field(
+        default_factory=list,
+        serialization_alias="incomeStatement",
+    )
+    balance_sheet: list[FinancialLineItem] = Field(
+        default_factory=list,
+        serialization_alias="balanceSheet",
+    )
+    cash_flow: list[FinancialLineItem] = Field(
+        default_factory=list,
+        serialization_alias="cashFlow",
+    )
+
+
+class FinancialStrength(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    rating: Literal["strong", "solid", "mixed", "weak"]
+    score: int = Field(ge=0, le=100)
+    headline: str
+    strengths: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    highlights: list[str] = Field(default_factory=list)
+
+
+class FinancialsPackage(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    quarterly: FinancialStatementsSnapshot | None = None
+    annual: FinancialStatementsSnapshot | None = None
+    strength: FinancialStrength
+
+
 class FundamentalsBlock(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     overviewNote: str
     metrics: list[FundamentalMetric]
+    quarterly_financials: FinancialStatementsSnapshot | None = Field(
+        default=None,
+        serialization_alias="quarterlyFinancials",
+    )
+    annual_financials: FinancialStatementsSnapshot | None = Field(
+        default=None,
+        serialization_alias="annualFinancials",
+    )
+    strength: FinancialStrength | None = None
 
 
 class FundamentalsOverview(BaseModel):

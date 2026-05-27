@@ -1537,7 +1537,10 @@ class PromptEnrichmentService:
         return [system_msg, user_msg]
 
     def build_fundamentals_prompt(
-        self, ctx: ResearchContext, metrics: list[FundamentalMetric]
+        self,
+        ctx: ResearchContext,
+        metrics: list[FundamentalMetric],
+        financials=None,
     ) -> List[str]:
         context_block = self._format_research_context_block(ctx)
 
@@ -1547,6 +1550,21 @@ class PromptEnrichmentService:
             )
         else:
             metrics_block = "No fundamental metrics available."
+
+        financials_block = self._format_financials_block(financials)
+        strength_block = ""
+        if financials is not None:
+            strength = financials.strength
+            strength_block = dedent(
+                f"""
+                ## Financial strength (rule-based, from yfinance statements)
+                - Rating: {strength.rating} ({strength.score}/100)
+                - Headline: {strength.headline}
+                - Highlights: {"; ".join(strength.highlights) or "n/a"}
+                - Strengths: {"; ".join(strength.strengths) or "n/a"}
+                - Risks: {"; ".join(strength.risks) or "n/a"}
+                """
+            ).strip()
 
         system_msg = dedent(
             f"""
@@ -1565,6 +1583,9 @@ class PromptEnrichmentService:
             - When SEC filed financials are provided, treat them as the authoritative source for
               revenue, income, margins, balance sheet strength, and cash flow. Use market-data
               estimates for valuation multiples (P/E, beta) that SEC filings do not provide.
+            - When yfinance statement tables are provided, use them for recent quarterly/annual
+              trends (revenue, margins, cash flow, leverage). Align your narrative with the
+              rule-based strength rating when present.
             - Highlight the 2–3 most important fundamental strengths visible in the data.
             - Highlight the 2–3 most important fundamental concerns or red flags.
             - Compare margins, growth, and leverage to what you'd generally expect for this
@@ -1592,12 +1613,54 @@ class PromptEnrichmentService:
             ## Metrics to interpret (already shown to the user — explain what they mean)
             {metrics_block}
 
+            {strength_block}
+
+            {financials_block}
+
             Help the reader understand whether this company's fundamentals support a long-term
             investment, and what the key numbers are really telling them.
             """
         ).strip()
 
         return [system_msg, user_msg]
+
+    @staticmethod
+    def _format_financials_block(financials: "FinancialsPackage | None") -> str:
+        if financials is None:
+            return ""
+
+        def format_snapshot(title: str, snapshot) -> str:
+            if snapshot is None or not snapshot.periods:
+                return ""
+            periods = " | ".join(snapshot.periods)
+            lines = [f"### {title} (periods: {periods})"]
+
+            def section(name: str, rows) -> None:
+                if not rows:
+                    return
+                lines.append(f"**{name}**")
+                for row in rows:
+                    values = ", ".join(
+                        f"{period}: {value:,.0f}"
+                        if value is not None
+                        else f"{period}: —"
+                        for period, value in row.values.items()
+                        if period in snapshot.periods
+                    )
+                    lines.append(f"- {row.label}: {values}")
+
+            section("Income", snapshot.income_statement)
+            section("Balance sheet", snapshot.balance_sheet)
+            section("Cash flow", snapshot.cash_flow)
+            return "\n".join(lines)
+
+        parts = [
+            "## yfinance financial statements (shown in the Financial tab)",
+            format_snapshot("Quarterly", financials.quarterly),
+            format_snapshot("Annual", financials.annual),
+        ]
+        body = "\n\n".join(part for part in parts if part)
+        return body if body else ""
 
     def build_earnings_detail_prompt(
         self,
