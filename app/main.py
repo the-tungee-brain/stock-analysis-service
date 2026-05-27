@@ -23,6 +23,7 @@ from app.api.get_stock_summary_route import router as get_stock_summary_route
 from app.api.get_business_details_route import router as get_business_details_route
 from app.api.get_fundamentals_route import router as get_fundamentals_route
 from app.api.sec_research_routes import router as sec_research_router
+from app.api.get_dividend_history_route import router as get_dividend_history_router
 from app.api.get_etf_holdings_route import router as get_etf_holdings_router
 from app.api.get_earnings_route import router as get_earnings_route
 from app.api.lookup_symbol_route import router as lookup_symbol_router
@@ -103,6 +104,7 @@ protected_api.include_router(get_business_details_route)
 protected_api.include_router(get_fundamentals_route)
 protected_api.include_router(sec_research_router)
 protected_api.include_router(get_etf_holdings_router)
+protected_api.include_router(get_dividend_history_router)
 protected_api.include_router(get_earnings_route)
 protected_api.include_router(lookup_symbol_router)
 protected_api.include_router(search_symbols_route)

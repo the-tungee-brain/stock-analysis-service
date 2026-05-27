@@ -59,3 +59,33 @@ class SecuritiesDbAdapter:
         }
         self._cache.set(cache_key, result)
         return result
+
+    def get_stock_dividends(self, symbol: str) -> dict[str, Any] | None:
+        symbol_upper = symbol.strip().upper()
+        if not symbol_upper:
+            return None
+
+        cache_key = f"stock_dividends:{symbol_upper}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        url = f"{self.BASE_URL}/stocks/{symbol_upper}/dividends"
+        timeout = float(os.getenv("SECURITIESDB_TIMEOUT_SECONDS", "15"))
+        response = self.session.get(url, headers=self._headers(), timeout=timeout)
+
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+
+        payload = response.json()
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return None
+
+        result = {
+            "meta": payload.get("meta") if isinstance(payload.get("meta"), dict) else {},
+            "data": data,
+        }
+        self._cache.set(cache_key, result)
+        return result

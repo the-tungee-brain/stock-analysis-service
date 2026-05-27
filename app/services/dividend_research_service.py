@@ -1,0 +1,124 @@
+from typing import Any
+
+from app.adapters.securitiesdb.securitiesdb_adapter import SecuritiesDbAdapter
+from app.models.dividend_research_models import (
+    AnnualDividendIncome,
+    DividendHistoryContext,
+    DividendPaymentItem,
+    DividendSnowballScenario,
+)
+from app.utils.dividend_snowball import (
+    annual_income_on_shares,
+    build_scenario,
+    dividend_cagr_pct,
+    parse_annual_totals,
+)
+
+DEFAULT_SCENARIO_SHARES = 100.0
+DEFAULT_RECENT_PAYMENTS = 8
+
+
+class DividendResearchService:
+    def __init__(self, securitiesdb_adapter: SecuritiesDbAdapter) -> None:
+        self.securitiesdb_adapter = securitiesdb_adapter
+
+    def build_history_context(
+        self,
+        symbol: str,
+        *,
+        shares: float = DEFAULT_SCENARIO_SHARES,
+        start_year: int | None = None,
+    ) -> DividendHistoryContext | None:
+        payload = self.securitiesdb_adapter.get_stock_dividends(symbol=symbol)
+        if payload is None:
+            return None
+
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return None
+
+        meta = payload.get("meta")
+        meta_dict = meta if isinstance(meta, dict) else {}
+        summary = data.get("summary")
+        summary_dict = summary if isinstance(summary, dict) else {}
+
+        annual_totals = parse_annual_totals(summary_dict.get("annual_totals"))
+        if not annual_totals:
+            return None
+
+        raw_dividends = data.get("dividends")
+        dividend_rows: list[dict[str, Any]] = []
+        if isinstance(raw_dividends, list):
+            for item in raw_dividends:
+                if isinstance(item, dict):
+                    dividend_rows.append(item)
+
+        resolved_shares = max(float(shares), 0.0) or DEFAULT_SCENARIO_SHARES
+        scenario_data = build_scenario(
+            dividends=dividend_rows,
+            annual_totals=annual_totals,
+            shares=resolved_shares,
+            start_year=start_year,
+        )
+
+        recent_payments: list[DividendPaymentItem] = []
+        for item in dividend_rows[:DEFAULT_RECENT_PAYMENTS]:
+            payment_date = item.get("date")
+            amount = item.get("amount_per_share")
+            if isinstance(payment_date, str) and isinstance(amount, (int, float)):
+                recent_payments.append(
+                    DividendPaymentItem(
+                        date=payment_date,
+                        amount_per_share=float(amount),
+                    )
+                )
+
+        total_dividends = summary_dict.get("total_dividends")
+        if not isinstance(total_dividends, int):
+            total_dividends = len(dividend_rows)
+
+        total_splits = summary_dict.get("total_splits")
+        if not isinstance(total_splits, int):
+            total_splits = 0
+
+        consecutive = summary_dict.get("consecutive_annual_increases")
+        if not isinstance(consecutive, int):
+            consecutive = 0
+
+        return DividendHistoryContext(
+            ticker=str(data.get("ticker") or symbol).upper(),
+            total_dividends=total_dividends,
+            total_splits=total_splits,
+            consecutive_annual_increases=consecutive,
+            cagr_5y_pct=dividend_cagr_pct(annual_totals, lookback_years=5),
+            cagr_10y_pct=dividend_cagr_pct(annual_totals, lookback_years=10),
+            annual_income=[
+                AnnualDividendIncome.model_validate(row)
+                for row in annual_income_on_shares(
+                    annual_totals,
+                    shares=resolved_shares,
+                )
+            ],
+            recent_payments=recent_payments,
+            scenario=DividendSnowballScenario.model_validate(scenario_data),
+            data_as_of=self._extract_data_as_of(meta_dict),
+            confidence_score=self._extract_confidence_score(meta_dict),
+        )
+
+    @staticmethod
+    def _extract_data_as_of(meta: dict[str, Any]) -> str | None:
+        domains = meta.get("domains")
+        if not isinstance(domains, dict):
+            return None
+        corporate_actions = domains.get("corporate_actions")
+        if not isinstance(corporate_actions, dict):
+            return None
+        last_updated = corporate_actions.get("last_updated")
+        return last_updated if isinstance(last_updated, str) else None
+
+    @staticmethod
+    def _extract_confidence_score(meta: dict[str, Any]) -> float | None:
+        score = meta.get("confidence_score")
+        if isinstance(score, (int, float)):
+            return float(score)
+        return None

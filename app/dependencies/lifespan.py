@@ -75,6 +75,7 @@ from app.builders.sec_financials_builder import SecFinancialsBuilder
 from app.builders.sec_ratios_builder import SecRatiosBuilder
 from app.services.sec_research_service import SecResearchService
 from app.services.earnings_service import EarningsService
+from app.services.dividend_research_service import DividendResearchService
 from app.services.etf_research_service import EtfResearchService
 from app.services.enriched_news_service import EnrichedNewsService
 from app.services.intelligence.peer_comparison_service import PeerComparisonService
@@ -219,6 +220,9 @@ async def lifespan(app: FastAPI):
         securitiesdb_adapter=securitiesdb_adapter,
         fundamentals_builder=fundamentals_builder,
     )
+    dividend_research_service = DividendResearchService(
+        securitiesdb_adapter=securitiesdb_adapter,
+    )
 
     news_service = NewsService(finnhub_builder=finnhub_builder)
     market_service = MarketService(
@@ -337,6 +341,7 @@ async def lifespan(app: FastAPI):
     app.state.earnings_service = earnings_service
     app.state.sec_research_service = sec_research_service
     app.state.etf_research_service = etf_research_service
+    app.state.dividend_research_service = dividend_research_service
     app.state.ticker_service = ticker_service
     app.state.transaction_service = transaction_service
     app.state.recent_orders_cache = recent_orders_cache
