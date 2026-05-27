@@ -11,7 +11,9 @@ from app.utils.dividend_snowball import (
     annual_income_on_shares,
     build_scenario,
     dividend_cagr_pct as compute_dividend_cagr_pct,
+    latest_completed_dividend_per_share,
     parse_annual_totals,
+    resolve_dividend_yield_pct,
 )
 from app.utils.stock_price_cagr import fetch_price_cagr_pct
 
@@ -120,6 +122,13 @@ class DividendResearchService:
         if not isinstance(consecutive, int):
             consecutive = 0
 
+        base_dps = latest_completed_dividend_per_share(annual_totals)
+        dividend_yield_pct = resolve_dividend_yield_pct(
+            base_dps=base_dps,
+            share_price=resolved_share_price,
+            symbol=str(data.get("ticker") or symbol).upper(),
+        )
+
         return DividendHistoryContext(
             ticker=str(data.get("ticker") or symbol).upper(),
             total_dividends=total_dividends,
@@ -127,6 +136,7 @@ class DividendResearchService:
             consecutive_annual_increases=consecutive,
             cagr_5y_pct=compute_dividend_cagr_pct(annual_totals, lookback_years=5),
             cagr_10y_pct=compute_dividend_cagr_pct(annual_totals, lookback_years=10),
+            dividend_yield_pct=dividend_yield_pct,
             annual_income=[
                 AnnualDividendIncome.model_validate(row)
                 for row in annual_income_on_shares(

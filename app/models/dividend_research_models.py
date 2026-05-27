@@ -50,6 +50,9 @@ class DividendHistoryContext(BaseModel):
     )
     cagr_5y_pct: float | None = Field(default=None, serialization_alias="cagr5yPct")
     cagr_10y_pct: float | None = Field(default=None, serialization_alias="cagr10yPct")
+    dividend_yield_pct: float | None = Field(
+        default=None, serialization_alias="dividendYieldPct"
+    )
     annual_income: list[AnnualDividendIncome] = Field(
         default_factory=list, serialization_alias="annualIncome"
     )

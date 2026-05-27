@@ -97,6 +97,20 @@ def resolve_dividend_cagr_pct(
     return resolved if resolved is not None else 0.0
 
 
+def resolve_dividend_yield_pct(
+    *,
+    base_dps: float,
+    share_price: float | None,
+    symbol: str,
+) -> float | None:
+    if share_price is not None and share_price > 0 and base_dps > 0:
+        return round(base_dps / share_price * 100.0, 2)
+
+    from app.utils.stock_price_cagr import fetch_dividend_yield_pct
+
+    return fetch_dividend_yield_pct(symbol)
+
+
 def cash_collected_since_year(
     dividends: list[dict[str, Any]],
     *,

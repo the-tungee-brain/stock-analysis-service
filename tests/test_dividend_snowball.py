@@ -9,6 +9,7 @@ from app.utils.dividend_snowball import (
     dividend_cagr_pct,
     normalize_project_years,
     parse_annual_totals,
+    resolve_dividend_yield_pct,
     simulate_drip_backtest,
     simulate_forward_projection,
 )
@@ -99,6 +100,15 @@ def test_simulate_forward_projection_with_drip():
         result["advanced"]["annual_income_latest_drip"]
         > result["annual_income_latest"]
     )
+
+
+def test_resolve_dividend_yield_pct_from_share_price():
+    yield_pct = resolve_dividend_yield_pct(
+        base_dps=1.0,
+        share_price=50,
+        symbol="SCHD",
+    )
+    assert yield_pct == pytest.approx(2.0)
 
 
 def test_build_scenario_projects_from_current_year():
