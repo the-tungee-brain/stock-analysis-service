@@ -127,13 +127,14 @@ class MorningBriefDeliveryService:
         users = self.app_user_adapter.list_users_with_schwab()
         for user in users:
             result.attempted += 1
+            user_key = user.identity_sub
 
-            if not force and self.delivery_adapter.was_delivered_today(user.id):
+            if not force and self.delivery_adapter.was_delivered_today(user_key):
                 result.skipped += 1
                 continue
 
             try:
-                brief = self.build_for_user(user_id=user.id, persist=True)
+                brief = self.build_for_user(user_id=user_key, persist=True)
                 if brief is None:
                     result.skipped += 1
                     continue
@@ -149,7 +150,7 @@ class MorningBriefDeliveryService:
                     text=text_body,
                 )
                 self.delivery_adapter.record_delivery(
-                    user_id=user.id,
+                    user_id=user_key,
                     email=str(user.email),
                     status="sent",
                 )
@@ -160,10 +161,10 @@ class MorningBriefDeliveryService:
                 result.failed += 1
                 message = f"{user.email}: {exc}"
                 result.errors.append(message)
-                logger.exception("Morning brief delivery failed for user %s", user.id)
+                logger.exception("Morning brief delivery failed for user %s", user_key)
                 try:
                     self.delivery_adapter.record_delivery(
-                        user_id=user.id,
+                        user_id=user_key,
                         email=str(user.email),
                         status="failed",
                         error_message=str(exc)[:2000],

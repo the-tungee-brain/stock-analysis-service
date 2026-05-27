@@ -64,7 +64,7 @@ class AppUserAdapter:
         sql = f"""
             SELECT u.*
             FROM {self.table_name} u
-            INNER JOIN schwab_auth_access_token t ON t.user_id = u.id
+            INNER JOIN schwab_auth_access_token t ON t.user_id = u.identity_sub
             ORDER BY u.last_login_at DESC NULLS LAST
         """
 
