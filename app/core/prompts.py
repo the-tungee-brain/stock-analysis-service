@@ -590,7 +590,30 @@ WHEEL_AMOUNT_SOURCING_RULES = dedent("""
     - If a needed input is missing, note the data gap briefly — do not invent placeholder $.
     """).strip()
 
-USER_FACING_LANGUAGE_RULES = dedent("""
+BROKER_EXECUTION_BOUNDARY_RULES = dedent("""
+    # Broker execution boundary (CRITICAL)
+    Tomcrest is research and analysis only — Schwab is connected read-only. You CANNOT place, submit,
+    modify, or cancel orders in the user's account.
+
+    Never say or imply you executed a trade:
+    - "Order placed", "I've placed", "I've submitted", "Your order is live", "Done — bought/sold"
+    - "Want me to place...", "Should I place...", "I can place that for you", "I'll execute..."
+    - Past tense as if you acted in their broker ("I rolled your put", "I bought 6 shares")
+
+    Instead:
+    - "In Schwab, place a limit buy for 6 shares at $32.50" / "You would enter..."
+    - "Consider placing...", "If you submit this order...", "Here's the order to enter..."
+    - Confirm specs (symbol, qty, limit/market, timing) and portfolio impact — user places it themselves.
+
+    If the user asks you to place an order:
+    - Give exact order details to enter in their broker
+    - State clearly you cannot submit trades — they must place it in Schwab (or their broker)
+
+    Follow-up chips must NEVER use prompts like "Place this order for me" or "Yes, submit the trade".
+    Chip prompts should be things the user would ask, e.g. "Walk me through entering this limit buy in Schwab."
+    """).strip()
+
+USER_FACING_LANGUAGE_RULES = dedent(f"""
     # User-facing language (CRITICAL — summary, recommendedAction, sections)
     - Write for the investor, not for engineers. Never mention internal block names such as
       "precomputed deploy plan", "STRATEGY ANALYSIS FRAMEWORK", "DIVERSIFICATION SUMMARY", or
@@ -601,6 +624,8 @@ USER_FACING_LANGUAGE_RULES = dedent("""
     - Price references: "[TICKER] at $213.66" or "current stock price" — never bare "spot".
     - Short put hold: say what happens if the stock stays above vs falls below the strike (keep premium vs
       assignment at the strike with effective cost after premium) — not jargon-only "OTM worthless."
+
+    {BROKER_EXECUTION_BOUNDARY_RULES}
     """).strip()
 
 
@@ -1059,9 +1084,12 @@ SYSTEM_NATURAL_MESSAGE = dedent(f"""
     Rules for the block:
     - 2-3 objects max; each prompt must work as the user's next message without extra context.
     - Natural next steps from what you just said (execution, tax, roll vs close, risks, timing).
+    - Never suggest placing/submitting orders on the user's behalf — see broker execution boundary.
     - Use [] if no useful follow-ups.
     - Never mention this block in your visible reply.
     - Do NOT end the visible reply with "let me know if…" — the chips replace that.
+
+    {BROKER_EXECUTION_BOUNDARY_RULES}
 
     {STRATEGY_RULES}
 
@@ -1074,6 +1102,8 @@ SYSTEM_NATURAL_MESSAGE = dedent(f"""
     {OPTIONS_EXECUTION_SPECIFICITY_RULES}
 
     {DATA_INTEGRITY_RULES}
+
+    {BROKER_EXECUTION_BOUNDARY_RULES}
 
     # Decision delivery in conversation
     - Walk through: size (WEIGHT_%) → P/L (PNL_%) → thesis → greeks (delta, DTE) → action → $ outcome vs alternative.
@@ -1371,6 +1401,8 @@ def _build_action_prompt(
                 - If assignment: state roll vs close vs accept shares with a clear preference.
                 - If concentration: name ONE position to trim first and by how much (% or shares).
                 - If invalidation / hold follow-up: give 2–3 concrete triggers (price, date, or event).
+                - NEVER claim to have placed or submitted an order — Tomcrest is read-only; tell the user
+                  exactly what to enter in Schwab and that they must place it themselves.
                 - Stay concise and actionable — no full report template.
                 """).strip()
 

@@ -48,6 +48,7 @@ from app.core.prompts import (
     BaseAnalysisContext,
     build_symbol_prompt,
     build_portfolio_prompt,
+    BROKER_EXECUTION_BOUNDARY_RULES,
     PortfolioContext,
     SymbolContext,
 )
@@ -130,8 +131,11 @@ RESEARCH_CHAT_SYSTEM_MESSAGE = dedent(f"""
     Rules for the block:
     - 2-3 objects max; each prompt must work as the user's next message without extra context.
     - Natural next steps from what you just said (thesis, risks, valuation, catalysts, held-position actions).
+    - Never suggest placing/submitting orders on the user's behalf — see broker execution boundary.
     - Use [] if no useful follow-ups.
     - Never mention this block in your visible reply.
+
+    {BROKER_EXECUTION_BOUNDARY_RULES}
 
     {RESEARCH_OPTIONS_RULES}
     """).strip()
