@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.broker.sector_labels import (
     ETF_SECTOR_LABEL,
     MISC_SECTOR_LABEL,
@@ -112,3 +114,42 @@ def test_sector_weights_group_etfs_separately_from_equity_sectors():
     by_sector = {item.sector: item.weight_pct for item in weights}
     assert by_sector["Technology"] == 40.0
     assert by_sector[ETF_SECTOR_LABEL] == 60.0
+
+
+def test_sector_weights_include_csp_reserved_cash():
+    from tests.test_option_utils import _make_option_position
+
+    def put_for(underlying: str, short_qty: float, strike: float):
+        position = _make_option_position(
+            symbol=f"{underlying}_061726P{int(strike)}",
+            strike_price=strike,
+            short_qty=short_qty,
+        )
+        return position.model_copy(
+            update={
+                "instrument": position.instrument.model_copy(
+                    update={"underlyingSymbol": underlying}
+                )
+            }
+        )
+
+    account = _make_account(liquidation_value=100_000)
+    positions = [
+        _make_position(symbol="NVDA", market_value=855),
+        put_for("NVDA", short_qty=2, strike=170),
+        _make_position(symbol="TSM", market_value=2_083),
+    ]
+
+    service = PortfolioIntelligenceService(
+        peer_comparison_service=MagicMock(),
+        enriched_news_service=MagicMock(),
+    )
+    weights = service._sector_weights(
+        positions=positions,
+        account=account,
+        sector_by_symbol={"NVDA": "Technology", "TSM": "Technology"},
+        asset_type_by_symbol={},
+    )
+
+    by_sector = {item.sector: item.weight_pct for item in weights}
+    assert by_sector["Technology"] == pytest.approx(36.938, rel=1e-3)

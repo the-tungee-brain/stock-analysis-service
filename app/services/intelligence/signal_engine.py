@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
+from app.broker.option_utils import portfolio_spending_by_symbol
 from app.broker.position_metrics import position_open_profit_loss_pct
 from app.core.prompts import AnalysisAction
 from app.models.company_research_models import ResearchContext, SecRatioTrendPoint
@@ -88,15 +89,10 @@ class SignalEngine:
         if liquidation <= 0:
             return signals
 
-        by_symbol: dict[str, float] = {}
-        for position in positions:
-            key = SignalEngine._position_symbol(position)
-            if not key:
-                continue
-            by_symbol[key] = by_symbol.get(key, 0.0) + abs(position.marketValue)
+        by_symbol = portfolio_spending_by_symbol(positions)
 
-        for sym, mv in sorted(by_symbol.items(), key=lambda item: item[1], reverse=True):
-            weight = (mv / liquidation) * 100.0
+        for sym, spending in sorted(by_symbol.items(), key=lambda item: item[1], reverse=True):
+            weight = (spending / liquidation) * 100.0
             if weight >= 30:
                 signals.append(
                     IntelligenceSignal(

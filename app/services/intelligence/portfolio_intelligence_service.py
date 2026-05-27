@@ -7,6 +7,10 @@ from app.core.llm_routes import LLMRoute
 from app.models.company_research_models import AISummary, ResearchContext
 from app.broker.option_chain_table import build_option_chain_table, DEFAULT_OPTION_CHAIN_STRIKE_COUNT
 from app.broker.sector_labels import ETF_SECTOR_LABEL, sector_label_for_holding
+from app.broker.option_utils import (
+    instrument_asset_type_by_symbol,
+    portfolio_spending_by_symbol,
+)
 from app.models.intelligence_models import (
     CachedResearchSnippet,
     HoldingCompanyNewsItem,
@@ -332,21 +336,22 @@ class PortfolioIntelligenceService:
         if liquidation <= 0:
             return []
 
+        spending_by_symbol = portfolio_spending_by_symbol(positions)
+        asset_types = instrument_asset_type_by_symbol(positions)
+
         by_sector: dict[str, tuple[float, list[str]]] = {}
-        for position in positions:
-            symbol = self._position_symbol(position)
+        for symbol, spending in spending_by_symbol.items():
             sector = sector_label_for_holding(
                 symbol=symbol,
-                instrument_asset_type=position.instrument.assetType,
+                instrument_asset_type=asset_types.get(symbol, "EQUITY"),
                 sector_by_symbol=sector_by_symbol,
                 asset_type_by_symbol=asset_type_by_symbol,
             )
-            mv = abs(position.marketValue)
             current = by_sector.get(sector, (0.0, []))
             symbols = current[1]
             if symbol.upper() not in {s.upper() for s in symbols}:
                 symbols = symbols + [symbol.upper()]
-            by_sector[sector] = (current[0] + mv, symbols)
+            by_sector[sector] = (current[0] + spending, symbols)
 
         weights: list[SectorWeight] = []
         for sector, (mv, symbols) in by_sector.items():
@@ -394,13 +399,7 @@ class PortfolioIntelligenceService:
     def _portfolio_weight_by_symbol(
         positions: list[Position],
     ) -> dict[str, float]:
-        weight_by_symbol: dict[str, float] = {}
-        for position in positions:
-            symbol = PortfolioIntelligenceService._position_symbol(position).upper()
-            weight_by_symbol[symbol] = weight_by_symbol.get(symbol, 0.0) + abs(
-                position.marketValue
-            )
-        return weight_by_symbol
+        return portfolio_spending_by_symbol(positions)
 
     @staticmethod
     def _truncate_company_news_summary(summary: str | None) -> str | None:

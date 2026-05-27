@@ -4,6 +4,8 @@ from typing import TypedDict
 
 from app.broker.option_utils import (
     csp_reserved_cash_by_underlying,
+    equity_market_value_by_symbol,
+    portfolio_spending_by_symbol,
     total_csp_reserved_cash,
 )
 from app.broker.position_metrics import portfolio_liquidation_value
@@ -67,30 +69,20 @@ def _aggregate_symbol_spending(
     if liquidation <= 0:
         return []
 
-    equity_by_symbol: dict[str, float] = {}
-    for position in positions:
-        instrument = position.instrument
-        if instrument.assetType == "OPTION":
-            continue
-        symbol = (instrument.symbol or "").upper()
-        if not symbol:
-            continue
-        equity_by_symbol[symbol] = equity_by_symbol.get(symbol, 0.0) + abs(
-            position.marketValue
-        )
+    equity_by_symbol = equity_market_value_by_symbol(positions)
+    spending_by_symbol = portfolio_spending_by_symbol(positions)
 
-    symbols = set(equity_by_symbol) | set(csp_by_underlying)
     rows: list[tuple[str, float, float, float, float]] = []
-    for symbol in symbols:
+    for symbol, portfolio_spending in sorted(
+        spending_by_symbol.items(), key=lambda item: item[1], reverse=True
+    ):
         market_value = equity_by_symbol.get(symbol, 0.0)
         csp_reserved = csp_by_underlying.get(symbol, 0.0)
-        portfolio_spending = market_value + csp_reserved
         spending_pct = (portfolio_spending / liquidation) * 100.0
         rows.append(
             (symbol, market_value, csp_reserved, portfolio_spending, spending_pct)
         )
 
-    rows.sort(key=lambda item: item[3], reverse=True)
     return rows
 
 

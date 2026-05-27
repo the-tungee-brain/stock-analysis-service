@@ -429,6 +429,42 @@ def csp_reserved_cash_by_underlying(positions: List[Position]) -> dict[str, floa
     return by_underlying
 
 
+def equity_market_value_by_symbol(positions: List[Position]) -> dict[str, float]:
+    by_symbol: dict[str, float] = {}
+    for position in positions:
+        instrument = position.instrument
+        if instrument.assetType == "OPTION":
+            continue
+        symbol = (instrument.symbol or "").upper()
+        if not symbol:
+            continue
+        by_symbol[symbol] = by_symbol.get(symbol, 0.0) + abs(position.marketValue)
+    return by_symbol
+
+
+def portfolio_spending_by_symbol(positions: List[Position]) -> dict[str, float]:
+    """Equity market value plus CSP reserved cash per symbol."""
+    equity_by_symbol = equity_market_value_by_symbol(positions)
+    csp_by_underlying = csp_reserved_cash_by_underlying(positions)
+    symbols = set(equity_by_symbol) | set(csp_by_underlying)
+    return {
+        symbol: equity_by_symbol.get(symbol, 0.0) + csp_by_underlying.get(symbol, 0.0)
+        for symbol in symbols
+    }
+
+
+def instrument_asset_type_by_symbol(positions: List[Position]) -> dict[str, str]:
+    by_symbol: dict[str, str] = {}
+    for position in positions:
+        instrument = position.instrument
+        if instrument.assetType == "OPTION":
+            continue
+        symbol = (instrument.symbol or "").upper()
+        if symbol:
+            by_symbol[symbol] = instrument.assetType
+    return by_symbol
+
+
 def summarize_csp_cash_reserves(
     positions: List[Position],
     cash_balance: float | None = None,
