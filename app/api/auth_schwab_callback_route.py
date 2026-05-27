@@ -10,8 +10,13 @@ import traceback
 router = APIRouter()
 
 
-def redirect_to_oauth_result(frontend_uri: str, status: str) -> RedirectResponse:
-    return RedirectResponse(url=f"{frontend_uri}/?status={status}")
+def redirect_to_oauth_result(
+    frontend_uri: str,
+    status: str,
+    *,
+    path: str = "/portfolio",
+) -> RedirectResponse:
+    return RedirectResponse(url=f"{frontend_uri}{path}?status={status}")
 
 
 @router.get("/callback")
@@ -24,16 +29,22 @@ def auth_schwab_callback(
 ):
     powerpocket_frontend_uri = os.getenv("POWERPOCKET_FRONTEND_URI")
     if error is not None:
-        return redirect_to_oauth_result(powerpocket_frontend_uri, "error")
+        return redirect_to_oauth_result(
+            powerpocket_frontend_uri, "error", path="/settings"
+        )
 
     if code is None:
-        return redirect_to_oauth_result(powerpocket_frontend_uri, "invalid")
+        return redirect_to_oauth_result(
+            powerpocket_frontend_uri, "invalid", path="/settings"
+        )
 
     user_id = schwab_auth_service.get_user_id_by_state(state=state)
     if not user_id:
-        return redirect_to_oauth_result(powerpocket_frontend_uri, "error_state")
+        return redirect_to_oauth_result(
+            powerpocket_frontend_uri, "error_state", path="/settings"
+        )
 
-    schwab_auth_service.delete_cache(key=state)
+    schwab_auth_service.delete_cache(key=f"oauth:{state}")
     print("Getting access token: ", user_id, code, state)
     try:
         schwab_auth_service.claim_access_token(user_id=user_id, auth_code=code)
@@ -41,6 +52,8 @@ def auth_schwab_callback(
     except Exception as e:
         print("Error in callback:" + user_id + ":" + code, e, flush=True)
         traceback.print_exc()
-        return redirect_to_oauth_result(powerpocket_frontend_uri, "error_token")
+        return redirect_to_oauth_result(
+            powerpocket_frontend_uri, "error_token", path="/settings"
+        )
 
     return redirect_to_oauth_result(powerpocket_frontend_uri, "success")
