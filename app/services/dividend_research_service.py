@@ -10,7 +10,7 @@ from app.models.dividend_research_models import (
 from app.utils.dividend_snowball import (
     annual_income_on_shares,
     build_scenario,
-    dividend_cagr_pct,
+    dividend_cagr_pct as compute_dividend_cagr_pct,
     parse_annual_totals,
 )
 from app.utils.stock_price_cagr import fetch_price_cagr_pct
@@ -125,8 +125,8 @@ class DividendResearchService:
             total_dividends=total_dividends,
             total_splits=total_splits,
             consecutive_annual_increases=consecutive,
-            cagr_5y_pct=dividend_cagr_pct(annual_totals, lookback_years=5),
-            cagr_10y_pct=dividend_cagr_pct(annual_totals, lookback_years=10),
+            cagr_5y_pct=compute_dividend_cagr_pct(annual_totals, lookback_years=5),
+            cagr_10y_pct=compute_dividend_cagr_pct(annual_totals, lookback_years=10),
             annual_income=[
                 AnnualDividendIncome.model_validate(row)
                 for row in annual_income_on_shares(
