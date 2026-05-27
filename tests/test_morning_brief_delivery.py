@@ -8,19 +8,23 @@ from app.models.portfolio_memory_models import MorningBrief, PortfolioChanges
 from app.services.morning_brief_delivery_service import MorningBriefDeliveryService
 
 
-def test_render_email_includes_macro_and_changes():
-    service = MorningBriefDeliveryService(
-        app_user_adapter=MagicMock(),
-        delivery_adapter=MagicMock(),
-        email_adapter=MagicMock(),
-        portfolio_analysis_service=MagicMock(),
-        portfolio_service=MagicMock(),
-        transaction_service=MagicMock(),
-        schwab_auth_service=MagicMock(),
-        portfolio_memory_service=MagicMock(),
-    )
+def _service(**overrides) -> MorningBriefDeliveryService:
+    defaults = {
+        "app_user_adapter": MagicMock(),
+        "delivery_adapter": MagicMock(),
+        "email_adapter": MagicMock(),
+        "portfolio_analysis_service": MagicMock(),
+        "portfolio_service": MagicMock(),
+        "transaction_service": MagicMock(),
+        "schwab_auth_service": MagicMock(),
+        "portfolio_memory_service": MagicMock(),
+    }
+    defaults.update(overrides)
+    return MorningBriefDeliveryService(**defaults)
 
-    brief = MorningBrief(
+
+def _sample_brief() -> MorningBrief:
+    return MorningBrief(
         generated_at=datetime.now(timezone.utc),
         macro_regime="VIX at 18.0",
         digest=PortfolioDigest(
@@ -49,12 +53,16 @@ def test_render_email_includes_macro_and_changes():
         ],
     )
 
+
+def test_render_email_includes_macro_and_changes():
+    service = _service()
+
     subject, text_body, html_body = service._render_email(
         recipient_name="Alex",
-        brief=brief,
+        brief=_sample_brief(),
     )
 
-    assert subject == "Your PowerPocket morning brief"
+    assert subject == "Your Tomcrest morning brief"
     assert "Alex" in text_body
     assert "VIX at 18.0" in text_body
     assert "Fed holds rates steady" in text_body
@@ -63,5 +71,22 @@ def test_render_email_includes_macro_and_changes():
     assert "portfolio value +1.20%" in text_body
     assert "AAPL" in text_body
     assert "assignment risk" in text_body
+    assert "Open Tomcrest" in text_body
+    assert "— Tomcrest" in text_body
     assert "VIX at 18.0" in html_body
     assert 'href="https://example.com/fed-rates"' in html_body
+    assert 'src="https://tomcrest.com/avatar.png"' in html_body
+    assert "Tomcrest morning brief" in html_body
+
+
+def test_render_email_includes_user_avatar_when_provided():
+    service = _service()
+
+    _, _, html_body = service._render_email(
+        recipient_name="Alex",
+        avatar_url="https://lh3.googleusercontent.com/a/example",
+        brief=_sample_brief(),
+    )
+
+    assert 'src="https://lh3.googleusercontent.com/a/example"' in html_body
+    assert 'border-radius: 50%' in html_body

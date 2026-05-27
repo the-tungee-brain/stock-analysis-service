@@ -52,6 +52,10 @@ class MorningBriefDeliveryService:
         self.portfolio_memory_service = portfolio_memory_service
         self.frontend_uri = os.getenv(
             "POWERPOCKET_FRONTEND_URI", "https://tomcrest.com"
+        ).rstrip("/")
+        self.brand_name = os.getenv("MORNING_BRIEF_BRAND_NAME", "Tomcrest")
+        self.logo_url = os.getenv(
+            "MORNING_BRIEF_LOGO_URL", f"{self.frontend_uri}/avatar.png"
         )
 
     def build_for_user(
@@ -141,6 +145,7 @@ class MorningBriefDeliveryService:
 
                 subject, text_body, html_body = self._render_email(
                     recipient_name=user.full_name,
+                    avatar_url=user.avatar_url,
                     brief=brief,
                 )
                 self.email_adapter.send_email(
@@ -181,10 +186,11 @@ class MorningBriefDeliveryService:
         self,
         *,
         recipient_name: str | None,
+        avatar_url: str | None = None,
         brief: MorningBrief,
     ) -> tuple[str, str, str]:
         greeting_name = recipient_name or "there"
-        subject = "Your PowerPocket morning brief"
+        subject = f"Your {self.brand_name} morning brief"
 
         lines: list[str] = [
             f"Good morning, {greeting_name}.",
@@ -220,16 +226,40 @@ class MorningBriefDeliveryService:
 
         lines.extend(
             [
-                f"Open PowerPocket: {self.frontend_uri}/portfolio",
+                f"Open {self.brand_name}: {self.frontend_uri}/portfolio",
                 "",
-                "— PowerPocket",
+                f"— {self.brand_name}",
             ]
         )
 
         text_body = "\n".join(lines)
 
+        logo_html = (
+            f'<a href="{html.escape(self.frontend_uri)}/portfolio" '
+            f'style="text-decoration: none;">'
+            f'<img src="{html.escape(self.logo_url)}" '
+            f'alt="{html.escape(self.brand_name)}" width="48" height="48" '
+            f'style="display: block; border-radius: 12px;" />'
+            f"</a>"
+        )
+
+        greeting_bits = [f"Good morning, {html.escape(greeting_name)}."]
+        if avatar_url:
+            greeting_bits.insert(
+                0,
+                f'<img src="{html.escape(avatar_url)}" alt="" width="32" height="32" '
+                f'style="border-radius: 50%; vertical-align: middle; margin-right: 8px;" />',
+            )
+
         html_sections: list[str] = [
-            f"<p>Good morning, {html.escape(greeting_name)}.</p>",
+            (
+                '<div style="margin-bottom: 20px;">'
+                f"{logo_html}"
+                f'<p style="margin: 12px 0 0; font-size: 13px; color: #666;">'
+                f"{html.escape(self.brand_name)} morning brief"
+                f"</p></div>"
+            ),
+            f'<p style="margin: 0 0 20px;">{"".join(greeting_bits)}</p>',
         ]
 
         if brief.macro_regime:
@@ -276,12 +306,17 @@ class MorningBriefDeliveryService:
             )
 
         html_sections.append(
-            f'<p><a href="{html.escape(self.frontend_uri)}/portfolio">'
-            "Open PowerPocket</a></p>"
+            f'<p style="margin-top: 24px;"><a href="{html.escape(self.frontend_uri)}/portfolio">'
+            f"Open {html.escape(self.brand_name)}</a></p>"
+        )
+        html_sections.append(
+            f'<p style="margin-top: 24px; color: #666; font-size: 13px;">'
+            f"— {html.escape(self.brand_name)}</p>"
         )
 
         html_body = (
-            '<html><body style="font-family: sans-serif; line-height: 1.5;">'
+            '<html><body style="font-family: sans-serif; line-height: 1.5; '
+            'color: #111; max-width: 640px; margin: 0 auto; padding: 24px;">'
             + "".join(html_sections)
             + "</body></html>"
         )

@@ -19,7 +19,7 @@ class EmailAdapter:
     ):
         self.api_key = api_key or os.getenv("RESEND_API_KEY")
         self.from_email = from_email or os.getenv(
-            "MORNING_BRIEF_FROM_EMAIL", "PowerPocket <brief@powerpocket.app>"
+            "MORNING_BRIEF_FROM_EMAIL", "Tomcrest <brief@tomcrest.com>"
         )
         self.session = session or requests.Session()
 
