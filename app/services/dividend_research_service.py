@@ -13,6 +13,7 @@ from app.utils.dividend_snowball import (
     dividend_cagr_pct,
     parse_annual_totals,
 )
+from app.utils.stock_price_cagr import fetch_price_cagr_pct
 
 DEFAULT_SCENARIO_SHARES = 100.0
 DEFAULT_RECENT_PAYMENTS = 8
@@ -46,6 +47,10 @@ class DividendResearchService:
         *,
         shares: float = DEFAULT_SCENARIO_SHARES,
         start_year: int | None = None,
+        investment_usd: float | None = None,
+        share_price: float | None = None,
+        reinvest_dividends: bool = False,
+        price_cagr_pct: float | None = None,
     ) -> DividendHistoryContext | None:
         payload = self.securitiesdb_adapter.get_stock_dividends(symbol=symbol)
         if payload is None:
@@ -72,11 +77,28 @@ class DividendResearchService:
                     dividend_rows.append(item)
 
         resolved_shares = max(float(shares), 0.0) or DEFAULT_SCENARIO_SHARES
+        resolved_investment = (
+            float(investment_usd) if investment_usd is not None and investment_usd > 0 else None
+        )
+        resolved_share_price = (
+            float(share_price) if share_price is not None and share_price > 0 else None
+        )
+        if resolved_investment and resolved_share_price:
+            resolved_shares = resolved_investment / resolved_share_price
+
+        resolved_price_cagr = price_cagr_pct
+        if reinvest_dividends and resolved_price_cagr is None:
+            resolved_price_cagr = fetch_price_cagr_pct(symbol, lookback_years=5)
+
         scenario_data = build_scenario(
             dividends=dividend_rows,
             annual_totals=annual_totals,
             shares=resolved_shares,
             start_year=start_year,
+            investment_usd=resolved_investment,
+            share_price=resolved_share_price,
+            reinvest_dividends=reinvest_dividends,
+            price_cagr_pct=resolved_price_cagr,
         )
 
         all_payments = _parse_payment_items(dividend_rows)

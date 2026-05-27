@@ -6,17 +6,32 @@ from fastapi import HTTPException
 
 from app.api.get_dividend_history_route import get_dividend_history
 from app.models.dividend_research_models import (
+    AnnualDividendIncome,
     DividendHistoryContext,
+    DividendPaymentItem,
     DividendSnowballScenario,
 )
 
 
-def test_get_dividend_history_returns_context():
-    service = MagicMock()
-    service.build_history_context.return_value = DividendHistoryContext(
-        ticker="SCHD",
+def _sample_context(symbol: str = "SCHD") -> DividendHistoryContext:
+    return DividendHistoryContext(
+        ticker=symbol,
         total_dividends=58,
         consecutive_annual_increases=14,
+        annual_income=[
+            AnnualDividendIncome(
+                year=2024,
+                total_per_share=0.995,
+                income_on_shares=99.5,
+            )
+        ],
+        recent_payments=[
+            DividendPaymentItem(date="2025-12-10", amount_per_share=0.278),
+        ],
+        payments=[
+            DividendPaymentItem(date="2024-12-11", amount_per_share=0.249),
+            DividendPaymentItem(date="2025-12-10", amount_per_share=0.278),
+        ],
         scenario=DividendSnowballScenario(
             shares=100,
             start_year=2016,
@@ -27,11 +42,20 @@ def test_get_dividend_history_returns_context():
         ),
     )
 
+
+def test_get_dividend_history_returns_context():
+    service = MagicMock()
+    service.build_history_context.return_value = _sample_context()
+
     result = asyncio.run(
         get_dividend_history(
             symbol="SCHD",
             shares=100,
             start_year=None,
+            investment_usd=None,
+            share_price=None,
+            reinvest_dividends=False,
+            price_cagr_pct=None,
             dividend_research_service=service,
         )
     )
@@ -41,6 +65,10 @@ def test_get_dividend_history_returns_context():
         "SCHD",
         shares=100,
         start_year=None,
+        investment_usd=None,
+        share_price=None,
+        reinvest_dividends=False,
+        price_cagr_pct=None,
     )
 
 
@@ -59,3 +87,22 @@ def test_get_dividend_history_raises_404_when_missing():
         )
 
     assert exc.value.status_code == 404
+
+
+def test_route_json_uses_camel_case_aliases():
+    service = MagicMock()
+    service.build_history_context.return_value = _sample_context()
+
+    payload = asyncio.run(
+        get_dividend_history(
+            symbol="SCHD",
+            shares=100,
+            start_year=None,
+            dividend_research_service=service,
+        )
+    ).model_dump(mode="json", by_alias=True)
+
+    assert "totalDividends" in payload
+    assert payload["annualIncome"][0]["totalPerShare"] == 0.995
+    assert payload["payments"][0]["amountPerShare"] == 0.249
+    assert payload["scenario"]["startYear"] == 2016

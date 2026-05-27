@@ -3,8 +3,10 @@ import pytest
 from app.utils.dividend_snowball import (
     build_scenario,
     cash_collected_since_year,
+    derive_share_price_at_start,
     dividend_cagr_pct,
     parse_annual_totals,
+    simulate_drip_backtest,
 )
 
 
@@ -62,3 +64,59 @@ def test_build_scenario():
     assert scenario["annual_income_latest"] == pytest.approx(104.7)
     assert scenario["annual_income_start"] == pytest.approx(38.23)
     assert scenario["total_collected"] > 0
+
+
+def test_build_scenario_from_investment_and_share_price():
+    scenario = build_scenario(
+        dividends=SCHD_DIVIDENDS,
+        annual_totals=SCHD_ANNUAL_TOTALS,
+        shares=100,
+        start_year=2015,
+        investment_usd=10_000,
+        share_price=50,
+    )
+    assert scenario["shares"] == pytest.approx(200)
+    assert scenario["investment_usd"] == pytest.approx(10_000)
+    assert scenario["share_price"] == pytest.approx(50)
+    assert scenario["annual_income_latest"] == pytest.approx(209.4)
+
+
+def test_derive_share_price_at_start():
+    price = derive_share_price_at_start(
+        current_share_price=100,
+        price_cagr_pct=10,
+        years_elapsed=5,
+    )
+    assert price == pytest.approx(100 / (1.1**5), rel=1e-4)
+
+
+def test_simulate_drip_backtest_grows_share_count():
+    result = simulate_drip_backtest(
+        annual_totals=SCHD_ANNUAL_TOTALS,
+        start_year=2015,
+        end_year=2024,
+        initial_investment_usd=10_000,
+        share_price_at_start=20,
+        price_cagr_pct=8,
+        current_share_price=80,
+    )
+    assert result["initial_shares"] == pytest.approx(500)
+    assert result["final_shares"] > result["initial_shares"]
+    assert result["annual_income_latest_drip"] > 0
+    assert result["portfolio_value_latest"] > 10_000
+    assert result["total_dividends_reinvested"] > 0
+
+
+def test_build_scenario_with_advanced_drip():
+    scenario = build_scenario(
+        dividends=SCHD_DIVIDENDS,
+        annual_totals=SCHD_ANNUAL_TOTALS,
+        shares=100,
+        start_year=2015,
+        investment_usd=10_000,
+        share_price=80,
+        reinvest_dividends=True,
+        price_cagr_pct=8,
+    )
+    assert scenario["advanced"] is not None
+    assert scenario["advanced"]["final_shares"] > scenario["advanced"]["initial_shares"]

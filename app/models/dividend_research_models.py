@@ -13,6 +13,20 @@ class AnnualDividendIncome(BaseModel):
     is_partial_year: bool = Field(default=False, serialization_alias="isPartialYear")
 
 
+class DividendAdvancedSnowballScenario(BaseModel):
+    enabled: bool = True
+    initial_shares: float = Field(serialization_alias="initialShares")
+    final_shares: float = Field(serialization_alias="finalShares")
+    share_price_at_start: float = Field(serialization_alias="sharePriceAtStart")
+    share_price_latest: float = Field(serialization_alias="sharePriceLatest")
+    price_cagr_pct: float = Field(serialization_alias="priceCagrPct")
+    annual_income_latest_drip: float = Field(serialization_alias="annualIncomeLatestDrip")
+    portfolio_value_latest: float = Field(serialization_alias="portfolioValueLatest")
+    total_dividends_reinvested: float = Field(
+        serialization_alias="totalDividendsReinvested"
+    )
+
+
 class DividendSnowballScenario(BaseModel):
     shares: float
     start_year: int = Field(serialization_alias="startYear")
@@ -20,6 +34,9 @@ class DividendSnowballScenario(BaseModel):
     annual_income_latest: float = Field(serialization_alias="annualIncomeLatest")
     annual_income_start: float = Field(serialization_alias="annualIncomeStart")
     latest_year: int = Field(serialization_alias="latestYear")
+    investment_usd: float | None = Field(default=None, serialization_alias="investmentUsd")
+    share_price: float | None = Field(default=None, serialization_alias="sharePrice")
+    advanced: DividendAdvancedSnowballScenario | None = None
 
 
 class DividendHistoryContext(BaseModel):

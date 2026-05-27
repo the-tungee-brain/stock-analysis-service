@@ -22,6 +22,28 @@ async def get_dividend_history(
         le=1_000_000,
         description="Share count used for income and snowball scenarios",
     ),
+    investment_usd: float | None = Query(
+        default=None,
+        ge=0,
+        le=100_000_000,
+        description="Optional dollar investment used to derive fractional shares",
+    ),
+    share_price: float | None = Query(
+        default=None,
+        gt=0,
+        le=1_000_000,
+        description="Share price paired with investment_usd to derive fractional shares",
+    ),
+    reinvest_dividends: bool = Query(
+        default=False,
+        description="Simulate dividend reinvestment with average annual price growth",
+    ),
+    price_cagr_pct: float | None = Query(
+        default=None,
+        ge=-99,
+        le=500,
+        description="Average annual price growth used for advanced DRIP simulation",
+    ),
     start_year: int | None = Query(
         default=None,
         ge=1980,
@@ -38,6 +60,10 @@ async def get_dividend_history(
         symbol_upper,
         shares=shares,
         start_year=start_year,
+        investment_usd=investment_usd,
+        share_price=share_price,
+        reinvest_dividends=reinvest_dividends,
+        price_cagr_pct=price_cagr_pct,
     )
     if context is None:
         raise HTTPException(
