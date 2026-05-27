@@ -259,7 +259,7 @@ class YFinanceFinancialsBuilder:
 
         score = max(0, min(100, score))
         rating = self._rating_from_score(score)
-        headline = self._headline_for_rating(symbol, rating, score)
+        headline = self._headline_for_rating(symbol, rating)
 
         if not strengths:
             strengths.append("Review the statement tables for margin and cash-flow trends.")
@@ -313,14 +313,14 @@ class YFinanceFinancialsBuilder:
         return "weak"
 
     @staticmethod
-    def _headline_for_rating(symbol: str, rating: StrengthRating, score: int) -> str:
+    def _headline_for_rating(symbol: str, rating: StrengthRating) -> str:
         labels = {
             "strong": "Financial profile looks strong",
             "solid": "Financial profile looks solid",
             "mixed": "Financial profile is mixed",
             "weak": "Financial profile looks weak",
         }
-        return f"{labels[rating]} for {symbol.upper()} (score {score}/100)."
+        return f"{labels[rating]} for {symbol.upper()}."
 
     @staticmethod
     def _fmt_compact(value: float) -> str:
