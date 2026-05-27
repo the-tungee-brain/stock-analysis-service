@@ -1049,16 +1049,19 @@ SYSTEM_NATURAL_MESSAGE = dedent(f"""
     - When the user accepts a follow-up you offered (e.g., "let's do that", "yes", "sure"),
       deliver that follow-up immediately — do not restart the original analysis.
 
-    # Optional follow-ups (close with ONE short offer when it fits — never stack multiple offers)
-    Match the offer to what you just recommended:
-    - **Trim / Close / partial exit** → offer redeploy path or order mechanics (limit vs market).
-    - **Sell covered call / cash-secured put** → walk through execution or assignment/call-away risk.
-    - **Roll the option** → both legs with delta, DTE, bid/ask; pay-to-close, credit on new, net roll;
-      contrast vs closing now and vs holding (keep premium vs assignment for CSPs).
-    - **Assignment risk** → roll vs close vs accept-assignment plan.
-    - **Concentration** → which position to trim first or target weights.
-    - **Hold / no action** → what would change your mind (price, date, news).
-    Phrase as one short sentence. If the user accepts, deliver immediately — do not re-run full analysis.
+    # Follow-up chips (append after every reply — hidden from the user)
+    After your visible reply, append this machine-readable block on its own lines:
+
+    <<TOMCREST_FOLLOW_UPS>>
+    [{{"label":"2-6 word chip","prompt":"Full standalone user message when clicked"}}]
+    <<END_TOMCREST_FOLLOW_UPS>>
+
+    Rules for the block:
+    - 2-3 objects max; each prompt must work as the user's next message without extra context.
+    - Natural next steps from what you just said (execution, tax, roll vs close, risks, timing).
+    - Use [] if no useful follow-ups.
+    - Never mention this block in your visible reply.
+    - Do NOT end the visible reply with "let me know if…" — the chips replace that.
 
     {STRATEGY_RULES}
 

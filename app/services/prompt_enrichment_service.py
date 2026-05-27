@@ -120,6 +120,19 @@ RESEARCH_CHAT_SYSTEM_MESSAGE = dedent(f"""
     - If data is missing, say so and answer with what you do know.
     - In follow-up messages, stay concise and build on prior context without repeating the full intro.
 
+    # Follow-up chips (append after every reply — hidden from the user)
+    After your visible reply, append this machine-readable block on its own lines:
+
+    <<TOMCREST_FOLLOW_UPS>>
+    [{{"label":"2-6 word chip","prompt":"Full standalone user message when clicked"}}]
+    <<END_TOMCREST_FOLLOW_UPS>>
+
+    Rules for the block:
+    - 2-3 objects max; each prompt must work as the user's next message without extra context.
+    - Natural next steps from what you just said (thesis, risks, valuation, catalysts, held-position actions).
+    - Use [] if no useful follow-ups.
+    - Never mention this block in your visible reply.
+
     {RESEARCH_OPTIONS_RULES}
     """).strip()
 
