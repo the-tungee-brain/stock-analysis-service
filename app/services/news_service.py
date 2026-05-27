@@ -7,6 +7,7 @@ from app.models.finnhub_news_models import NewsResponse
 MARKET_NEWS_DISPLAY_LIMIT = int(os.getenv("MARKET_NEWS_LIMIT", "5"))
 MARKET_NEWS_PROMPT_LIMIT = int(os.getenv("MARKET_NEWS_PROMPT_LIMIT", "3"))
 MARKET_NEWS_LOOKBACK_HOURS = int(os.getenv("MARKET_NEWS_LOOKBACK_HOURS", "24"))
+COMPANY_NEWS_DISPLAY_LIMIT = int(os.getenv("COMPANY_NEWS_LIMIT", "20"))
 
 
 def finnhub_press_releases_enabled() -> bool:
@@ -34,7 +35,7 @@ class NewsService:
         except Exception:
             return NewsResponse(root=[])
 
-        news_response.root = news_response.root[:10]
+        news_response.root = news_response.root[:COMPANY_NEWS_DISPLAY_LIMIT]
         return news_response
 
     def get_market_news(
