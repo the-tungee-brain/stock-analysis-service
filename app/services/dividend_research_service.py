@@ -51,6 +51,8 @@ class DividendResearchService:
         share_price: float | None = None,
         reinvest_dividends: bool = False,
         price_cagr_pct: float | None = None,
+        project_years: int | None = None,
+        dividend_cagr_pct: float | None = None,
     ) -> DividendHistoryContext | None:
         payload = self.securitiesdb_adapter.get_stock_dividends(symbol=symbol)
         if payload is None:
@@ -99,6 +101,8 @@ class DividendResearchService:
             share_price=resolved_share_price,
             reinvest_dividends=reinvest_dividends,
             price_cagr_pct=resolved_price_cagr,
+            project_years=project_years,
+            dividend_cagr_pct=dividend_cagr_pct,
         )
 
         all_payments = _parse_payment_items(dividend_rows)

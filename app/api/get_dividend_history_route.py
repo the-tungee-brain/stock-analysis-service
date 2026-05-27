@@ -44,6 +44,18 @@ async def get_dividend_history(
         le=500,
         description="Average annual price growth used for advanced DRIP simulation",
     ),
+    project_years: int | None = Query(
+        default=None,
+        ge=1,
+        le=50,
+        description="Forward projection horizon in years from the current year",
+    ),
+    dividend_cagr_pct: float | None = Query(
+        default=None,
+        ge=-99,
+        le=500,
+        description="Average annual dividend growth used for forward projection",
+    ),
     start_year: int | None = Query(
         default=None,
         ge=1980,
@@ -64,6 +76,8 @@ async def get_dividend_history(
         share_price=share_price,
         reinvest_dividends=reinvest_dividends,
         price_cagr_pct=price_cagr_pct,
+        project_years=project_years,
+        dividend_cagr_pct=dividend_cagr_pct,
     )
     if context is None:
         raise HTTPException(

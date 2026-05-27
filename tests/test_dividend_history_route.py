@@ -56,6 +56,8 @@ def test_get_dividend_history_returns_context():
             share_price=None,
             reinvest_dividends=False,
             price_cagr_pct=None,
+            project_years=None,
+            dividend_cagr_pct=None,
             dividend_research_service=service,
         )
     )
@@ -69,6 +71,8 @@ def test_get_dividend_history_returns_context():
         share_price=None,
         reinvest_dividends=False,
         price_cagr_pct=None,
+        project_years=None,
+        dividend_cagr_pct=None,
     )
 
 

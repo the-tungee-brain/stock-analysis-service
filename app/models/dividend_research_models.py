@@ -34,6 +34,8 @@ class DividendSnowballScenario(BaseModel):
     annual_income_latest: float = Field(serialization_alias="annualIncomeLatest")
     annual_income_start: float = Field(serialization_alias="annualIncomeStart")
     latest_year: int = Field(serialization_alias="latestYear")
+    project_years: int = Field(default=10, serialization_alias="projectYears")
+    dividend_cagr_pct: float = Field(default=0.0, serialization_alias="dividendCagrPct")
     investment_usd: float | None = Field(default=None, serialization_alias="investmentUsd")
     share_price: float | None = Field(default=None, serialization_alias="sharePrice")
     advanced: DividendAdvancedSnowballScenario | None = None

@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 
 from app.utils.dividend_snowball import (
@@ -5,8 +7,10 @@ from app.utils.dividend_snowball import (
     cash_collected_since_year,
     derive_share_price_at_start,
     dividend_cagr_pct,
+    normalize_project_years,
     parse_annual_totals,
     simulate_drip_backtest,
+    simulate_forward_projection,
 )
 
 
@@ -37,6 +41,12 @@ def test_parse_annual_totals():
     assert 2023 not in parsed
 
 
+def test_normalize_project_years():
+    assert normalize_project_years(None) == 10
+    assert normalize_project_years(15) == 15
+    assert normalize_project_years(100) == 50
+
+
 def test_dividend_cagr_pct_uses_completed_years_only():
     cagr = dividend_cagr_pct(SCHD_ANNUAL_TOTALS, lookback_years=5)
     assert cagr is not None
@@ -52,17 +62,59 @@ def test_cash_collected_since_year():
     assert total == pytest.approx(78.7)
 
 
-def test_build_scenario():
+def test_simulate_forward_projection_flat_shares():
+    current_year = 2026
+    result = simulate_forward_projection(
+        shares=100,
+        project_years=10,
+        base_dps=0.995,
+        dividend_cagr_pct=5.0,
+        share_price=80,
+        price_cagr_pct=8.0,
+        reinvest_dividends=False,
+        current_year=current_year,
+    )
+    assert result["start_year"] == current_year
+    assert result["latest_year"] == current_year + 10
+    assert result["annual_income_start"] == pytest.approx(99.5)
+    assert result["annual_income_latest"] > result["annual_income_start"]
+    assert result["total_collected"] > result["annual_income_start"]
+
+
+def test_simulate_forward_projection_with_drip():
+    current_year = 2026
+    result = simulate_forward_projection(
+        shares=100,
+        project_years=10,
+        base_dps=0.995,
+        dividend_cagr_pct=5.0,
+        share_price=80,
+        price_cagr_pct=8.0,
+        reinvest_dividends=True,
+        current_year=current_year,
+    )
+    assert result["advanced"] is not None
+    assert result["advanced"]["final_shares"] > result["advanced"]["initial_shares"]
+    assert (
+        result["advanced"]["annual_income_latest_drip"]
+        > result["annual_income_latest"]
+    )
+
+
+def test_build_scenario_projects_from_current_year():
+    current_year = date.today().year
     scenario = build_scenario(
         dividends=SCHD_DIVIDENDS,
         annual_totals=SCHD_ANNUAL_TOTALS,
         shares=100,
-        start_year=2015,
+        project_years=10,
     )
     assert scenario["shares"] == 100
-    assert scenario["start_year"] == 2015
-    assert scenario["annual_income_latest"] == pytest.approx(104.7)
-    assert scenario["annual_income_start"] == pytest.approx(38.23)
+    assert scenario["start_year"] == current_year
+    assert scenario["latest_year"] == current_year + 10
+    assert scenario["project_years"] == 10
+    assert scenario["annual_income_start"] == pytest.approx(104.7)
+    assert scenario["annual_income_latest"] > scenario["annual_income_start"]
     assert scenario["total_collected"] > 0
 
 
@@ -71,14 +123,14 @@ def test_build_scenario_from_investment_and_share_price():
         dividends=SCHD_DIVIDENDS,
         annual_totals=SCHD_ANNUAL_TOTALS,
         shares=100,
-        start_year=2015,
         investment_usd=10_000,
         share_price=50,
+        project_years=5,
     )
     assert scenario["shares"] == pytest.approx(200)
     assert scenario["investment_usd"] == pytest.approx(10_000)
     assert scenario["share_price"] == pytest.approx(50)
-    assert scenario["annual_income_latest"] == pytest.approx(209.4)
+    assert scenario["project_years"] == 5
 
 
 def test_derive_share_price_at_start():
@@ -112,11 +164,11 @@ def test_build_scenario_with_advanced_drip():
         dividends=SCHD_DIVIDENDS,
         annual_totals=SCHD_ANNUAL_TOTALS,
         shares=100,
-        start_year=2015,
         investment_usd=10_000,
         share_price=80,
         reinvest_dividends=True,
         price_cagr_pct=8,
+        project_years=10,
     )
     assert scenario["advanced"] is not None
     assert scenario["advanced"]["final_shares"] > scenario["advanced"]["initial_shares"]
