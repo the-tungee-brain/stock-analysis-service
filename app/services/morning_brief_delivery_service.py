@@ -54,9 +54,6 @@ class MorningBriefDeliveryService:
             "POWERPOCKET_FRONTEND_URI", "https://tomcrest.com"
         ).rstrip("/")
         self.brand_name = os.getenv("MORNING_BRIEF_BRAND_NAME", "Tomcrest")
-        self.logo_url = os.getenv(
-            "MORNING_BRIEF_LOGO_URL", f"{self.frontend_uri}/avatar.png"
-        )
 
     def build_for_user(
         self,
@@ -145,7 +142,6 @@ class MorningBriefDeliveryService:
 
                 subject, text_body, html_body = self._render_email(
                     recipient_name=user.full_name,
-                    avatar_url=user.avatar_url,
                     brief=brief,
                 )
                 self.email_adapter.send_email(
@@ -186,7 +182,6 @@ class MorningBriefDeliveryService:
         self,
         *,
         recipient_name: str | None,
-        avatar_url: str | None = None,
         brief: MorningBrief,
     ) -> tuple[str, str, str]:
         greeting_name = recipient_name or "there"
@@ -234,32 +229,8 @@ class MorningBriefDeliveryService:
 
         text_body = "\n".join(lines)
 
-        logo_html = (
-            f'<a href="{html.escape(self.frontend_uri)}/portfolio" '
-            f'style="text-decoration: none;">'
-            f'<img src="{html.escape(self.logo_url)}" '
-            f'alt="{html.escape(self.brand_name)}" width="48" height="48" '
-            f'style="display: block; border-radius: 12px;" />'
-            f"</a>"
-        )
-
-        greeting_bits = [f"Good morning, {html.escape(greeting_name)}."]
-        if avatar_url:
-            greeting_bits.insert(
-                0,
-                f'<img src="{html.escape(avatar_url)}" alt="" width="32" height="32" '
-                f'style="border-radius: 50%; vertical-align: middle; margin-right: 8px;" />',
-            )
-
         html_sections: list[str] = [
-            (
-                '<div style="margin-bottom: 20px;">'
-                f"{logo_html}"
-                f'<p style="margin: 12px 0 0; font-size: 13px; color: #666;">'
-                f"{html.escape(self.brand_name)} morning brief"
-                f"</p></div>"
-            ),
-            f'<p style="margin: 0 0 20px;">{"".join(greeting_bits)}</p>',
+            f"<p>Good morning, {html.escape(greeting_name)}.</p>",
         ]
 
         if brief.macro_regime:

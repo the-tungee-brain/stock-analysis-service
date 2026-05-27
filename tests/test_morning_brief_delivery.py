@@ -75,18 +75,3 @@ def test_render_email_includes_macro_and_changes():
     assert "— Tomcrest" in text_body
     assert "VIX at 18.0" in html_body
     assert 'href="https://example.com/fed-rates"' in html_body
-    assert 'src="https://tomcrest.com/avatar.png"' in html_body
-    assert "Tomcrest morning brief" in html_body
-
-
-def test_render_email_includes_user_avatar_when_provided():
-    service = _service()
-
-    _, _, html_body = service._render_email(
-        recipient_name="Alex",
-        avatar_url="https://lh3.googleusercontent.com/a/example",
-        brief=_sample_brief(),
-    )
-
-    assert 'src="https://lh3.googleusercontent.com/a/example"' in html_body
-    assert 'border-radius: 50%' in html_body
