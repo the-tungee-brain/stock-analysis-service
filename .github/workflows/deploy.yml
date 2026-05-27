@@ -112,6 +112,9 @@ jobs:
               -e REDIS_HOST="${{ secrets.REDIS_HOST }}" \
               -e REDIS_PORT="${{ secrets.REDIS_PORT }}" \
               -e REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
+              -e CRON_SECRET="${{ secrets.CRON_SECRET }}" \
+              -e RESEND_API_KEY="${{ secrets.RESEND_API_KEY }}" \
+              -e MORNING_BRIEF_FROM_EMAIL="${{ secrets.MORNING_BRIEF_FROM_EMAIL }}" \
               --restart always \
               tungxd96/sas-server:latest
 
