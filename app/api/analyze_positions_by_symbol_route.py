@@ -42,6 +42,8 @@ class AnalyzePositionsBySymbolRequest(BaseModel):
     account: SchwabAccounts
     positions: List[Position]
     session_id: Optional[str] = None
+    chat_session_id: Optional[str] = None
+    new_chat_session: bool = False
     symbol: Optional[str] = None
     prompt: Optional[str] = None
     user_display_message: Optional[str] = None
@@ -110,6 +112,8 @@ async def analyze_positions_by_symbol(
             symbol=request.symbol,
             prompt=session_prompt,
             model=request.model,
+            chat_session_id=request.chat_session_id,
+            new_chat_session=request.new_chat_session,
         )
         session_id = str(resolved_session_id) if resolved_session_id else None
         recent_messages = chat_service.get_chat_messages_by_session(session_id=session_id)
@@ -214,6 +218,8 @@ async def analyze_positions_by_symbol(
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",
     }
+    if session_id:
+        response_headers["X-Chat-Session-Id"] = session_id
     if json_v1:
         response_headers["X-Analysis-Envelope"] = "symbol_analysis_v1"
 

@@ -59,32 +59,19 @@ class ChatService:
         symbol: Optional[str],
         prompt: Optional[str],
         model: ResponsesModel,
+        *,
+        chat_session_id: Optional[str] = None,
+        new_chat_session: bool = False,
     ) -> tuple[Optional[UUID], bool]:
-        if not prompt:
-            return None, True
-
-        prefix = self._portfolio_session_title_prefix(symbol=symbol)
-        session = (
-            self.chat_sessions_builder.get_latest_session_by_user_id_and_title_prefix(
-                user_id=user_id,
-                title_prefix=prefix,
-            )
+        return self._resolve_prefixed_chat_session(
+            user_id=user_id,
+            title_prefix=self._portfolio_session_title_prefix(symbol=symbol),
+            prompt=prompt,
+            model=model,
+            system_prompt=SYSTEM_NATURAL_MESSAGE,
+            chat_session_id=chat_session_id,
+            new_chat_session=new_chat_session,
         )
-        is_first_chat = not session
-
-        if is_first_chat:
-            new_session = ChatSession(
-                user_id=user_id,
-                title=f"{prefix} {prompt[:200]}",
-                model=model,
-                system_prompt=SYSTEM_NATURAL_MESSAGE,
-            )
-            created_session = self.chat_sessions_builder.create_session(
-                session=new_session
-            )
-            return created_session.id, is_first_chat
-
-        return session.id, is_first_chat
 
     @staticmethod
     def _portfolio_session_title_prefix(symbol: Optional[str]) -> str:
@@ -130,32 +117,109 @@ class ChatService:
         symbol: str,
         prompt: Optional[str],
         model: ResponsesModel,
+        *,
+        chat_session_id: Optional[str] = None,
+        new_chat_session: bool = False,
+    ) -> tuple[Optional[UUID], bool]:
+        return self._resolve_prefixed_chat_session(
+            user_id=user_id,
+            title_prefix=self._research_session_title_prefix(symbol=symbol),
+            prompt=prompt,
+            model=model,
+            system_prompt=RESEARCH_CHAT_SYSTEM_MESSAGE,
+            chat_session_id=chat_session_id,
+            new_chat_session=new_chat_session,
+        )
+
+    def _create_prefixed_chat_session(
+        self,
+        user_id: str,
+        title_prefix: str,
+        prompt: str,
+        model: ResponsesModel,
+        system_prompt: str,
+    ) -> tuple[UUID, bool]:
+        new_session = ChatSession(
+            user_id=user_id,
+            title=f"{title_prefix} {prompt[:200]}",
+            model=model,
+            system_prompt=system_prompt,
+        )
+        created_session = self.chat_sessions_builder.create_session(
+            session=new_session
+        )
+        if created_session.id is None:
+            raise RuntimeError("Failed to create chat session")
+        return created_session.id, True
+
+    def _session_matches_prefix(
+        self,
+        session: ChatSession,
+        title_prefix: str,
+    ) -> bool:
+        return bool(session.title and session.title.startswith(title_prefix))
+
+    def _resolve_prefixed_chat_session(
+        self,
+        user_id: str,
+        title_prefix: str,
+        prompt: Optional[str],
+        model: ResponsesModel,
+        system_prompt: str,
+        *,
+        chat_session_id: Optional[str] = None,
+        new_chat_session: bool = False,
     ) -> tuple[Optional[UUID], bool]:
         if not prompt:
             return None, True
 
-        prefix = self._research_session_title_prefix(symbol=symbol)
+        if new_chat_session:
+            return self._create_prefixed_chat_session(
+                user_id=user_id,
+                title_prefix=title_prefix,
+                prompt=prompt,
+                model=model,
+                system_prompt=system_prompt,
+            )
+
+        if chat_session_id:
+            try:
+                resolved_id = UUID(str(chat_session_id))
+            except ValueError:
+                resolved_id = None
+
+            if resolved_id is not None:
+                session = self.get_session_for_user(
+                    user_id=user_id,
+                    session_id=resolved_id,
+                )
+                if session and session.id and self._session_matches_prefix(
+                    session,
+                    title_prefix,
+                ):
+                    existing_messages = self.chat_messages_builder.list_messages_by_session(
+                        session_id=str(session.id),
+                        limit=1,
+                        order="asc",
+                    )
+                    return session.id, len(existing_messages) == 0
+
         session = (
             self.chat_sessions_builder.get_latest_session_by_user_id_and_title_prefix(
                 user_id=user_id,
-                title_prefix=prefix,
+                title_prefix=title_prefix,
             )
         )
-        is_first_chat = not session
+        if session and session.id:
+            return session.id, False
 
-        if is_first_chat:
-            new_session = ChatSession(
-                user_id=user_id,
-                title=f"{prefix} {prompt[:200]}",
-                model=model,
-                system_prompt=RESEARCH_CHAT_SYSTEM_MESSAGE,
-            )
-            created_session = self.chat_sessions_builder.create_session(
-                session=new_session
-            )
-            return created_session.id, is_first_chat
-
-        return session.id, is_first_chat
+        return self._create_prefixed_chat_session(
+            user_id=user_id,
+            title_prefix=title_prefix,
+            prompt=prompt,
+            model=model,
+            system_prompt=system_prompt,
+        )
 
     def create_message(
         self,

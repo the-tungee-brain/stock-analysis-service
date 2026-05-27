@@ -32,6 +32,28 @@ class _FakeSessionsBuilder:
                 return session
         return None
 
+    def get_latest_session_by_user_id_and_title_prefix(
+        self,
+        user_id: str,
+        title_prefix: str,
+    ):
+        matches = [
+            session
+            for session in self.sessions
+            if session.user_id == user_id
+            and session.title
+            and session.title.startswith(title_prefix)
+        ]
+        if not matches:
+            return None
+        return sorted(matches, key=lambda session: session.updated_at, reverse=True)[0]
+
+    def create_session(self, session: ChatSession) -> ChatSession:
+        if session.id is None:
+            session.id = uuid4()
+        self.sessions.insert(0, session)
+        return session
+
 
 class _FakeMessagesBuilder:
     def __init__(self, messages: dict[str, list[ChatMessage]]):
@@ -175,7 +197,55 @@ def test_delete_session_for_user_removes_messages_then_session():
     assert sessions_builder.deleted_ids == [session.id]
 
 
-def test_clear_sessions_for_title_prefix():
+def test_resolve_prefixed_chat_session_creates_new_when_requested():
+    user_id = "user-1"
+    existing = _session(user_id=user_id, title="Portfolio: old thread")
+    sessions_builder = _FakeSessionsBuilder([existing])
+    service = ChatService(
+        chat_sessions_builder=sessions_builder,
+        chat_messages_builder=_FakeMessagesBuilder({}),
+    )
+
+    session_id, is_first = service.get_portfolio_analysis_session_id(
+        user_id=user_id,
+        symbol=None,
+        prompt="Start a fresh portfolio review",
+        model="gpt-4.1-mini",
+        new_chat_session=True,
+    )
+
+    assert session_id is not None
+    assert session_id != existing.id
+    assert is_first is True
+    assert len(sessions_builder.sessions) == 2
+
+
+def test_resolve_prefixed_chat_session_resumes_explicit_session():
+    user_id = "user-1"
+    session = _session(user_id=user_id, title="Symbol:AAPL: earlier thread")
+    messages = [
+        ChatMessage(
+            id=1,
+            session_id=session.id,
+            role="user",
+            content="How concentrated is AAPL?",
+        ),
+    ]
+    service = ChatService(
+        chat_sessions_builder=_FakeSessionsBuilder([session]),
+        chat_messages_builder=_FakeMessagesBuilder({str(session.id): messages}),
+    )
+
+    session_id, is_first = service.get_portfolio_analysis_session_id(
+        user_id=user_id,
+        symbol="AAPL",
+        prompt="Follow up on trim plan",
+        model="gpt-4.1-mini",
+        chat_session_id=str(session.id),
+    )
+
+    assert session_id == session.id
+    assert is_first is False
     user_id = "user-1"
     sessions = [
         _session(user_id=user_id, title="Symbol:AAPL: old"),

@@ -35,6 +35,8 @@ class ResearchChatRequest(BaseModel):
     symbol: str
     prompt: str
     model: Optional[ResponsesModel] = "gpt-4.1-mini"
+    chat_session_id: Optional[str] = None
+    new_chat_session: bool = False
 
 
 @router.post("/research/chat")
@@ -68,6 +70,8 @@ async def research_chat(
         symbol=symbol,
         prompt=prompt,
         model=request.model,
+        chat_session_id=request.chat_session_id,
+        new_chat_session=request.new_chat_session,
     )
     recent_messages = chat_service.get_chat_messages_by_session(session_id=session_id)
 
@@ -149,5 +153,6 @@ async def research_chat(
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+            **({"X-Chat-Session-Id": str(session_id)} if session_id else {}),
         },
     )
