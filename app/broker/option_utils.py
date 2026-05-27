@@ -414,6 +414,21 @@ def total_csp_reserved_cash(positions: List[Position]) -> float:
     )
 
 
+def csp_reserved_cash_by_underlying(positions: List[Position]) -> dict[str, float]:
+    by_underlying: dict[str, float] = {}
+    for position in positions:
+        reserved = cash_secured_put_reserved_cash(position)
+        if reserved is None:
+            continue
+        underlying = (
+            position.instrument.underlyingSymbol or position.instrument.symbol or ""
+        ).upper()
+        if not underlying:
+            continue
+        by_underlying[underlying] = by_underlying.get(underlying, 0.0) + reserved
+    return by_underlying
+
+
 def summarize_csp_cash_reserves(
     positions: List[Position],
     cash_balance: float | None = None,

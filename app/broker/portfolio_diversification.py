@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from app.broker.option_utils import total_csp_reserved_cash
+from app.broker.option_utils import (
+    csp_reserved_cash_by_underlying,
+    total_csp_reserved_cash,
+)
 from app.broker.position_metrics import portfolio_liquidation_value
 from app.broker.sector_labels import normalize_sector_label
 from app.models.intelligence_models import SectorWeight
@@ -53,6 +56,42 @@ def _aggregate_symbol_weights(
         (symbol, market_value, (market_value / liquidation) * 100.0)
         for symbol, market_value in ranked
     ]
+
+
+def _aggregate_symbol_spending(
+    positions: list[Position],
+    liquidation: float,
+    csp_by_underlying: dict[str, float],
+) -> list[tuple[str, float, float, float, float]]:
+    """symbol, equity value, CSP reserve, total spending, spending % of portfolio."""
+    if liquidation <= 0:
+        return []
+
+    equity_by_symbol: dict[str, float] = {}
+    for position in positions:
+        instrument = position.instrument
+        if instrument.assetType == "OPTION":
+            continue
+        symbol = (instrument.symbol or "").upper()
+        if not symbol:
+            continue
+        equity_by_symbol[symbol] = equity_by_symbol.get(symbol, 0.0) + abs(
+            position.marketValue
+        )
+
+    symbols = set(equity_by_symbol) | set(csp_by_underlying)
+    rows: list[tuple[str, float, float, float, float]] = []
+    for symbol in symbols:
+        market_value = equity_by_symbol.get(symbol, 0.0)
+        csp_reserved = csp_by_underlying.get(symbol, 0.0)
+        portfolio_spending = market_value + csp_reserved
+        spending_pct = (portfolio_spending / liquidation) * 100.0
+        rows.append(
+            (symbol, market_value, csp_reserved, portfolio_spending, spending_pct)
+        )
+
+    rows.sort(key=lambda item: item[3], reverse=True)
+    return rows
 
 
 def _short_put_underlyings(positions: list[Position]) -> list[str]:
@@ -153,13 +192,17 @@ def build_portfolio_allocation_precomputed(
     balances = account.securitiesAccount.currentBalances
     cash = balances.cashBalance or 0.0
     csp_reserved = total_csp_reserved_cash(positions)
+    csp_by_underlying = csp_reserved_cash_by_underlying(positions)
     cash_after_csp = max(cash - csp_reserved, 0.0)
     min_cash_buffer_pct = 5.0
     min_cash_buffer = liquidation * (min_cash_buffer_pct / 100.0)
     deployable_cash = max(cash_after_csp - min_cash_buffer, 0.0)
 
     ranked = _aggregate_symbol_weights(positions, liquidation)
-    if not ranked:
+    spending_ranked = _aggregate_symbol_spending(
+        positions, liquidation, csp_by_underlying
+    )
+    if not ranked and not spending_ranked:
         return None
 
     single_name_limit = _profile_single_name_limit(profile)
@@ -185,20 +228,29 @@ def build_portfolio_allocation_precomputed(
     trim_plan: list[TrimPlanItem] = []
     total_trim_proceeds = 0.0
 
-    for symbol, market_value, weight in ranked[:12]:
+    for symbol, market_value, csp_reserved_for_symbol, portfolio_spending, spending_weight in spending_ranked[:12]:
+        equity_weight = (
+            (market_value / liquidation) * 100.0 if liquidation > 0 else 0.0
+        )
         etf_target = etf_targets.get(symbol)
+        review_weight = spending_weight if csp_reserved_for_symbol > 0 else equity_weight
         status = _holding_allocation_status(
-            weight_pct=weight,
+            weight_pct=review_weight,
             single_limit=single_name_limit,
             etf_target_pct=etf_target,
         )
         action_bits: list[str] = []
-        trim_target = _trim_target_weight_pct(weight, single_name_limit)
+        if csp_reserved_for_symbol >= 1.0:
+            action_bits.append(
+                f"${csp_reserved_for_symbol:,.0f} reserved for cash-secured puts — "
+                "counts toward portfolio spending on this name"
+            )
+        trim_target = _trim_target_weight_pct(review_weight, single_name_limit)
         trim_dollars = 0.0
         if trim_target is not None:
             trim_dollars = _trim_dollars_to_target(
-                market_value=market_value,
-                weight_pct=weight,
+                market_value=portfolio_spending,
+                weight_pct=review_weight,
                 target_weight_pct=trim_target,
                 liquidation=liquidation,
             )
@@ -210,30 +262,46 @@ def build_portfolio_allocation_precomputed(
                 trim_plan.append(
                     TrimPlanItem(
                         symbol=symbol,
-                        current_weight_pct=round(weight, 2),
+                        current_weight_pct=round(review_weight, 2),
                         target_weight_pct=trim_target,
                         trim_dollars=trim_dollars,
                     )
                 )
         if etf_target is not None:
-            gap_pct = etf_target - weight
+            gap_pct = etf_target - equity_weight
             buy_dollars = max((gap_pct / 100.0) * liquidation, 0.0)
             if gap_pct > 1.0 and buy_dollars >= 1.0:
-                action_bits.append(
-                    f"Buy about ${buy_dollars:,.0f} more to reach your ETF target"
-                )
+                if csp_reserved_for_symbol >= 1.0:
+                    action_bits.append(
+                        "Pause new cash-secured puts before adding shares — "
+                        "CSP reserves already add exposure"
+                    )
+                else:
+                    action_bits.append(
+                        f"Buy about ${buy_dollars:,.0f} more to reach your ETF target"
+                    )
             elif gap_pct < -1.0:
                 action_bits.append(
                     "Above your ETF target — trim this before buying elsewhere"
                 )
-        if not action_bits:
-            if weight >= 15:
+        if len(action_bits) == (1 if csp_reserved_for_symbol >= 1.0 else 0):
+            if review_weight >= 15:
                 action_bits.append(
                     "Already a big slice of your portfolio — don't add more yet"
                 )
             elif status == "Small position — room to add":
+                if csp_reserved_for_symbol >= 1.0:
+                    action_bits.append(
+                        "Shares are small, but CSP reserves already commit capital here — "
+                        "hold before selling new puts or adding size"
+                    )
+                else:
+                    action_bits.append(
+                        f"Still small vs your {single_name_limit:.0f}% per-stock limit — OK to buy more if it fits your plan"
+                    )
+            elif csp_reserved_for_symbol >= 1.0:
                 action_bits.append(
-                    f"Still small vs your {single_name_limit:.0f}% per-stock limit — OK to buy more if it fits your plan"
+                    "Fine to hold the short puts — no new CSP or share adds until reserves clear"
                 )
             else:
                 action_bits.append("Fine to hold — no trim needed")
@@ -241,8 +309,11 @@ def build_portfolio_allocation_precomputed(
         holdings.append(
             HoldingAllocationReview(
                 symbol=symbol,
-                weight_pct=round(weight, 2),
+                weight_pct=round(equity_weight, 2),
                 market_value=round(market_value, 2),
+                csp_reserved_cash=round(csp_reserved_for_symbol, 2),
+                portfolio_spending=round(portfolio_spending, 2),
+                spending_weight_pct=round(spending_weight, 2),
                 status=status,
                 action_summary="; ".join(action_bits),
             )
@@ -397,9 +468,15 @@ def format_diversification_summary_block(
         "\n## Holding-by-holding review (precomputed — for reasoning only)"
     )
     for holding in precomputed.holdings:
+        spending_note = ""
+        if holding.csp_reserved_cash >= 1.0:
+            spending_note = (
+                f" (${holding.csp_reserved_cash:,.0f} CSP reserve; "
+                f"{holding.spending_weight_pct:.1f}% total spending)"
+            )
         lines.append(
-            f"- {holding.symbol}: {holding.weight_pct:.1f}% "
-            f"(${holding.market_value:,.0f}) — {holding.status} — "
+            f"- {holding.symbol}: {holding.weight_pct:.1f}% equity "
+            f"(${holding.market_value:,.0f}){spending_note} — {holding.status} — "
             f"{holding.action_summary}"
         )
 

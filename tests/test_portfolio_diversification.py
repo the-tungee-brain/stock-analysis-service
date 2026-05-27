@@ -164,6 +164,44 @@ def test_diversification_summary_includes_etf_core_gap():
     assert "Suggested deploy plan (precomputed" in block
 
 
+def test_build_portfolio_allocation_includes_csp_in_holding_spending():
+    from tests.test_option_utils import _make_option_position
+
+    def put_for(underlying: str, short_qty: float, strike: float):
+        position = _make_option_position(
+            symbol=f"{underlying}_061726P{int(strike)}",
+            strike_price=strike,
+            short_qty=short_qty,
+        )
+        return position.model_copy(
+            update={
+                "instrument": position.instrument.model_copy(
+                    update={"underlyingSymbol": underlying}
+                )
+            }
+        )
+
+    account = _account_with_cash(liquidation=100_000, cash=70_000)
+    positions = [
+        _make_position(symbol="NVDA", market_value=855),
+        put_for("NVDA", short_qty=2, strike=170),
+        _make_position(symbol="TSM", market_value=2_083),
+    ]
+
+    precomputed = build_portfolio_allocation_precomputed(
+        positions=positions,
+        account=account,
+    )
+
+    assert precomputed is not None
+    nvda = next(item for item in precomputed.holdings if item.symbol == "NVDA")
+    assert nvda.csp_reserved_cash == 34_000.0
+    assert nvda.portfolio_spending == 34_855.0
+    assert nvda.spending_weight_pct > nvda.weight_pct
+    assert "cash-secured puts" in nvda.action_summary.lower()
+    assert "portfolio spending" in nvda.action_summary.lower()
+
+
 def test_diversification_summary_ignores_stale_etf_core_for_wheel_strategy():
     from app.models.strategy_models import EtfCoreStrategyConfig
 

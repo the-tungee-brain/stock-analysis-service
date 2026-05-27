@@ -48,6 +48,9 @@ class HoldingAllocationReview(BaseModel):
     symbol: str
     weight_pct: float = Field(serialization_alias="weightPct")
     market_value: float = Field(serialization_alias="marketValue")
+    csp_reserved_cash: float = Field(default=0.0, serialization_alias="cspReservedCash")
+    portfolio_spending: float = Field(serialization_alias="portfolioSpending")
+    spending_weight_pct: float = Field(serialization_alias="spendingWeightPct")
     status: str
     action_summary: str = Field(serialization_alias="actionSummary")
 
