@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Any
 
 from app.adapters.finnhub.finnhub_adapter import FinnhubAdapter
+from app.adapters.market.yfinance_adapter import YFinanceAdapter
+from app.broker.fiscal_period import format_fiscal_period
 from app.models.company_research_models import NewsHeadline
 from app.models.earnings_models import (
     BeatLabel,
@@ -24,52 +26,31 @@ class EarningsBuilder:
         "during market hours": "dmh",
     }
 
-    def __init__(self, finnhub_adapter: FinnhubAdapter):
+    def __init__(
+        self,
+        yfinance_adapter: YFinanceAdapter,
+        finnhub_adapter: FinnhubAdapter | None = None,
+    ):
+        self.yfinance_adapter = yfinance_adapter
         self.finnhub_adapter = finnhub_adapter
 
     def build_list(self, symbol: str, limit: int = 8) -> EarningsListResponse:
         symbol = symbol.upper()
-        try:
-            raw_surprises = self._safe_list(
-                self.finnhub_adapter.get_company_earnings(symbol=symbol, limit=limit)
-            )
-        except Exception:
-            raw_surprises = []
-        if not raw_surprises:
+        bundle = self.yfinance_adapter.get_earnings_bundle(symbol=symbol, limit=limit)
+        surprises = bundle.get("surprises") or []
+        if not surprises and not bundle.get("upcoming"):
             return EarningsListResponse(symbol=symbol)
 
-        report_dates = [
-            self._period_to_report_date(item.get("period"))
-            for item in raw_surprises
-            if item.get("period")
-        ]
-        report_dates = [d for d in report_dates if d]
-
-        today = date.today()
-        history_start = (
-            min(report_dates) if report_dates else today - timedelta(days=365)
-        )
-        history_end = max(report_dates) if report_dates else today
-        calendar_start = min(history_start, today)
-        calendar_end = max(history_end, today + timedelta(days=120))
-
-        calendar_by_date = self._load_calendar_by_date(
-            symbol=symbol,
-            start=calendar_start,
-            end=calendar_end,
-        )
-
-        reported_periods = self._reported_fiscal_periods(raw_surprises)
+        revenue_by_period: dict[str, float] = bundle.get("revenue_by_period") or {}
 
         history: list[EarningsEvent] = []
-        for item in raw_surprises:
+        for item in surprises:
             report_date = self._period_to_report_date(item.get("period"))
             if not report_date:
                 continue
-            calendar_row = self._calendar_row_for_surprise(
-                calendar_by_date,
-                surprise_row=item,
+            calendar_row = self._calendar_row_for_period(
                 report_date=report_date,
+                revenue_by_period=revenue_by_period,
             )
             event = self._build_event(
                 symbol=symbol,
@@ -81,10 +62,9 @@ class EarningsBuilder:
             )
             history.append(event)
 
-        upcoming = self._pick_upcoming(
+        upcoming = self._build_upcoming_event(
             symbol=symbol,
-            calendar_by_date=calendar_by_date,
-            reported_periods=reported_periods,
+            upcoming_row=bundle.get("upcoming"),
         )
 
         return EarningsListResponse(
@@ -101,37 +81,35 @@ class EarningsBuilder:
     ) -> EarningsEvent | None:
         symbol = symbol.upper()
         iso_date = report_date.isoformat()
-
-        calendar_by_date = self._load_calendar_by_date(
-            symbol=symbol,
-            start=report_date - timedelta(days=120),
-            end=report_date + timedelta(days=120),
-        )
-        calendar_row = calendar_by_date.get(iso_date, {})
+        bundle = self.yfinance_adapter.get_earnings_bundle(symbol=symbol, limit=20)
+        surprises = bundle.get("surprises") or []
+        revenue_by_period: dict[str, float] = bundle.get("revenue_by_period") or {}
 
         surprise_row: dict[str, Any] | None = None
-        try:
-            raw_surprises = self._safe_list(
-                self.finnhub_adapter.get_company_earnings(symbol=symbol, limit=20)
-            )
-        except Exception:
-            raw_surprises = []
-        for item in raw_surprises:
-            item_date = self._period_to_report_date(item.get("period"))
-            if item_date and item_date.isoformat() == iso_date:
+        for item in surprises:
+            if item.get("period") == iso_date:
                 surprise_row = item
                 break
-        if surprise_row is None and calendar_row:
-            surprise_row = self._surprise_for_calendar_row(
-                raw_surprises,
-                calendar_row=calendar_row,
-            )
-        if surprise_row is not None:
-            calendar_row = self._calendar_row_for_surprise(
-                calendar_by_date,
-                surprise_row=surprise_row,
+        if surprise_row is None:
+            surprise_row = self._surprise_for_fiscal_period(
+                surprises,
                 report_date=report_date,
-            ) or calendar_row
+            )
+
+        upcoming_row = bundle.get("upcoming")
+        calendar_row = self._calendar_row_for_period(
+            report_date=report_date,
+            revenue_by_period=revenue_by_period,
+        )
+        if upcoming_row and upcoming_row.get("period") == iso_date:
+            calendar_row = {
+                **calendar_row,
+                "epsEstimate": upcoming_row.get("estimate"),
+                "revenueEstimate": upcoming_row.get("revenueEstimate"),
+                "hour": upcoming_row.get("timing"),
+                "quarter": upcoming_row.get("quarter"),
+                "year": upcoming_row.get("year"),
+            }
 
         if not surprise_row and not calendar_row:
             return None
@@ -151,10 +129,14 @@ class EarningsBuilder:
         )
 
     def lookup_transcript_id(self, symbol: str, report_date: date) -> str | None:
+        if self.finnhub_adapter is None:
+            return None
         by_date = self._load_transcript_ids_by_date(symbol=symbol)
         return by_date.get(report_date.isoformat())
 
     def fetch_transcript(self, transcript_id: str) -> list[TranscriptSegment]:
+        if self.finnhub_adapter is None:
+            return []
         try:
             raw = self.finnhub_adapter.get_transcript(transcript_id)
         except Exception:
@@ -210,6 +192,8 @@ class EarningsBuilder:
                 continue
             dt = item.get("datetime")
             if isinstance(dt, (int, float)):
+                from datetime import datetime
+
                 dt_str = datetime.fromtimestamp(dt).isoformat()
             else:
                 dt_str = str(dt or "")
@@ -223,45 +207,24 @@ class EarningsBuilder:
             )
         return headlines
 
-    def _pick_upcoming(
+    def _build_upcoming_event(
         self,
-        symbol: str,
-        calendar_by_date: dict[str, dict[str, Any]],
         *,
-        reported_periods: set[tuple[int, int]] | None = None,
+        symbol: str,
+        upcoming_row: dict[str, Any] | None,
     ) -> EarningsEvent | None:
-        today = date.today()
-        reported = reported_periods or set()
-        upcoming_dates = sorted(
-            d
-            for d in calendar_by_date
-            if date.fromisoformat(d) >= today
-            and not self._is_calendar_period_already_reported(
-                calendar_by_date[d],
-                reported_periods=reported,
-            )
-        )
-        if not upcoming_dates:
-            future_calendar = self._load_calendar_by_date(
-                symbol=symbol,
-                start=today,
-                end=today + timedelta(days=120),
-            )
-            upcoming_dates = sorted(
-                d
-                for d in future_calendar
-                if date.fromisoformat(d) >= today
-                and not self._is_calendar_period_already_reported(
-                    future_calendar[d],
-                    reported_periods=reported,
-                )
-            )
-            calendar_by_date = {**calendar_by_date, **future_calendar}
-        if not upcoming_dates:
+        if not upcoming_row:
             return None
-
-        report_date = date.fromisoformat(upcoming_dates[0])
-        calendar_row = calendar_by_date[upcoming_dates[0]]
+        report_date = self._period_to_report_date(upcoming_row.get("period"))
+        if not report_date:
+            return None
+        calendar_row = {
+            "epsEstimate": upcoming_row.get("estimate"),
+            "revenueEstimate": upcoming_row.get("revenueEstimate"),
+            "hour": upcoming_row.get("timing"),
+            "quarter": upcoming_row.get("quarter"),
+            "year": upcoming_row.get("year"),
+        }
         return self._build_event(
             symbol=symbol,
             report_date=report_date,
@@ -271,49 +234,9 @@ class EarningsBuilder:
             is_upcoming=True,
         )
 
-    def _load_upcoming(
-        self,
-        symbol: str,
-        calendar_by_date: dict[str, dict[str, Any]],
-    ) -> EarningsEvent | None:
-        future_calendar = self._load_calendar_by_date(
-            symbol=symbol,
-            start=date.today(),
-            end=date.today() + timedelta(days=120),
-        )
-        calendar_by_date.update(future_calendar)
-        return self._pick_upcoming(symbol=symbol, calendar_by_date=calendar_by_date)
-
-    def _load_calendar_by_date(
-        self,
-        symbol: str,
-        start: date,
-        end: date,
-    ) -> dict[str, dict[str, Any]]:
-        try:
-            raw = self.finnhub_adapter.get_earnings_calendar(
-                _from=start.isoformat(),
-                to=end.isoformat(),
-                symbol=symbol,
-                international=False,
-            )
-        except Exception:
-            return {}
-        rows = raw.get("earningsCalendar") if isinstance(raw, dict) else []
-        by_date: dict[str, dict[str, Any]] = {}
-        for row in self._safe_list(rows):
-            if not isinstance(row, dict):
-                continue
-            row_symbol = str(row.get("symbol") or "").upper()
-            if row_symbol and row_symbol != symbol.upper():
-                continue
-            row_date = row.get("date")
-            if not row_date:
-                continue
-            by_date[str(row_date)] = row
-        return by_date
-
     def _load_transcript_ids_by_date(self, symbol: str) -> dict[str, str]:
+        if self.finnhub_adapter is None:
+            return {}
         try:
             raw = self.finnhub_adapter.get_transcripts_list(symbol=symbol)
         except Exception:
@@ -343,6 +266,10 @@ class EarningsBuilder:
     ) -> EarningsEvent:
         quarter = surprise_row.get("quarter") or calendar_row.get("quarter")
         year = surprise_row.get("year") or calendar_row.get("year")
+        fiscal_period = surprise_row.get("fiscalPeriod") or format_fiscal_period(
+            int(quarter) if quarter is not None else None,
+            int(year) if year is not None else None,
+        )
 
         eps_actual = None if is_upcoming else self._first_float(
             surprise_row.get("actual"),
@@ -379,7 +306,9 @@ class EarningsBuilder:
                 (revenue_actual - revenue_estimate) / abs(revenue_estimate)
             ) * 100
 
-        timing = self._normalize_timing(calendar_row.get("hour"))
+        timing = self._normalize_timing(
+            calendar_row.get("hour") or calendar_row.get("timing")
+        )
         beat_label = self._beat_label(
             eps_actual=eps_actual,
             eps_estimate=eps_estimate,
@@ -389,7 +318,7 @@ class EarningsBuilder:
         return EarningsEvent(
             symbol=symbol,
             reportDate=report_date.isoformat(),
-            fiscalPeriod=self._fiscal_period(quarter, year),
+            fiscalPeriod=fiscal_period,
             quarter=int(quarter) if quarter is not None else None,
             year=int(year) if year is not None else None,
             timing=timing,
@@ -405,108 +334,36 @@ class EarningsBuilder:
         )
 
     @staticmethod
+    def _calendar_row_for_period(
+        *,
+        report_date: date,
+        revenue_by_period: dict[str, float],
+    ) -> dict[str, Any]:
+        row: dict[str, Any] = {}
+        revenue = revenue_by_period.get(report_date.isoformat())
+        if revenue is not None:
+            row["revenueActual"] = revenue
+        return row
+
+    @staticmethod
+    def _surprise_for_fiscal_period(
+        surprises: list[dict[str, Any]],
+        *,
+        report_date: date,
+    ) -> dict[str, Any] | None:
+        """Match by fiscal quarter when the UI date differs slightly from yfinance period."""
+        for item in surprises:
+            if item.get("period") == report_date.isoformat():
+                return item
+        return None
+
+    @staticmethod
     def _safe_list(value: Any) -> list[Any]:
         if value is None:
             return []
         if isinstance(value, list):
             return value
         return []
-
-    @staticmethod
-    def _reported_fiscal_periods(raw_surprises: list[Any]) -> set[tuple[int, int]]:
-        reported: set[tuple[int, int]] = set()
-        for item in raw_surprises:
-            if not isinstance(item, dict):
-                continue
-            if item.get("actual") is None:
-                continue
-            quarter = item.get("quarter")
-            year = item.get("year")
-            if quarter is None or year is None:
-                continue
-            reported.add((int(quarter), int(year)))
-        return reported
-
-    @staticmethod
-    def _is_calendar_period_already_reported(
-        calendar_row: dict[str, Any],
-        *,
-        reported_periods: set[tuple[int, int]],
-    ) -> bool:
-        quarter = calendar_row.get("quarter")
-        year = calendar_row.get("year")
-        if quarter is not None and year is not None:
-            if (int(quarter), int(year)) in reported_periods:
-                return True
-        eps_actual = calendar_row.get("epsActual")
-        if eps_actual is not None and calendar_row.get("date"):
-            try:
-                row_date = date.fromisoformat(str(calendar_row["date"])[:10])
-            except ValueError:
-                row_date = None
-            if row_date is not None and row_date <= date.today():
-                return True
-        return False
-
-    @staticmethod
-    def _calendar_row_for_surprise(
-        calendar_by_date: dict[str, dict[str, Any]],
-        *,
-        surprise_row: dict[str, Any],
-        report_date: date,
-    ) -> dict[str, Any]:
-        exact = calendar_by_date.get(report_date.isoformat())
-        if exact:
-            return exact
-
-        quarter = surprise_row.get("quarter")
-        year = surprise_row.get("year")
-        if quarter is None or year is None:
-            return {}
-
-        target = (int(quarter), int(year))
-        best_row: dict[str, Any] | None = None
-        best_delta: int | None = None
-        for date_str, row in calendar_by_date.items():
-            row_quarter = row.get("quarter")
-            row_year = row.get("year")
-            if row_quarter is None or row_year is None:
-                continue
-            if (int(row_quarter), int(row_year)) != target:
-                continue
-            try:
-                cal_date = date.fromisoformat(date_str)
-            except ValueError:
-                continue
-            delta = abs((cal_date - report_date).days)
-            if best_delta is None or delta < best_delta:
-                best_delta = delta
-                best_row = row
-        if best_row is not None and best_delta is not None and best_delta <= 120:
-            return best_row
-        return {}
-
-    @staticmethod
-    def _surprise_for_calendar_row(
-        raw_surprises: list[Any],
-        *,
-        calendar_row: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        quarter = calendar_row.get("quarter")
-        year = calendar_row.get("year")
-        if quarter is None or year is None:
-            return None
-        target = (int(quarter), int(year))
-        for item in raw_surprises:
-            if not isinstance(item, dict):
-                continue
-            item_quarter = item.get("quarter")
-            item_year = item.get("year")
-            if item_quarter is None or item_year is None:
-                continue
-            if (int(item_quarter), int(item_year)) == target:
-                return item
-        return None
 
     @staticmethod
     def _period_to_report_date(period: Any) -> date | None:
@@ -519,10 +376,15 @@ class EarningsBuilder:
 
     @staticmethod
     def _parse_transcript_time(value: str) -> date | None:
+        from datetime import datetime
+
         value = value.strip()
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
             try:
-                return datetime.strptime(value[:19] if fmt.endswith("%S") else value[:10], fmt).date()
+                return datetime.strptime(
+                    value[:19] if fmt.endswith("%S") else value[:10],
+                    fmt,
+                ).date()
             except ValueError:
                 continue
         if len(value) >= 10:
@@ -551,21 +413,12 @@ class EarningsBuilder:
         return None
 
     @staticmethod
-    def _fiscal_period(quarter: Any, year: Any) -> str:
-        if quarter and year:
-            return f"Q{int(quarter)} {int(year)}"
-        if year:
-            return str(int(year))
-        return "Unknown period"
-
-    @staticmethod
     def _event_is_upcoming(
         report_date: date,
         *,
         surprise_row: dict[str, Any],
         calendar_row: dict[str, Any],
     ) -> bool:
-        """A quarter with EPS actuals is reported even if the calendar date is still in the future."""
         if surprise_row.get("actual") is not None:
             return False
         if calendar_row.get("epsActual") is not None:

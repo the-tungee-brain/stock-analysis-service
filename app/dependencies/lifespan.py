@@ -207,7 +207,10 @@ async def lifespan(app: FastAPI):
     )
     performance_builder = PerformanceBuilder(market_data_adapter=yfinance_adapter)
     fundamentals_builder = FundamentalsBuilder(market_data_adapter=yfinance_adapter)
-    earnings_builder = EarningsBuilder(finnhub_adapter=finnhub_adapter)
+    earnings_builder = EarningsBuilder(
+        yfinance_adapter=yfinance_adapter,
+        finnhub_adapter=finnhub_adapter,
+    )
     sec_edgar_adapter = SecEdgarAdapter.from_env(session=session)
     securitiesdb_adapter = SecuritiesDbAdapter.from_env(session=session)
     sec_cik_builder = SecCikBuilder(sec_edgar_adapter=sec_edgar_adapter)
