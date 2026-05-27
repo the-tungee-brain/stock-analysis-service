@@ -313,3 +313,55 @@ def test_portfolio_allocation_prompts_do_not_hardcode_example_etfs():
     assert "Do NOT default to popular ETFs" in TICKER_SOURCING_RULES
     assert TICKER_SOURCING_RULES in SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE
     assert AMOUNT_SOURCING_RULES in SYSTEM_PORTFOLIO_ALLOCATION_MESSAGE
+
+
+def test_portfolio_v1_prompt_forbids_numeric_action_plan_bullets():
+    from app.core.prompts import _STRUCTURED_PORTFOLIO_V1_JSON_RULES
+
+    assert "Do NOT prefix bullets with numbers" in _STRUCTURED_PORTFOLIO_V1_JSON_RULES
+
+
+def test_normalize_portfolio_action_plan_bullets_strips_numeric_prefixes():
+    from app.core.analysis_schema import (
+        normalize_portfolio_action_plan_bullets,
+        strip_numeric_bullet_prefix,
+    )
+    from app.models.analysis_models import (
+        PortfolioAnalysisV1LLMResponse,
+        StructuredAnalysisActionLLM,
+        StructuredAnalysisSectionLLM,
+    )
+
+    assert strip_numeric_bullet_prefix("1. Trim NVDA by ~$4,200") == "Trim NVDA by ~$4,200"
+    assert strip_numeric_bullet_prefix("2) Deploy ~$1,300 to SCHD") == "Deploy ~$1,300 to SCHD"
+    assert strip_numeric_bullet_prefix("Step 1: Hold cash buffer") == "Hold cash buffer"
+
+    analysis = PortfolioAnalysisV1LLMResponse(
+        summary="Trim first.",
+        recommendedAction=StructuredAnalysisActionLLM(
+            title="Trim NVDA",
+            reason="Too large.",
+            symbol="NVDA",
+        ),
+        sections=[
+            StructuredAnalysisSectionLLM(
+                title="Action plan (ranked)",
+                bullets=[
+                    "1. Trim NVDA by ~$4,200 this week",
+                    "2. Deploy ~$1,300 to SCHD this month",
+                ],
+            ),
+            StructuredAnalysisSectionLLM(
+                title="Confidence",
+                bullets=["1. High — full holdings data"],
+            ),
+        ],
+    )
+
+    normalized = normalize_portfolio_action_plan_bullets(analysis)
+    assert normalized.sections[0].bullets == [
+        "Trim NVDA by ~$4,200 this week",
+        "Deploy ~$1,300 to SCHD this month",
+    ]
+    assert normalized.sections[1].bullets == ["1. High — full holdings data"]
+

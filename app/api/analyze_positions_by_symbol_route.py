@@ -26,7 +26,10 @@ from app.core.prompts import (
     should_use_natural_response,
     uses_structured_system_message,
 )
-from app.core.analysis_schema import wants_structured_analysis_v1
+from app.core.analysis_schema import (
+    normalize_portfolio_action_plan_bullets,
+    wants_structured_analysis_v1,
+)
 from app.core.llm_routes import LLMRoute
 from app.models.analysis_models import (
     PortfolioAnalysisV1LLMResponse,
@@ -177,6 +180,8 @@ async def analyze_positions_by_symbol(
                 model=request.model or settings.OPENAI_MODEL,
                 max_output_tokens=settings.MAX_OUTPUT_TOKENS_STREAM,
             )
+            if request.symbol is None:
+                parsed = normalize_portfolio_action_plan_bullets(parsed)
             precomputed = ctx.precomputed if isinstance(ctx, SymbolContext) else None
             portfolio_precomputed = (
                 ctx.portfolio_precomputed if isinstance(ctx, PortfolioContext) else None

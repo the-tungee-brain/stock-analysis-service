@@ -227,6 +227,7 @@ _STRUCTURED_PORTFOLIO_V1_JSON_RULES = dedent("""
       Diversification diagnosis, Portfolio snapshot, Holdings review, Trim plan, or Deploy plan.
     - "Action plan (ranked)": 2-4 bullets with timing (this week / this month) and priority — reference
       tickers and $ from the data but do not re-walk the full cash map or holding-by-holding table.
+      Do NOT prefix bullets with numbers (no "1.", "2)", or "Step 1:") — array order carries priority.
     - When **Suggested deploy plan (precomputed)** exists, recommendedAction must follow it; put timing
       and trade-offs in sections, not a second copy of the deploy $ table.
     - Never invent dollar amounts or tickers — if a figure is not in the provided data blocks, omit it.
@@ -405,6 +406,7 @@ def _structured_portfolio_analysis_v1_task(
           Do NOT add Portfolio cash map, Gaps vs targets, Where to put money smarter, Diversification
           diagnosis, or Portfolio snapshot — the app renders those in the money map card.
           Action plan bullets: 2-4 timed steps with $ and tickers from the data; do not re-walk every holding.
+          Plain bullets only — never prefix with "1.", "2.", or numbered step labels.
 
         {decision_order}
 
@@ -737,6 +739,7 @@ PORTFOLIO_DIVERSIFICATION_RULES = dedent("""
     ## Step 7 — Ranked action plan
     - Give 2–4 steps ranked by diversification impact with timing (this week / this month).
     - Include expected impact (e.g., "drops top-name weight from 28% to ~22%").
+    - Use plain bullet text only — no numeric prefixes; order in the bullets array is the rank.
     """).strip()
 
 OPTIONS_LANGUAGE_RULES = dedent("""
