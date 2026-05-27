@@ -54,6 +54,8 @@ def test_dividend_research_service_maps_payload():
     assert context.scenario.shares == 100
     assert context.scenario.total_collected > 0
     assert context.recent_payments[0].amount_per_share == pytest.approx(0.278)
+    assert len(context.payments) == 3
+    assert context.payments[0].date == "2024-12-11"
     assert context.data_as_of == "2026-05-22T23:59:59.000Z"
 
 

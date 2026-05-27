@@ -18,6 +18,24 @@ DEFAULT_SCENARIO_SHARES = 100.0
 DEFAULT_RECENT_PAYMENTS = 8
 
 
+def _parse_payment_items(
+    dividend_rows: list[dict[str, Any]],
+) -> list[DividendPaymentItem]:
+    payments: list[DividendPaymentItem] = []
+    for item in dividend_rows:
+        payment_date = item.get("date")
+        amount = item.get("amount_per_share")
+        if isinstance(payment_date, str) and isinstance(amount, (int, float)):
+            payments.append(
+                DividendPaymentItem(
+                    date=payment_date,
+                    amount_per_share=float(amount),
+                )
+            )
+    payments.sort(key=lambda payment: payment.date)
+    return payments
+
+
 class DividendResearchService:
     def __init__(self, securitiesdb_adapter: SecuritiesDbAdapter) -> None:
         self.securitiesdb_adapter = securitiesdb_adapter
@@ -61,17 +79,8 @@ class DividendResearchService:
             start_year=start_year,
         )
 
-        recent_payments: list[DividendPaymentItem] = []
-        for item in dividend_rows[:DEFAULT_RECENT_PAYMENTS]:
-            payment_date = item.get("date")
-            amount = item.get("amount_per_share")
-            if isinstance(payment_date, str) and isinstance(amount, (int, float)):
-                recent_payments.append(
-                    DividendPaymentItem(
-                        date=payment_date,
-                        amount_per_share=float(amount),
-                    )
-                )
+        all_payments = _parse_payment_items(dividend_rows)
+        recent_payments = list(reversed(all_payments[-DEFAULT_RECENT_PAYMENTS:]))
 
         total_dividends = summary_dict.get("total_dividends")
         if not isinstance(total_dividends, int):
@@ -100,6 +109,7 @@ class DividendResearchService:
                 )
             ],
             recent_payments=recent_payments,
+            payments=all_payments,
             scenario=DividendSnowballScenario.model_validate(scenario_data),
             data_as_of=self._extract_data_as_of(meta_dict),
             confidence_score=self._extract_confidence_score(meta_dict),

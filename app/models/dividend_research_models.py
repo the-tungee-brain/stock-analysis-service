@@ -37,6 +37,7 @@ class DividendHistoryContext(BaseModel):
     recent_payments: list[DividendPaymentItem] = Field(
         default_factory=list, serialization_alias="recentPayments"
     )
+    payments: list[DividendPaymentItem] = Field(default_factory=list)
     scenario: DividendSnowballScenario
     data_as_of: str | None = Field(default=None, serialization_alias="dataAsOf")
     confidence_score: float | None = Field(
