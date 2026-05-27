@@ -53,6 +53,8 @@ def test_dividend_research_service_maps_payload():
     assert len(context.annual_income) >= 4
     assert context.scenario.shares == 100
     assert context.scenario.total_collected > 0
+    assert context.historical_backtest is not None
+    assert context.historical_backtest.cash_collected > 0
     assert context.recent_payments[0].amount_per_share == pytest.approx(0.278)
     assert len(context.payments) == 3
     assert context.payments[0].date == "2024-12-11"

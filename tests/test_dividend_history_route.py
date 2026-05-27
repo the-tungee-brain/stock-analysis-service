@@ -51,13 +51,13 @@ def test_get_dividend_history_returns_context():
         get_dividend_history(
             symbol="SCHD",
             shares=100,
-            start_year=None,
             investment_usd=None,
             share_price=None,
             reinvest_dividends=False,
             price_cagr_pct=None,
             project_years=None,
             dividend_cagr_pct=None,
+            history_start_year=None,
             dividend_research_service=service,
         )
     )
@@ -66,13 +66,13 @@ def test_get_dividend_history_returns_context():
     service.build_history_context.assert_called_once_with(
         "SCHD",
         shares=100,
-        start_year=None,
         investment_usd=None,
         share_price=None,
         reinvest_dividends=False,
         price_cagr_pct=None,
         project_years=None,
         dividend_cagr_pct=None,
+        history_start_year=None,
     )
 
 
@@ -85,7 +85,6 @@ def test_get_dividend_history_raises_404_when_missing():
             get_dividend_history(
                 symbol="UNKNOWN",
                 shares=100,
-                start_year=None,
                 dividend_research_service=service,
             )
         )
@@ -101,7 +100,6 @@ def test_route_json_uses_camel_case_aliases():
         get_dividend_history(
             symbol="SCHD",
             shares=100,
-            start_year=None,
             dividend_research_service=service,
         )
     ).model_dump(mode="json", by_alias=True)

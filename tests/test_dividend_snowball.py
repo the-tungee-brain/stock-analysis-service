@@ -3,6 +3,7 @@ from datetime import date
 import pytest
 
 from app.utils.dividend_snowball import (
+    build_historical_backtest,
     build_scenario,
     cash_collected_since_year,
     derive_share_price_at_start,
@@ -98,8 +99,9 @@ def test_simulate_forward_projection_with_drip():
     assert result["advanced"]["final_shares"] > result["advanced"]["initial_shares"]
     assert (
         result["advanced"]["annual_income_latest_drip"]
-        > result["annual_income_latest"]
+        == result["annual_income_latest"]
     )
+    assert result["annual_income_latest"] > result["annual_income_start"]
 
 
 def test_resolve_dividend_yield_pct_from_share_price():
@@ -182,3 +184,24 @@ def test_build_scenario_with_advanced_drip():
     )
     assert scenario["advanced"] is not None
     assert scenario["advanced"]["final_shares"] > scenario["advanced"]["initial_shares"]
+
+
+def test_build_historical_backtest_includes_cash_and_drip():
+    result = build_historical_backtest(
+        dividends=SCHD_DIVIDENDS,
+        annual_totals=SCHD_ANNUAL_TOTALS,
+        shares=100,
+        start_year=2015,
+        share_price=80,
+        investment_usd=10_000,
+        price_cagr_pct=8,
+        symbol="SCHD",
+    )
+
+    assert result is not None
+    assert result["start_year"] == 2015
+    assert result["end_year"] == 2025
+    assert result["cash_collected"] > 0
+    assert result["cash_collected_annual"] > 0
+    assert result["drip"] is not None
+    assert result["drip"]["final_shares"] > result["drip"]["initial_shares"]

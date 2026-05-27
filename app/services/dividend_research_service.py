@@ -1,14 +1,17 @@
-from typing import Any
+from typing import Any, Optional
 
+from app.adapters.cache.dividend_history_cache import DividendHistoryCache
 from app.adapters.securitiesdb.securitiesdb_adapter import SecuritiesDbAdapter
 from app.models.dividend_research_models import (
     AnnualDividendIncome,
+    DividendHistoricalBacktest,
     DividendHistoryContext,
     DividendPaymentItem,
     DividendSnowballScenario,
 )
 from app.utils.dividend_snowball import (
     annual_income_on_shares,
+    build_historical_backtest,
     build_scenario,
     dividend_cagr_pct as compute_dividend_cagr_pct,
     latest_completed_dividend_per_share,
@@ -40,22 +43,53 @@ def _parse_payment_items(
 
 
 class DividendResearchService:
-    def __init__(self, securitiesdb_adapter: SecuritiesDbAdapter) -> None:
+    def __init__(
+        self,
+        securitiesdb_adapter: SecuritiesDbAdapter,
+        dividend_history_cache: Optional[DividendHistoryCache] = None,
+    ) -> None:
         self.securitiesdb_adapter = securitiesdb_adapter
+        self.dividend_history_cache = dividend_history_cache
 
     def build_history_context(
         self,
         symbol: str,
         *,
         shares: float = DEFAULT_SCENARIO_SHARES,
-        start_year: int | None = None,
         investment_usd: float | None = None,
         share_price: float | None = None,
         reinvest_dividends: bool = False,
         price_cagr_pct: float | None = None,
         project_years: int | None = None,
         dividend_cagr_pct: float | None = None,
+        history_start_year: int | None = None,
     ) -> DividendHistoryContext | None:
+        resolved_shares = max(float(shares), 0.0) or DEFAULT_SCENARIO_SHARES
+        resolved_investment = (
+            float(investment_usd) if investment_usd is not None and investment_usd > 0 else None
+        )
+        resolved_share_price = (
+            float(share_price) if share_price is not None and share_price > 0 else None
+        )
+        if resolved_investment and resolved_share_price:
+            resolved_shares = resolved_investment / resolved_share_price
+
+        cache_key = None
+        if self.dividend_history_cache is not None:
+            cache_key = DividendHistoryCache.build_cache_key(
+                shares=resolved_shares,
+                investment_usd=resolved_investment,
+                share_price=resolved_share_price,
+                reinvest_dividends=reinvest_dividends,
+                price_cagr_pct=price_cagr_pct,
+                project_years=project_years,
+                dividend_cagr_pct=dividend_cagr_pct,
+                history_start_year=history_start_year,
+            )
+            cached = self.dividend_history_cache.get(symbol, cache_key)
+            if cached is not None:
+                return cached
+
         payload = self.securitiesdb_adapter.get_stock_dividends(symbol=symbol)
         if payload is None:
             return None
@@ -80,16 +114,6 @@ class DividendResearchService:
                 if isinstance(item, dict):
                     dividend_rows.append(item)
 
-        resolved_shares = max(float(shares), 0.0) or DEFAULT_SCENARIO_SHARES
-        resolved_investment = (
-            float(investment_usd) if investment_usd is not None and investment_usd > 0 else None
-        )
-        resolved_share_price = (
-            float(share_price) if share_price is not None and share_price > 0 else None
-        )
-        if resolved_investment and resolved_share_price:
-            resolved_shares = resolved_investment / resolved_share_price
-
         resolved_price_cagr = price_cagr_pct
         if reinvest_dividends and resolved_price_cagr is None:
             resolved_price_cagr = fetch_price_cagr_pct(symbol, lookback_years=5)
@@ -98,7 +122,6 @@ class DividendResearchService:
             dividends=dividend_rows,
             annual_totals=annual_totals,
             shares=resolved_shares,
-            start_year=start_year,
             investment_usd=resolved_investment,
             share_price=resolved_share_price,
             reinvest_dividends=reinvest_dividends,
@@ -129,7 +152,23 @@ class DividendResearchService:
             symbol=str(data.get("ticker") or symbol).upper(),
         )
 
-        return DividendHistoryContext(
+        historical_data = build_historical_backtest(
+            dividends=dividend_rows,
+            annual_totals=annual_totals,
+            shares=resolved_shares,
+            start_year=history_start_year,
+            share_price=resolved_share_price,
+            investment_usd=resolved_investment,
+            price_cagr_pct=price_cagr_pct,
+            symbol=str(data.get("ticker") or symbol).upper(),
+        )
+        historical_backtest = (
+            DividendHistoricalBacktest.model_validate(historical_data)
+            if historical_data is not None
+            else None
+        )
+
+        context = DividendHistoryContext(
             ticker=str(data.get("ticker") or symbol).upper(),
             total_dividends=total_dividends,
             total_splits=total_splits,
@@ -147,9 +186,15 @@ class DividendResearchService:
             recent_payments=recent_payments,
             payments=all_payments,
             scenario=DividendSnowballScenario.model_validate(scenario_data),
+            historical_backtest=historical_backtest,
             data_as_of=self._extract_data_as_of(meta_dict),
             confidence_score=self._extract_confidence_score(meta_dict),
         )
+
+        if self.dividend_history_cache is not None and cache_key is not None:
+            self.dividend_history_cache.put(symbol, cache_key, context)
+
+        return context
 
     @staticmethod
     def _extract_data_as_of(meta: dict[str, Any]) -> str | None:

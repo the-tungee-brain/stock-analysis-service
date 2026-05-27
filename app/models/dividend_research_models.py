@@ -27,6 +27,14 @@ class DividendAdvancedSnowballScenario(BaseModel):
     )
 
 
+class DividendHistoricalBacktest(BaseModel):
+    start_year: int = Field(serialization_alias="startYear")
+    end_year: int = Field(serialization_alias="endYear")
+    cash_collected: float = Field(serialization_alias="cashCollected")
+    cash_collected_annual: float = Field(serialization_alias="cashCollectedAnnual")
+    drip: DividendAdvancedSnowballScenario | None = None
+
+
 class DividendSnowballScenario(BaseModel):
     shares: float
     start_year: int = Field(serialization_alias="startYear")
@@ -61,6 +69,10 @@ class DividendHistoryContext(BaseModel):
     )
     payments: list[DividendPaymentItem] = Field(default_factory=list)
     scenario: DividendSnowballScenario
+    historical_backtest: DividendHistoricalBacktest | None = Field(
+        default=None,
+        serialization_alias="historicalBacktest",
+    )
     data_as_of: str | None = Field(default=None, serialization_alias="dataAsOf")
     confidence_score: float | None = Field(
         default=None, serialization_alias="confidenceScore"

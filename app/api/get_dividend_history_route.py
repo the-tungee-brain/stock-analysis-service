@@ -56,11 +56,11 @@ async def get_dividend_history(
         le=500,
         description="Average annual dividend growth used for forward projection",
     ),
-    start_year: int | None = Query(
+    history_start_year: int | None = Query(
         default=None,
         ge=1980,
         le=2100,
-        description="First calendar year included in the cash-collected scenario",
+        description="Optional first year for the historical cash-collected backtest",
     ),
     dividend_research_service: DividendResearchService = Depends(
         get_dividend_research_service
@@ -71,13 +71,13 @@ async def get_dividend_history(
         dividend_research_service.build_history_context,
         symbol_upper,
         shares=shares,
-        start_year=start_year,
         investment_usd=investment_usd,
         share_price=share_price,
         reinvest_dividends=reinvest_dividends,
         price_cagr_pct=price_cagr_pct,
         project_years=project_years,
         dividend_cagr_pct=dividend_cagr_pct,
+        history_start_year=history_start_year,
     )
     if context is None:
         raise HTTPException(

@@ -210,13 +210,14 @@ def simulate_forward_projection(
             price *= 1.0 + price_rate
 
     final_dps = base_dps * ((1.0 + div_rate) ** project_years)
+    annual_income_latest = round(final_dps * share_count, 2)
     return {
         "start_year": today_year,
         "latest_year": end_year,
         "project_years": project_years,
         "dividend_cagr_pct": dividend_cagr_pct,
         "annual_income_start": annual_income_start,
-        "annual_income_latest": round(final_dps * shares, 2),
+        "annual_income_latest": annual_income_latest,
         "total_collected": round(total_collected, 2),
         "advanced": {
             "enabled": True,
@@ -225,7 +226,7 @@ def simulate_forward_projection(
             "share_price_at_start": round(share_price, 2),
             "share_price_latest": round(price, 2),
             "price_cagr_pct": round(price_cagr_pct or 0.0, 2),
-            "annual_income_latest_drip": round(final_dps * share_count, 2),
+            "annual_income_latest_drip": annual_income_latest,
             "portfolio_value_latest": round(share_count * price, 2),
             "total_dividends_reinvested": round(total_reinvested, 2),
         },
@@ -237,7 +238,6 @@ def build_scenario(
     dividends: list[dict[str, Any]],
     annual_totals: dict[int, float],
     shares: float,
-    start_year: int | None = None,
     investment_usd: float | None = None,
     share_price: float | None = None,
     reinvest_dividends: bool = False,
@@ -246,7 +246,6 @@ def build_scenario(
     dividend_cagr_pct: float | None = None,
 ) -> dict[str, Any]:
     _ = dividends
-    _ = start_year
 
     resolved_project_years = normalize_project_years(project_years)
     resolved_shares = shares
@@ -293,6 +292,79 @@ def build_scenario(
         scenario["advanced"] = projection["advanced"]
 
     return scenario
+
+
+def build_historical_backtest(
+    *,
+    dividends: list[dict[str, Any]],
+    annual_totals: dict[int, float],
+    shares: float,
+    start_year: int | None = None,
+    share_price: float | None = None,
+    investment_usd: float | None = None,
+    price_cagr_pct: float | None = None,
+    symbol: str,
+) -> dict[str, Any] | None:
+    completed = completed_annual_totals(annual_totals)
+    if not completed:
+        return None
+
+    first_year = completed[0][0]
+    end_year = completed[-1][0]
+    default_start = max(first_year, end_year - 9)
+    resolved_start = start_year if start_year is not None else default_start
+    resolved_start = max(first_year, min(resolved_start, end_year))
+
+    cash_collected = cash_collected_since_year(
+        dividends,
+        shares=shares,
+        start_year=resolved_start,
+    )
+    cash_collected_annual = round(
+        sum(
+            annual_totals.get(year, 0.0) * shares
+            for year in range(resolved_start, end_year + 1)
+        ),
+        2,
+    )
+
+    drip: dict[str, Any] | None = None
+    if share_price is not None and share_price > 0 and resolved_start < end_year:
+        from app.utils.stock_price_cagr import fetch_price_cagr_pct
+
+        resolved_investment = (
+            investment_usd
+            if investment_usd is not None and investment_usd > 0
+            else shares * share_price
+        )
+        resolved_price_cagr = (
+            price_cagr_pct
+            if price_cagr_pct is not None
+            else fetch_price_cagr_pct(symbol, lookback_years=5) or 0.0
+        )
+        years_elapsed = end_year - resolved_start
+        share_price_at_start = derive_share_price_at_start(
+            current_share_price=share_price,
+            price_cagr_pct=resolved_price_cagr,
+            years_elapsed=years_elapsed,
+        )
+        drip = simulate_drip_backtest(
+            annual_totals=annual_totals,
+            start_year=resolved_start,
+            end_year=end_year,
+            initial_investment_usd=resolved_investment,
+            share_price_at_start=share_price_at_start,
+            price_cagr_pct=resolved_price_cagr,
+            current_share_price=share_price,
+        )
+
+    return {
+        "start_year": resolved_start,
+        "end_year": end_year,
+        "cash_collected": cash_collected,
+        "cash_collected_annual": cash_collected_annual,
+        "drip": drip,
+    }
 
 
 def derive_share_price_at_start(

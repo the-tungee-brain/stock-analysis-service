@@ -7,6 +7,7 @@ import requests
 from fastapi import FastAPI
 from openai import OpenAI
 
+from app.adapters.cache.dividend_history_cache import DividendHistoryCache
 from app.adapters.cache.enriched_news_cache import EnrichedNewsCache
 from app.adapters.cache.finnhub_response_cache import FinnhubResponseCache
 from app.adapters.cache.portfolio_brief_cache import PortfolioBriefCache
@@ -163,6 +164,7 @@ async def lifespan(app: FastAPI):
     )
     schwab_redis_token_manager = SchwabRedisTokenManager(redis_client=redis_client)
     research_context_cache = ResearchContextCache(redis_client=redis_client)
+    dividend_history_cache = DividendHistoryCache(redis_client=redis_client)
     portfolio_brief_cache = PortfolioBriefCache(redis_client=redis_client)
     enriched_news_cache = EnrichedNewsCache(redis_client=redis_client)
     recent_orders_cache = RecentOrdersCache(redis_client=redis_client)
@@ -222,6 +224,7 @@ async def lifespan(app: FastAPI):
     )
     dividend_research_service = DividendResearchService(
         securitiesdb_adapter=securitiesdb_adapter,
+        dividend_history_cache=dividend_history_cache,
     )
 
     news_service = NewsService(finnhub_builder=finnhub_builder)
@@ -324,6 +327,7 @@ async def lifespan(app: FastAPI):
 
     app.state.http_session = session
     app.state.redis_client = redis_client
+    app.state.yfinance_adapter = yfinance_adapter
     app.state.news_service = news_service
     app.state.prompt_enrichment_service = prompt_enrichment_service
     app.state.market_service = market_service

@@ -740,26 +740,32 @@ class PortfolioAnalysisService:
             top_symbols = self._top_position_symbols(
                 positions=positions, account=account, limit=PORTFOLIO_RESEARCH_LIMIT
             )
-            research_contexts = []
+            research_contexts: list = []
             sector_by_symbol: dict[str, str] = {}
             research_asset_types: dict[str, str] = {}
 
-            for sym in top_symbols:
-                try:
-                    if lightweight:
-                        ctx = self.company_research_service.build_lightweight_context(
-                            sym
-                        )
-                    else:
-                        ctx = self.company_research_service.build_context(symbol=sym)
-                    ctx = self.portfolio_intelligence_service.attach_enriched_news(ctx)
+            def load_research_context(sym: str):
+                if lightweight:
+                    ctx = self.company_research_service.build_lightweight_context(sym)
+                else:
+                    ctx = self.company_research_service.build_context(symbol=sym)
+                return sym, self.portfolio_intelligence_service.attach_enriched_news(ctx)
+
+            max_workers = min(len(top_symbols), 4) if top_symbols else 1
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(load_research_context, sym) for sym in top_symbols
+                ]
+                for future in futures:
+                    try:
+                        sym, ctx = future.result()
+                    except Exception:
+                        continue
                     research_contexts.append(ctx)
                     if ctx.snapshot and ctx.snapshot.sector:
                         sector_by_symbol[sym] = ctx.snapshot.sector
                     if ctx.asset_type:
                         research_asset_types[sym] = ctx.asset_type
-                except Exception:
-                    continue
 
             asset_type_by_symbol = build_asset_type_by_symbol(
                 positions,
