@@ -59,12 +59,18 @@ class EarningsBuilder:
             end=calendar_end,
         )
 
+        reported_periods = self._reported_fiscal_periods(raw_surprises)
+
         history: list[EarningsEvent] = []
         for item in raw_surprises:
             report_date = self._period_to_report_date(item.get("period"))
             if not report_date:
                 continue
-            calendar_row = calendar_by_date.get(report_date.isoformat(), {})
+            calendar_row = self._calendar_row_for_surprise(
+                calendar_by_date,
+                surprise_row=item,
+                report_date=report_date,
+            )
             event = self._build_event(
                 symbol=symbol,
                 report_date=report_date,
@@ -78,6 +84,7 @@ class EarningsBuilder:
         upcoming = self._pick_upcoming(
             symbol=symbol,
             calendar_by_date=calendar_by_date,
+            reported_periods=reported_periods,
         )
 
         return EarningsListResponse(
@@ -114,6 +121,11 @@ class EarningsBuilder:
             if item_date and item_date.isoformat() == iso_date:
                 surprise_row = item
                 break
+        if surprise_row is None and calendar_row:
+            surprise_row = self._surprise_for_calendar_row(
+                raw_surprises,
+                calendar_row=calendar_row,
+            )
 
         if not surprise_row and not calendar_row:
             return None
@@ -204,11 +216,36 @@ class EarningsBuilder:
         self,
         symbol: str,
         calendar_by_date: dict[str, dict[str, Any]],
+        *,
+        reported_periods: set[tuple[int, int]] | None = None,
     ) -> EarningsEvent | None:
         today = date.today()
+        reported = reported_periods or set()
         upcoming_dates = sorted(
-            d for d in calendar_by_date if date.fromisoformat(d) >= today
+            d
+            for d in calendar_by_date
+            if date.fromisoformat(d) >= today
+            and not self._is_calendar_period_already_reported(
+                calendar_by_date[d],
+                reported_periods=reported,
+            )
         )
+        if not upcoming_dates:
+            future_calendar = self._load_calendar_by_date(
+                symbol=symbol,
+                start=today,
+                end=today + timedelta(days=120),
+            )
+            upcoming_dates = sorted(
+                d
+                for d in future_calendar
+                if date.fromisoformat(d) >= today
+                and not self._is_calendar_period_already_reported(
+                    future_calendar[d],
+                    reported_periods=reported,
+                )
+            )
+            calendar_by_date = {**calendar_by_date, **future_calendar}
         if not upcoming_dates:
             return None
 
@@ -296,7 +333,7 @@ class EarningsBuilder:
         quarter = surprise_row.get("quarter") or calendar_row.get("quarter")
         year = surprise_row.get("year") or calendar_row.get("year")
 
-        eps_actual = self._first_float(
+        eps_actual = None if is_upcoming else self._first_float(
             surprise_row.get("actual"),
             calendar_row.get("epsActual"),
         )
@@ -304,8 +341,15 @@ class EarningsBuilder:
             surprise_row.get("estimate"),
             calendar_row.get("epsEstimate"),
         )
-        eps_surprise_pct = self._first_float(surprise_row.get("surprisePercent"))
-        if eps_surprise_pct is None and eps_actual is not None and eps_estimate:
+        eps_surprise_pct = None if is_upcoming else self._first_float(
+            surprise_row.get("surprisePercent")
+        )
+        if (
+            not is_upcoming
+            and eps_surprise_pct is None
+            and eps_actual is not None
+            and eps_estimate
+        ):
             eps_surprise_pct = ((eps_actual - eps_estimate) / abs(eps_estimate)) * 100
 
         revenue_actual = self._first_float(calendar_row.get("revenueActual"))
@@ -348,6 +392,102 @@ class EarningsBuilder:
         if isinstance(value, list):
             return value
         return []
+
+    @staticmethod
+    def _reported_fiscal_periods(raw_surprises: list[Any]) -> set[tuple[int, int]]:
+        reported: set[tuple[int, int]] = set()
+        for item in raw_surprises:
+            if not isinstance(item, dict):
+                continue
+            if item.get("actual") is None:
+                continue
+            quarter = item.get("quarter")
+            year = item.get("year")
+            if quarter is None or year is None:
+                continue
+            reported.add((int(quarter), int(year)))
+        return reported
+
+    @staticmethod
+    def _is_calendar_period_already_reported(
+        calendar_row: dict[str, Any],
+        *,
+        reported_periods: set[tuple[int, int]],
+    ) -> bool:
+        quarter = calendar_row.get("quarter")
+        year = calendar_row.get("year")
+        if quarter is not None and year is not None:
+            if (int(quarter), int(year)) in reported_periods:
+                return True
+        eps_actual = calendar_row.get("epsActual")
+        if eps_actual is not None and calendar_row.get("date"):
+            try:
+                row_date = date.fromisoformat(str(calendar_row["date"])[:10])
+            except ValueError:
+                row_date = None
+            if row_date is not None and row_date <= date.today():
+                return True
+        return False
+
+    @staticmethod
+    def _calendar_row_for_surprise(
+        calendar_by_date: dict[str, dict[str, Any]],
+        *,
+        surprise_row: dict[str, Any],
+        report_date: date,
+    ) -> dict[str, Any]:
+        exact = calendar_by_date.get(report_date.isoformat())
+        if exact:
+            return exact
+
+        quarter = surprise_row.get("quarter")
+        year = surprise_row.get("year")
+        if quarter is None or year is None:
+            return {}
+
+        target = (int(quarter), int(year))
+        best_row: dict[str, Any] | None = None
+        best_delta: int | None = None
+        for date_str, row in calendar_by_date.items():
+            row_quarter = row.get("quarter")
+            row_year = row.get("year")
+            if row_quarter is None or row_year is None:
+                continue
+            if (int(row_quarter), int(row_year)) != target:
+                continue
+            try:
+                cal_date = date.fromisoformat(date_str)
+            except ValueError:
+                continue
+            delta = abs((cal_date - report_date).days)
+            if best_delta is None or delta < best_delta:
+                best_delta = delta
+                best_row = row
+        if best_row is not None and best_delta is not None and best_delta <= 120:
+            return best_row
+        return {}
+
+    @staticmethod
+    def _surprise_for_calendar_row(
+        raw_surprises: list[Any],
+        *,
+        calendar_row: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        quarter = calendar_row.get("quarter")
+        year = calendar_row.get("year")
+        if quarter is None or year is None:
+            return None
+        target = (int(quarter), int(year))
+        for item in raw_surprises:
+            if not isinstance(item, dict):
+                continue
+            item_quarter = item.get("quarter")
+            item_year = item.get("year")
+            if item_quarter is None or item_year is None:
+                continue
+            if (int(item_quarter), int(item_year)) == target:
+                return item
+        return None
 
     @staticmethod
     def _period_to_report_date(period: Any) -> date | None:
