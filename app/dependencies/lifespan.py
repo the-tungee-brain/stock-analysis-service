@@ -27,6 +27,7 @@ from app.adapters.cache.recent_orders_cache import RecentOrdersCache
 from app.adapters.cache.llm_output_cache import LLMOutputCache
 from app.adapters.schwab.schwab_trader_adapter import SchwabTraderAdapter
 from app.adapters.user.app_user_adapter import AppUserAdapter
+from app.adapters.user.waitlist_adapter import WaitlistAdapter
 from app.adapters.user.user_investment_profile_adapter import (
     UserInvestmentProfileAdapter,
 )
@@ -41,6 +42,7 @@ from app.adapters.portfolio.morning_brief_delivery_adapter import (
 from app.adapters.portfolio.portfolio_snapshot_adapter import PortfolioSnapshotAdapter
 
 from app.builders.app_user_builder import AppUserBuilder
+from app.builders.waitlist_builder import WaitlistBuilder
 from app.builders.chat_messages_builder import ChatMessagesBuilder
 from app.builders.chat_sessions_builder import ChatSessionsBuilder
 from app.builders.finnhub_builder import FinnhubBuilder
@@ -55,6 +57,7 @@ from app.builders.ticker_symbol_builder import TickerSymbolBuilder
 from app.builders.fundamentals_builder import FundamentalsBuilder
 
 from app.core.llm_config import settings
+from app.core.access_control import max_active_users
 
 from app.services.chat_service import ChatService
 from app.services.company_profile_service import CompanyProfileService
@@ -151,6 +154,7 @@ async def lifespan(app: FastAPI):
         client=powerpocketdb_client
     )
     app_user_adapter = AppUserAdapter(client=powerpocketdb_client)
+    waitlist_adapter = WaitlistAdapter(client=powerpocketdb_client)
     user_investment_profile_adapter = UserInvestmentProfileAdapter(
         client=powerpocketdb_client
     )
@@ -192,6 +196,7 @@ async def lifespan(app: FastAPI):
     )
     schwab_trader_builder = get_schwab_trader_builder(session)
     app_user_builder = AppUserBuilder(app_user_adapter=app_user_adapter)
+    waitlist_builder = WaitlistBuilder(waitlist_adapter=waitlist_adapter)
     news_analytics_builder = NewsAnalyticsBuilder(openai_adapter=openai_adapter)
     prompt_builder = PromptBuilder(openai_adapter=openai_adapter)
     chat_messages_builder = ChatMessagesBuilder(
@@ -250,7 +255,11 @@ async def lifespan(app: FastAPI):
         schwab_redirect_uri=schwab_redirect_uri,
         schwab_auth_builder=schwab_auth_builder,
     )
-    user_service = UserService(app_user_builder=app_user_builder)
+    user_service = UserService(
+        app_user_builder=app_user_builder,
+        waitlist_builder=waitlist_builder,
+        max_active_users=max_active_users(),
+    )
     chat_service = ChatService(
         chat_sessions_builder=chat_sessions_builder,
         chat_messages_builder=chat_messages_builder,

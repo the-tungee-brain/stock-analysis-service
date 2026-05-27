@@ -8,6 +8,7 @@ from app.auth.jwt_utils import create_access_token
 from app.services.user_service import UserService
 from app.dependencies.service_dependencies import get_user_service
 from app.models.user_models import IdentityPayload
+from app.services.access_control_errors import WaitlistRequiredError
 
 router = APIRouter()
 
@@ -48,15 +49,24 @@ def auth_google_callback(
             detail="Missing required Google profile fields",
         )
 
-    user = user_service.create_or_link_user(
-        payload=IdentityPayload(
-            identity_sub=sub,
-            identity_provider="google",
-            email=email,
-            full_name=name,
-            avatar_url=picture,
-        )
+    identity = IdentityPayload(
+        identity_sub=sub,
+        identity_provider="google",
+        email=email,
+        full_name=name,
+        avatar_url=picture,
     )
+
+    try:
+        user = user_service.create_or_link_user(payload=identity)
+    except WaitlistRequiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "waitlist",
+                "message": exc.message,
+            },
+        ) from exc
 
     access_token = create_access_token(
         user_id=str(user.identity_sub),

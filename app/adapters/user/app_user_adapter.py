@@ -50,6 +50,16 @@ class AppUserAdapter:
         finally:
             con.close()
 
+    def count_active_users(self) -> int:
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            cur.execute(f"SELECT COUNT(*) FROM {self.table_name}")
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
+        finally:
+            con.close()
+
     def list_users_with_schwab(self) -> list[AppUserItem]:
         sql = f"""
             SELECT u.*

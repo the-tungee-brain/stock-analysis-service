@@ -106,6 +106,7 @@ jobs:
               -e SCHWAB_MARKET_URI="${{ secrets.SCHWAB_MARKET_URI }}" \
               -e FINNHUB_API_KEY="${{ secrets.FINNHUB_API_KEY }}" \
               -e FINNHUB_TIMEOUT_SECONDS=15 \
+              -e MAX_ACTIVE_USERS=5 \
               -e GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
               -e JWT_SECRET_KEY="${{ secrets.JWT_SECRET_KEY }}" \
               -e REDIS_HOST="${{ secrets.REDIS_HOST }}" \
