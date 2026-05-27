@@ -1,0 +1,44 @@
+name: Morning brief
+
+on:
+  schedule:
+    # 13:00 UTC daily (~8:00 AM US Eastern in standard time)
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send morning briefs
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${API_BASE_URL}" ] || [ -z "${CRON_SECRET}" ]; then
+            echo "Missing API_BASE_URL or CRON_SECRET repository secret."
+            exit 1
+          fi
+
+          response="$(curl -sS -w "\n%{http_code}" -X POST \
+            "${API_BASE_URL}/internal/dispatch-morning-briefs" \
+            -H "X-Cron-Secret: ${CRON_SECRET}" \
+            -H "Content-Type: application/json")"
+
+          http_code="${response##*$'\n'}"
+          body="${response%$'\n'*}"
+
+          echo "HTTP ${http_code}"
+          echo "${body}"
+
+          if [ "${http_code}" -ge 400 ]; then
+            exit 1
+          fi
+
+          failed="$(echo "${body}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('failed', 0))")"
+          if [ "${failed}" != "0" ]; then
+            echo "Morning brief dispatch reported failures."
+            exit 1
+          fi
