@@ -104,8 +104,8 @@ class EarningsBuilder:
 
         calendar_by_date = self._load_calendar_by_date(
             symbol=symbol,
-            start=report_date - timedelta(days=7),
-            end=report_date + timedelta(days=7),
+            start=report_date - timedelta(days=120),
+            end=report_date + timedelta(days=120),
         )
         calendar_row = calendar_by_date.get(iso_date, {})
 
@@ -126,17 +126,28 @@ class EarningsBuilder:
                 raw_surprises,
                 calendar_row=calendar_row,
             )
+        if surprise_row is not None:
+            calendar_row = self._calendar_row_for_surprise(
+                calendar_by_date,
+                surprise_row=surprise_row,
+                report_date=report_date,
+            ) or calendar_row
 
         if not surprise_row and not calendar_row:
             return None
 
+        resolved_surprise = surprise_row or {}
         return self._build_event(
             symbol=symbol,
             report_date=report_date,
-            surprise_row=surprise_row or {},
+            surprise_row=resolved_surprise,
             calendar_row=calendar_row,
             transcript_id=transcript_id,
-            is_upcoming=report_date > date.today(),
+            is_upcoming=self._event_is_upcoming(
+                report_date,
+                surprise_row=resolved_surprise,
+                calendar_row=calendar_row,
+            ),
         )
 
     def lookup_transcript_id(self, symbol: str, report_date: date) -> str | None:
@@ -352,10 +363,18 @@ class EarningsBuilder:
         ):
             eps_surprise_pct = ((eps_actual - eps_estimate) / abs(eps_estimate)) * 100
 
-        revenue_actual = self._first_float(calendar_row.get("revenueActual"))
+        revenue_actual = (
+            None
+            if is_upcoming
+            else self._first_float(calendar_row.get("revenueActual"))
+        )
         revenue_estimate = self._first_float(calendar_row.get("revenueEstimate"))
         revenue_surprise_pct = None
-        if revenue_actual is not None and revenue_estimate:
+        if (
+            not is_upcoming
+            and revenue_actual is not None
+            and revenue_estimate
+        ):
             revenue_surprise_pct = (
                 (revenue_actual - revenue_estimate) / abs(revenue_estimate)
             ) * 100
@@ -538,6 +557,20 @@ class EarningsBuilder:
         if year:
             return str(int(year))
         return "Unknown period"
+
+    @staticmethod
+    def _event_is_upcoming(
+        report_date: date,
+        *,
+        surprise_row: dict[str, Any],
+        calendar_row: dict[str, Any],
+    ) -> bool:
+        """A quarter with EPS actuals is reported even if the calendar date is still in the future."""
+        if surprise_row.get("actual") is not None:
+            return False
+        if calendar_row.get("epsActual") is not None:
+            return False
+        return report_date > date.today()
 
     @staticmethod
     def _beat_label(
