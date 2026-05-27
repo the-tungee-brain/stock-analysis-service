@@ -182,15 +182,30 @@ def simulate_forward_projection(
             total_collected += year_dps * shares
 
         final_dps = base_dps * ((1.0 + div_rate) ** project_years)
+        annual_income_latest = round(final_dps * shares, 2)
+        advanced = None
+        if not reinvest_dividends and share_price is not None and share_price > 0:
+            final_price = share_price * ((1.0 + price_rate) ** project_years)
+            advanced = {
+                "enabled": True,
+                "initial_shares": round(shares, 2),
+                "final_shares": round(shares, 2),
+                "share_price_at_start": round(share_price, 2),
+                "share_price_latest": round(final_price, 2),
+                "price_cagr_pct": round(price_cagr_pct or 0.0, 2),
+                "annual_income_latest_drip": annual_income_latest,
+                "portfolio_value_latest": round(shares * final_price, 2),
+                "total_dividends_reinvested": 0.0,
+            }
         return {
             "start_year": today_year,
             "latest_year": end_year,
             "project_years": project_years,
             "dividend_cagr_pct": dividend_cagr_pct,
             "annual_income_start": annual_income_start,
-            "annual_income_latest": round(final_dps * shares, 2),
+            "annual_income_latest": annual_income_latest,
             "total_collected": round(total_collected, 2),
-            "advanced": None,
+            "advanced": advanced,
         }
 
     price = share_price

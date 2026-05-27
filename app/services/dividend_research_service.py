@@ -115,7 +115,7 @@ class DividendResearchService:
                     dividend_rows.append(item)
 
         resolved_price_cagr = price_cagr_pct
-        if reinvest_dividends and resolved_price_cagr is None:
+        if resolved_price_cagr is None and resolved_share_price is not None:
             resolved_price_cagr = fetch_price_cagr_pct(symbol, lookback_years=5)
 
         scenario_data = build_scenario(

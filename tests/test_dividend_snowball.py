@@ -83,6 +83,24 @@ def test_simulate_forward_projection_flat_shares():
     assert result["total_collected"] > result["annual_income_start"]
 
 
+def test_simulate_forward_projection_flat_shares_with_price_growth():
+    current_year = 2026
+    result = simulate_forward_projection(
+        shares=100,
+        project_years=10,
+        base_dps=0.995,
+        dividend_cagr_pct=5.0,
+        share_price=80,
+        price_cagr_pct=8.0,
+        reinvest_dividends=False,
+        current_year=current_year,
+    )
+    assert result["advanced"] is not None
+    assert result["advanced"]["final_shares"] == result["advanced"]["initial_shares"]
+    assert result["advanced"]["portfolio_value_latest"] > 100 * 80
+    assert result["advanced"]["total_dividends_reinvested"] == 0.0
+
+
 def test_simulate_forward_projection_with_drip():
     current_year = 2026
     result = simulate_forward_projection(
