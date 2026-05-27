@@ -175,3 +175,7 @@ class SchwabAuthService:
 
         now = datetime.now(timezone.utc)
         return now < refresh_expires_at
+
+    def disconnect_user(self, user_id: str) -> None:
+        self.schwab_auth_builder.delete_cache(key=self._token_key(user_id=user_id))
+        self.schwab_auth_builder.delete_token_by_user_id(user_id=user_id)

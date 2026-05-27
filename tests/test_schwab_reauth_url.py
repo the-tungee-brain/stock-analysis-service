@@ -47,3 +47,14 @@ def test_reauth_http_detail_state_is_not_user_id(schwab_auth_service):
     detail = schwab_auth_service.reauth_http_detail("user-123", "reauth needed")
 
     assert "state=user-123" not in detail["authorization_url"]
+
+
+def test_disconnect_user_clears_cached_and_persisted_tokens(schwab_auth_service):
+    schwab_auth_service.disconnect_user(user_id="user-123")
+
+    schwab_auth_service.schwab_auth_builder.delete_cache.assert_called_once_with(
+        key="token:user-123"
+    )
+    schwab_auth_service.schwab_auth_builder.delete_token_by_user_id.assert_called_once_with(
+        user_id="user-123"
+    )

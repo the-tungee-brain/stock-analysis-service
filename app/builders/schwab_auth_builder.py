@@ -67,3 +67,6 @@ class SchwabAuthBuilder:
 
     def get_token_by_user_id(self, user_id: str) -> SchwabAuthTokenItem:
         return self.schwab_auth_access_token_adapter.get_by_user_id(user_id=user_id)
+
+    def delete_token_by_user_id(self, user_id: str) -> int:
+        return self.schwab_auth_access_token_adapter.delete_by_user_id(user_id=user_id)

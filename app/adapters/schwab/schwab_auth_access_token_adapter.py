@@ -93,3 +93,15 @@ class SchwabAuthAccessTokenAdapter:
             return self.dict_to_item(row_dict)
         finally:
             con.close()
+
+    def delete_by_user_id(self, user_id: str) -> int:
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            sql = f"DELETE FROM {self.table_name} WHERE user_id = :user_id"
+            cur.execute(sql, {"user_id": user_id})
+            rowcount = cur.rowcount
+            con.commit()
+            return rowcount
+        finally:
+            con.close()
