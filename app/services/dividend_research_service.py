@@ -114,9 +114,14 @@ class DividendResearchService:
                 if isinstance(item, dict):
                     dividend_rows.append(item)
 
-        resolved_price_cagr = price_cagr_pct
-        if resolved_price_cagr is None and resolved_share_price is not None:
-            resolved_price_cagr = fetch_price_cagr_pct(symbol, lookback_years=5)
+        symbol_upper = str(data.get("ticker") or symbol).upper()
+        resolved_price_cagr = (
+            price_cagr_pct
+            if price_cagr_pct is not None
+            else fetch_price_cagr_pct(symbol_upper, lookback_years=5)
+        )
+        if resolved_share_price is not None and resolved_price_cagr is None:
+            resolved_price_cagr = 0.0
 
         scenario_data = build_scenario(
             dividends=dividend_rows,
@@ -159,8 +164,8 @@ class DividendResearchService:
             start_year=history_start_year,
             share_price=resolved_share_price,
             investment_usd=resolved_investment,
-            price_cagr_pct=price_cagr_pct,
-            symbol=str(data.get("ticker") or symbol).upper(),
+            price_cagr_pct=resolved_price_cagr,
+            symbol=symbol_upper,
         )
         historical_backtest = (
             DividendHistoricalBacktest.model_validate(historical_data)
@@ -176,6 +181,7 @@ class DividendResearchService:
             cagr_5y_pct=compute_dividend_cagr_pct(annual_totals, lookback_years=5),
             cagr_10y_pct=compute_dividend_cagr_pct(annual_totals, lookback_years=10),
             dividend_yield_pct=dividend_yield_pct,
+            price_cagr_pct=resolved_price_cagr,
             annual_income=[
                 AnnualDividendIncome.model_validate(row)
                 for row in annual_income_on_shares(
