@@ -124,13 +124,18 @@ class FundamentalsBuilder:
 
     @staticmethod
     def _fmt_expense_ratio(info: dict) -> str | None:
-        for key in ("annualReportExpenseRatio", "netExpenseRatio", "expenseRatio"):
+        annual = info.get("annualReportExpenseRatio")
+        if isinstance(annual, (int, float)) and annual > 0:
+            return f"{abs(annual) * 100:.2f}%"
+
+        for key in ("netExpenseRatio", "expenseRatio"):
             value = info.get(key)
-            if value is None or not isinstance(value, (int, float)):
+            if value is None or not isinstance(value, (int, float)) or value <= 0:
                 continue
-            if 0 < abs(value) < 0.2:
-                return f"{value * 100:.2f}%"
-            return f"{value:.2f}%"
+            abs_value = abs(value)
+            if abs_value < 0.01:
+                return f"{abs_value * 100:.2f}%"
+            return f"{abs_value:.2f}%"
         return None
 
     def _fmt_multiple(self, value: float | None) -> str | None:
