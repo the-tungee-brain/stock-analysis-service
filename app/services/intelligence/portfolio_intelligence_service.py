@@ -6,7 +6,7 @@ from app.adapters.cache.llm_output_cache import LLMOutputCache
 from app.core.llm_routes import LLMRoute
 from app.models.company_research_models import AISummary, ResearchContext
 from app.broker.option_chain_table import build_option_chain_table, DEFAULT_OPTION_CHAIN_STRIKE_COUNT
-from app.broker.sector_labels import normalize_sector_label
+from app.broker.sector_labels import ETF_SECTOR_LABEL, sector_label_for_holding
 from app.models.intelligence_models import (
     CachedResearchSnippet,
     HoldingCompanyNewsItem,
@@ -207,6 +207,7 @@ class PortfolioIntelligenceService:
         positions: list[Position],
         account: SchwabAccounts,
         sector_by_symbol: dict[str, str] | None = None,
+        asset_type_by_symbol: dict[str, str] | None = None,
         macro_snapshots: dict[str, PromptQuoteSnapshot] | None = None,
         top_holdings_research: list[ResearchContext] | None = None,
         suggested_actions: list | None = None,
@@ -216,6 +217,7 @@ class PortfolioIntelligenceService:
             positions=positions,
             account=account,
             sector_by_symbol=sector_by_symbol or {},
+            asset_type_by_symbol=asset_type_by_symbol or {},
         )
         sector_map = {sw.sector: sw.weight_pct for sw in sector_weights}
 
@@ -324,6 +326,7 @@ class PortfolioIntelligenceService:
         positions: list[Position],
         account: SchwabAccounts,
         sector_by_symbol: dict[str, str],
+        asset_type_by_symbol: dict[str, str],
     ) -> list[SectorWeight]:
         liquidation = account.securitiesAccount.currentBalances.liquidationValue
         if liquidation <= 0:
@@ -332,7 +335,12 @@ class PortfolioIntelligenceService:
         by_sector: dict[str, tuple[float, list[str]]] = {}
         for position in positions:
             symbol = self._position_symbol(position)
-            sector = normalize_sector_label(sector_by_symbol.get(symbol.upper()))
+            sector = sector_label_for_holding(
+                symbol=symbol,
+                instrument_asset_type=position.instrument.assetType,
+                sector_by_symbol=sector_by_symbol,
+                asset_type_by_symbol=asset_type_by_symbol,
+            )
             mv = abs(position.marketValue)
             current = by_sector.get(sector, (0.0, []))
             symbols = current[1]

@@ -18,6 +18,7 @@ from app.broker.portfolio_diversification import (
     build_portfolio_allocation_precomputed,
     format_diversification_summary_block,
 )
+from app.broker.sector_labels import build_asset_type_by_symbol
 from app.broker.strategy_portfolio_guidance import format_strategy_portfolio_guidance_block
 from app.broker.strategy_symbol_alignment import (
     format_strategy_symbol_alignment_block,
@@ -741,6 +742,7 @@ class PortfolioAnalysisService:
             )
             research_contexts = []
             sector_by_symbol: dict[str, str] = {}
+            research_asset_types: dict[str, str] = {}
 
             for sym in top_symbols:
                 try:
@@ -754,8 +756,15 @@ class PortfolioAnalysisService:
                     research_contexts.append(ctx)
                     if ctx.snapshot and ctx.snapshot.sector:
                         sector_by_symbol[sym] = ctx.snapshot.sector
+                    if ctx.asset_type:
+                        research_asset_types[sym] = ctx.asset_type
                 except Exception:
                     continue
+
+            asset_type_by_symbol = build_asset_type_by_symbol(
+                positions,
+                research_asset_types=research_asset_types,
+            )
 
             macro_snapshots = self.market_service.get_enriched_quote_snapshot(
                 access_token=access_token,
@@ -787,6 +796,7 @@ class PortfolioAnalysisService:
                 positions=positions,
                 account=account,
                 sector_by_symbol=sector_by_symbol,
+                asset_type_by_symbol=asset_type_by_symbol,
                 macro_snapshots=macro_snapshots,
                 top_holdings_research=research_contexts,
                 suggested_actions=actions,
