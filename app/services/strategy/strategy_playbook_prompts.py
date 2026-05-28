@@ -13,19 +13,28 @@ PLAYBOOK_RESEARCH_CHAT_SYSTEM_MESSAGE = dedent("""
 
     # Style (CRITICAL)
     - Target ~220–320 words: decisive, not a company textbook, but name the actual factors behind the call.
+    - Write in plain everyday language — like explaining the decision to a smart friend, not writing a report.
+    - Weave facts and why they matter into natural sentences. Do NOT label parts with "(what)", "(why)",
+      "what → why", or similar meta tags in parentheses.
+    - Briefly define jargon when you use it (e.g. "free cash flow — cash left after running the business").
     - Do NOT give a generic industry overview or investing 101.
-    - Pull from the provided research data: business quality, SEC/filing metrics, and recent headlines.
-    - Every factor bullet must state WHAT from the data and WHY it affects the hold decision.
-    - Include specific numbers, dates, or headline themes when the data provides them; say what's missing if not.
+    - Pull from the provided research data: business quality, yfinance financial statements (when present),
+      SEC filing metrics, and recent headlines.
+    - Include specific numbers, dates, or headline themes when the data provides them; say plainly when data is missing.
     - No "Short answer:", "(plain English)", or extra section headers beyond the required format.
+
+    # Financials source priority
+    - Prefer yfinance income statement, balance sheet, and cash flow tables for revenue, margins, debt,
+      and free cash flow trends.
+    - Use SEC filed metrics to cross-check or fill gaps; do not invent figures.
 
     # Required output format
     **Verdict:** [Comfortable holding / Cautious / Avoid owning] — one direct sentence
 
     **What drives this:**
-    - **Business:** competitive position / model durability and why it matters for a multi-year hold
-    - **Financials:** 1–2 filing-backed metrics (revenue, margin, debt, cash flow, payout) with numbers when available
-    - **News:** 1–2 recent headline themes and whether they support or weaken holding
+    - **Business:** competitive position and model durability — why you'd be okay owning shares for years
+    - **Financials:** 2–3 concrete metrics with numbers (revenue growth, margins, debt, FCF, payout) in plain English
+    - **News:** 1–2 recent headline themes and how they affect your confidence in holding
     - **Strategy fit:** why this does or doesn't fit assignment / dividend / core-hold for their playbook
 
     **What would change my mind:** one sentence naming a concrete trigger
@@ -238,17 +247,18 @@ def _build_playbook_hold_verdict_prompt(
     lines = [
         f"I'm evaluating {symbol} for {playbook}. {context}",
         "",
-        "Use the company research data (business context, SEC filings, news, price) to justify the verdict.",
-        "Name the specific business, financial, and news factors — not a generic company description.",
+        "Use the research data — especially yfinance financial statements, SEC filings, news, and price — "
+        "to justify the verdict. Name specific business, financial, and news factors in plain English.",
+        "Do not use (what) or (why) labels in your answer.",
         "",
         "Respond in this format (~220–320 words):",
         "",
         "**Verdict:** [Comfortable holding / Cautious / Avoid owning] — one direct sentence",
         "",
         "**What drives this:**",
-        "- **Business:** competitive position / model durability and why it matters for a multi-year hold",
-        "- **Financials:** filing-backed metrics with numbers when available (revenue, margin, debt, FCF, payout)",
-        "- **News:** recent headline theme(s) and whether they support or weaken holding",
+        "- **Business:** competitive position / model durability — why you'd be okay owning shares for years",
+        "- **Financials:** yfinance/SEC metrics with numbers (revenue, margin, debt, FCF, payout) explained simply",
+        "- **News:** recent headline theme(s) and how they affect your confidence in holding",
         "- **Strategy fit:** why this works or doesn't for my playbook strategy",
         "",
         "**What would change my mind:** one sentence with a concrete trigger",

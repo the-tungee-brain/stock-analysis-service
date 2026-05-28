@@ -468,6 +468,29 @@ class PromptEnrichmentService:
                 + self._format_sec_ratio_trends_table(ctx.sec_ratio_trends[:max_trends])
             )
 
+        if include_market_fundamentals and ctx.yfinance_financials:
+            financials_block = self._format_financials_block(ctx.yfinance_financials)
+            if financials_block:
+                strength = ctx.yfinance_financials.strength
+                strength_lines = [
+                    "## Financial health summary (yfinance statements)",
+                    f"- Rating: {strength.rating} ({strength.score}/100)",
+                    f"- {strength.headline}",
+                ]
+                if strength.highlights:
+                    strength_lines.append(
+                        "- Highlights: " + "; ".join(strength.highlights[:4])
+                    )
+                if strength.strengths:
+                    strength_lines.append(
+                        "- Strengths: " + "; ".join(strength.strengths[:3])
+                    )
+                if strength.risks:
+                    strength_lines.append(
+                        "- Risks: " + "; ".join(strength.risks[:3])
+                    )
+                sections.append(f"{financials_block}\n\n" + "\n".join(strength_lines))
+
         if include_market_fundamentals and ctx.fundamentals:
             sections.append(
                 "## Market data fundamentals (estimates)\n"

@@ -233,6 +233,9 @@ class ResearchContext(BaseModel):
     sec_company_info: str | None = None
     peers: list[str] = Field(default_factory=list)
     earnings: EarningsContext | None = None
+    yfinance_financials: FinancialsPackage | None = Field(
+        default=None, serialization_alias="yfinanceFinancials"
+    )
     etf_holdings: EtfHoldingsContext | None = Field(
         default=None, serialization_alias="etfHoldings"
     )

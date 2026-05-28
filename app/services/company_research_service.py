@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from app.adapters.cache.research_context_cache import ResearchContextCache
 from app.builders.fundamentals_builder import FundamentalsBuilder
+from app.builders.yfinance_financials_builder import YFinanceFinancialsBuilder
 from app.builders.ticker_symbol_builder import TickerSymbolBuilder
 from app.models.company_research_models import (
     EarningsContext,
@@ -34,6 +35,7 @@ class CompanyResearchService:
         enriched_news_service: EnrichedNewsService | None = None,
         ticker_symbol_builder: TickerSymbolBuilder | None = None,
         etf_research_service: EtfResearchService | None = None,
+        yfinance_financials_builder: YFinanceFinancialsBuilder | None = None,
     ):
         self.company_profile_service = company_profile_service
         self.market_service = market_service
@@ -45,6 +47,7 @@ class CompanyResearchService:
         self.enriched_news_service = enriched_news_service
         self.ticker_symbol_builder = ticker_symbol_builder
         self.etf_research_service = etf_research_service
+        self.yfinance_financials_builder = yfinance_financials_builder
 
     @staticmethod
     def merge_fundamentals(
@@ -352,6 +355,15 @@ class CompanyResearchService:
                     lambda: self.earnings_service.build_research_context(symbol=symbol),
                 )
             )
+            future_yfinance_financials = (
+                None
+                if is_etf or self.yfinance_financials_builder is None
+                else executor.submit(
+                    self._run_loader,
+                    "yfinance_financials",
+                    lambda: self.yfinance_financials_builder.build(symbol=symbol),
+                )
+            )
             future_etf_holdings = (
                 executor.submit(
                     self._run_loader,
@@ -417,6 +429,12 @@ class CompanyResearchService:
             if gap:
                 data_gaps.append(gap)
 
+            yfinance_financials = None
+            if future_yfinance_financials is not None:
+                yfinance_financials, gap = future_yfinance_financials.result()
+                if gap:
+                    data_gaps.append(gap)
+
             etf_holdings = None
             if future_etf_holdings is not None:
                 etf_holdings, gap = future_etf_holdings.result()
@@ -437,6 +455,7 @@ class CompanyResearchService:
             sec_company_info=sec_company_info,
             peers=peers,
             earnings=earnings,
+            yfinance_financials=yfinance_financials,
             etf_holdings=etf_holdings,
             data_gaps=data_gaps,
         )

@@ -302,6 +302,7 @@ async def lifespan(app: FastAPI):
         enriched_news_service=enriched_news_service,
         ticker_symbol_builder=ticker_symbol_builder,
         etf_research_service=etf_research_service,
+        yfinance_financials_builder=yfinance_financials_builder,
     )
     peer_comparison_service = PeerComparisonService(
         yfinance_adapter=yfinance_adapter,
