@@ -298,7 +298,7 @@ async def get_strategy_recommendations(
 async def get_strategy_stock_screener(
     strategy: InvestmentStrategy,
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=50, alias="pageSize"),
+    page_size: int = Query(default=30, ge=1, le=50, alias="pageSize"),
     preset_id: str | None = Query(default=None, alias="presetId"),
     min_market_cap: int | None = Query(default=None, alias="minMarketCap", ge=0),
     max_pe: float | None = Query(default=None, alias="maxPe", gt=0),
@@ -310,8 +310,6 @@ async def get_strategy_stock_screener(
     strategy_stock_screener_service: StrategyStockScreenerService = Depends(
         get_strategy_stock_screener_service
     ),
-    schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
-    portfolio_service: PortfolioService = Depends(get_portfolio_service),
 ) -> StrategyStockScreenerResult:
     profile = await asyncio.to_thread(
         strategy_journey_service.get_profile,
@@ -322,12 +320,6 @@ async def get_strategy_stock_screener(
 
     if not strategy_stock_screener_service.supports_stock_screener(strategy):
         raise HTTPException(status_code=404, detail="Strategy does not support stock screener")
-
-    positions, _account, _access_token, _schwab_linked = await _load_schwab_positions(
-        user_id=user_id,
-        schwab_auth_service=schwab_auth_service,
-        portfolio_service=portfolio_service,
-    )
 
     filter_overrides: dict[str, object] = {}
     if min_market_cap is not None:
@@ -353,7 +345,6 @@ async def get_strategy_stock_screener(
         overrides=filter_overrides or None,
         page=page,
         page_size=page_size,
-        held_symbols=_held_symbols(positions),
     )
     if screener is None:
         raise HTTPException(

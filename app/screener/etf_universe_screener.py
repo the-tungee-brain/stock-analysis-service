@@ -66,7 +66,6 @@ def _passes_etf_structure(
 def screen_etf_preset(
     preset: ScreenerPreset,
     *,
-    exclude: set[str],
     limit: int,
 ) -> tuple[list[StrategyScreenerQuote], int]:
     structure = _structure_filters(preset)
@@ -76,7 +75,7 @@ def screen_etf_preset(
     quotes: list[StrategyScreenerQuote] = []
     for symbol in symbols:
         upper = str(symbol).upper()
-        if not upper or upper in exclude:
+        if not upper:
             continue
         try:
             info = yf.Ticker(upper).info or {}

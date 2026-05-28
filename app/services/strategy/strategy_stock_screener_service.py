@@ -41,9 +41,13 @@ WHEEL_LIKE = frozenset(
 )
 
 DEFAULT_SCREEN_SIZE = 100
-DEFAULT_PAGE_SIZE = 20
+DEFAULT_PAGE_SIZE = 30
 MAX_PAGE_SIZE = 50
 MAX_SCREEN_SIZE = 250
+YF_SCREEN_SORT: dict[str, Any] = {
+    "sortField": "intradaymarketcap",
+    "sortAsc": False,
+}
 
 # API override keys -> preset equity clause field names.
 OVERRIDE_FIELD_MAP = {
@@ -64,38 +68,6 @@ class StrategyStockScreenerService:
             InvestmentStrategy.DIVIDEND,
             InvestmentStrategy.ETF_CORE,
         }
-
-    @staticmethod
-    def _profile_symbols_for_strategy(
-        profile: UserInvestmentProfile,
-        strategy: InvestmentStrategy,
-    ) -> list[str]:
-        if strategy in WHEEL_LIKE and profile.wheel:
-            return list(profile.wheel.wheel_symbols or [])
-        if strategy == InvestmentStrategy.DIVIDEND and profile.dividend:
-            return list(profile.dividend.dividend_symbols or [])
-        if strategy == InvestmentStrategy.ETF_CORE and profile.etf_core:
-            return list((profile.etf_core.target_allocation or {}).keys())
-        return []
-
-    @staticmethod
-    def existing_symbols(
-        profile: UserInvestmentProfile,
-        strategy: InvestmentStrategy,
-        *,
-        held_symbols: list[str] | None = None,
-    ) -> set[str]:
-        symbols = {
-            symbol.upper()
-            for symbol in StrategyStockScreenerService._profile_symbols_for_strategy(
-                profile, strategy
-            )
-            if symbol
-        }
-        for symbol in held_symbols or []:
-            if symbol:
-                symbols.add(symbol.upper())
-        return symbols
 
     @staticmethod
     def resolve_preset(
@@ -189,7 +161,6 @@ class StrategyStockScreenerService:
         overrides: dict[str, Any] | None = None,
         page: int = 1,
         page_size: int = DEFAULT_PAGE_SIZE,
-        held_symbols: list[str] | None = None,
     ) -> StrategyStockScreenerResult | None:
         if not self.supports_stock_screener(strategy):
             return None
@@ -203,7 +174,6 @@ class StrategyStockScreenerService:
         resolved_page = max(1, page)
         resolved_page_size = max(1, min(page_size, MAX_PAGE_SIZE))
         offset = (resolved_page - 1) * resolved_page_size
-        exclude = self.existing_symbols(profile, strategy, held_symbols=held_symbols)
 
         try:
             if preset.equity_query is not None:
@@ -212,8 +182,7 @@ class StrategyStockScreenerService:
                     query,
                     size=resolved_page_size,
                     offset=offset,
-                    sortField="intradaymarketcap",
-                    sortAsc=False,
+                    **YF_SCREEN_SORT,
                 )
                 quotes_raw = raw.get("quotes") or []
                 total = int(raw.get("total") or len(quotes_raw))
@@ -221,12 +190,10 @@ class StrategyStockScreenerService:
                     quote
                     for item in quotes_raw
                     if (quote := self._map_equity_quote(item)).symbol
-                    and quote.symbol not in exclude
                 ]
             else:
                 quotes, total = screen_etf_preset(
                     preset,
-                    exclude=exclude,
                     limit=resolved_page_size,
                 )
                 resolved_page = 1
@@ -245,7 +212,6 @@ class StrategyStockScreenerService:
         sections = self._companion_sections(
             strategy=strategy,
             preset_id=preset_id,
-            exclude=exclude,
         )
 
         return StrategyStockScreenerResult(
@@ -267,7 +233,6 @@ class StrategyStockScreenerService:
         *,
         strategy: InvestmentStrategy,
         preset_id: str | None,
-        exclude: set[str],
     ) -> list[ScreenerResultSection]:
         if preset_id is not None:
             return []
@@ -279,7 +244,6 @@ class StrategyStockScreenerService:
                 continue
             quotes, total = screen_etf_preset(
                 companion,
-                exclude=exclude,
                 limit=20,
             )
             sections.append(

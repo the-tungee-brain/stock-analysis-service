@@ -61,31 +61,34 @@ def test_profile_adjustments_change_wheel_preset():
     assert market_cap_clause(aggressive) == 2_000_000_000
 
 
-def test_screen_stocks_excludes_existing_symbols():
-    raw = {
-        "total": 3,
-        "quotes": [
-            {
-                "symbol": "AAPL",
-                "shortName": "Apple Inc.",
-                "marketCap": 3_000_000_000_000,
-                "trailingPE": 28.5,
-                "dividendYield": 0.004,
-                "regularMarketPrice": 190.0,
-            },
-            {
-                "symbol": "MSFT",
-                "shortName": "Microsoft Corporation",
-                "marketCap": 3_100_000_000_000,
-                "trailingPE": 32.1,
-                "dividendYield": 0.007,
-                "regularMarketPrice": 420.0,
-            },
-        ],
-    }
+def test_screen_stocks_includes_existing_symbols():
+    quotes = [
+        {
+            "symbol": "AAPL",
+            "shortName": "Apple Inc.",
+            "marketCap": 3_000_000_000_000,
+            "trailingPE": 28.5,
+            "dividendYield": 0.004,
+            "regularMarketPrice": 190.0,
+        },
+        {
+            "symbol": "MSFT",
+            "shortName": "Microsoft Corporation",
+            "marketCap": 3_100_000_000_000,
+            "trailingPE": 32.1,
+            "dividendYield": 0.007,
+            "regularMarketPrice": 420.0,
+        },
+    ]
+
+    def fake_screen(*_args, **_kwargs):
+        return {"total": 2, "quotes": quotes}
 
     service = StrategyStockScreenerService()
-    with patch("app.services.strategy.strategy_stock_screener_service.yf.screen", return_value=raw):
+    with patch(
+        "app.services.strategy.strategy_stock_screener_service.yf.screen",
+        side_effect=fake_screen,
+    ):
         result = service.screen_stocks(
             profile=_wheel_profile(),
             strategy=InvestmentStrategy.WHEEL,
@@ -94,7 +97,7 @@ def test_screen_stocks_excludes_existing_symbols():
         )
 
     assert result is not None
-    assert [quote.symbol for quote in result.quotes] == ["MSFT"]
+    assert [quote.symbol for quote in result.quotes] == ["AAPL", "MSFT"]
     assert result.preset.id == "wheel_stock"
 
 
