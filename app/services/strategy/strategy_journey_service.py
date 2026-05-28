@@ -432,6 +432,26 @@ class StrategyJourneyService:
         )
 
     @staticmethod
+    def share_quantity_for_symbol(
+        symbol: str | None,
+        positions: list[Position],
+    ) -> float:
+        if not symbol:
+            return 0.0
+        symbol_upper = symbol.upper()
+        share_qty = 0.0
+        for position in positions:
+            instrument = position.instrument
+            underlying = (
+                instrument.underlyingSymbol or instrument.symbol
+            ).upper()
+            if underlying != symbol_upper:
+                continue
+            if instrument.assetType in {"EQUITY", "COLLECTIVE_INVESTMENT"}:
+                share_qty += position.longQuantity - position.shortQuantity
+        return share_qty
+
+    @staticmethod
     def detect_wheel_phase(
         *,
         symbol: str | None,
@@ -468,8 +488,6 @@ class StrategyJourneyService:
             return WheelPhase.ASSIGNED_SHARES
         if short_put:
             return WheelPhase.SHORT_PUT_OPEN
-        if share_qty > 0:
-            return WheelPhase.ASSIGNED_SHARES
         return WheelPhase.READY_FOR_CSP
 
     @staticmethod

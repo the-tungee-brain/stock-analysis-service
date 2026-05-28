@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.broker.portfolio_diversification import _aggregate_symbol_weights
+from app.broker.strategy_detector import SHARES_PER_OPTION_CONTRACT
 from app.broker.strategy_symbol_alignment import strategy_symbol_list
 from app.core.prompts import AnalysisAction
 from app.models.schwab_models import Position, SchwabAccounts
@@ -72,14 +73,24 @@ def _portfolio_weight_pct(
     return None
 
 
+def _share_quantity(symbol: str, positions: list[Position]) -> float:
+    from app.services.strategy.strategy_journey_service import StrategyJourneyService
+
+    return StrategyJourneyService.share_quantity_for_symbol(symbol, positions)
+
+
 def _wheel_status_label(
     *,
     strategy: InvestmentStrategy,
     phase: WheelPhase,
     held: bool,
+    share_qty: float = 0.0,
 ) -> str:
+    partial_lot = 0 < share_qty < SHARES_PER_OPTION_CONTRACT
     if strategy == InvestmentStrategy.CSP_INCOME:
         if phase == WheelPhase.READY_FOR_CSP:
+            if partial_lot:
+                return f"Partial lot ({int(share_qty)} sh) — CSP favored"
             return "Ready to sell put"
         if phase == WheelPhase.SHORT_PUT_OPEN:
             return "Put open — monitor"
@@ -90,10 +101,14 @@ def _wheel_status_label(
     if strategy == InvestmentStrategy.COVERED_CALL:
         if phase == WheelPhase.READY_FOR_CSP and not held:
             return "Need shares for CC"
+        if phase == WheelPhase.READY_FOR_CSP and partial_lot:
+            return f"Partial lot ({int(share_qty)} sh) — need 100 for CC"
         if phase == WheelPhase.ASSIGNED_SHARES:
             return "Ready to write call"
         if phase == WheelPhase.SHORT_CALL_OPEN:
             return "Call open — monitor"
+    if phase == WheelPhase.READY_FOR_CSP and partial_lot:
+        return f"Partial lot ({int(share_qty)} sh) — CSP favored"
     return WHEEL_PHASE_LABELS.get(phase, phase.value)
 
 
@@ -117,17 +132,51 @@ def next_action_for_symbol(
     symbol: str,
     wheel_phase: WheelPhase | None = None,
     held: bool = False,
+    share_qty: float = 0.0,
     csp_candidates: list[dict] | None = None,
     covered_call_candidates: list[dict] | None = None,
 ) -> StrategyNextAction | None:
     if strategy in WHEEL_LIKE and wheel_phase is not None:
+        partial_lot = 0 < share_qty < SHARES_PER_OPTION_CONTRACT
+
         if wheel_phase == WheelPhase.READY_FOR_CSP:
+            if partial_lot:
+                reason = (
+                    f"You hold {int(share_qty)} shares — need 100 for a covered call. "
+                    "Selling a cash-secured put can generate income while you build the position."
+                )
+                if csp_candidates:
+                    top = csp_candidates[0]
+                    return StrategyNextAction(
+                        type="options",
+                        title=f"Consider CSP on {symbol}",
+                        reason=top.get("rationale") or reason,
+                        symbol=symbol,
+                        metadata=top,
+                    )
+                return StrategyNextAction(
+                    type="research",
+                    title=f"Consider CSP on {symbol}",
+                    reason=reason,
+                    symbol=symbol,
+                    action_id=AnalysisAction.RISK_CHECK.value,
+                )
             if strategy == InvestmentStrategy.COVERED_CALL:
                 return StrategyNextAction(
                     type="buy",
                     title=f"Buy {symbol} before writing calls",
                     reason="You need at least 100 shares to sell a covered call.",
                     symbol=symbol,
+                )
+            if csp_candidates:
+                top = csp_candidates[0]
+                return StrategyNextAction(
+                    type="options",
+                    title=f"Consider CSP on {symbol}",
+                    reason=top.get("rationale")
+                    or "Top cash-secured put candidate from your option chain.",
+                    symbol=symbol,
+                    metadata=top,
                 )
             return StrategyNextAction(
                 type="research",
@@ -145,6 +194,16 @@ def next_action_for_symbol(
                 action_id=AnalysisAction.ASSIGNMENT_RISK.value,
             )
         if wheel_phase == WheelPhase.ASSIGNED_SHARES:
+            if share_qty < SHARES_PER_OPTION_CONTRACT:
+                return next_action_for_symbol(
+                    strategy=strategy,
+                    symbol=symbol,
+                    wheel_phase=WheelPhase.READY_FOR_CSP,
+                    held=held,
+                    share_qty=share_qty,
+                    csp_candidates=csp_candidates,
+                    covered_call_candidates=None,
+                )
             if strategy == InvestmentStrategy.CSP_INCOME:
                 return StrategyNextAction(
                     type="monitor",
@@ -155,7 +214,7 @@ def next_action_for_symbol(
             action = StrategyNextAction(
                 type="options",
                 title=f"Sell a covered call on {symbol}",
-                reason="You hold shares — the next wheel leg is selling an out-of-the-money call.",
+                reason="You hold at least 100 shares — the next wheel leg is selling an out-of-the-money call.",
                 symbol=symbol,
             )
             if covered_call_candidates:
@@ -176,16 +235,6 @@ def next_action_for_symbol(
                 reason="If called away, you're ready to sell another cash-secured put.",
                 symbol=symbol,
                 action_id=AnalysisAction.ASSIGNMENT_RISK.value,
-            )
-        if wheel_phase == WheelPhase.READY_FOR_CSP and csp_candidates:
-            top = csp_candidates[0]
-            return StrategyNextAction(
-                type="options",
-                title=f"Consider CSP on {symbol}",
-                reason=top.get("rationale")
-                or "Top cash-secured put candidate from your option chain.",
-                symbol=symbol,
-                metadata=top,
             )
         return None
 
@@ -246,6 +295,7 @@ def build_symbol_statuses(
     for symbol in symbols:
         upper = symbol.upper()
         held = _symbol_is_held(upper, positions)
+        share_qty = _share_quantity(upper, positions)
         weight = _portfolio_weight_pct(upper, positions=positions, account=account)
         wheel_phase = None
         status_label = "On your playbook"
@@ -265,12 +315,14 @@ def build_symbol_statuses(
                 strategy=strategy,
                 phase=wheel_phase,
                 held=held,
+                share_qty=share_qty,
             )
             priority = WHEEL_PHASE_PRIORITY.get(wheel_phase, 50)
             use_csp = csp_candidates if upper == (focus_symbol or "").upper() else None
+            cc_eligible = share_qty >= SHARES_PER_OPTION_CONTRACT
             use_cc = (
                 covered_call_candidates
-                if upper == (focus_symbol or "").upper()
+                if upper == (focus_symbol or "").upper() and cc_eligible
                 else None
             )
             action = next_action_for_symbol(
@@ -278,6 +330,7 @@ def build_symbol_statuses(
                 symbol=upper,
                 wheel_phase=wheel_phase,
                 held=held,
+                share_qty=share_qty,
                 csp_candidates=use_csp,
                 covered_call_candidates=use_cc,
             )

@@ -247,10 +247,15 @@ async def get_strategy_recommendations(
                     candidate.model_dump(mode="json", by_alias=True)
                     for candidate in intelligence.options_scorecard.csp_candidates
                 ]
-                covered_call_candidates = [
-                    candidate.model_dump(mode="json", by_alias=True)
-                    for candidate in intelligence.options_scorecard.covered_call_candidates
-                ]
+                share_qty = StrategyJourneyService.share_quantity_for_symbol(
+                    focus_symbol,
+                    positions,
+                )
+                if share_qty >= SHARES_PER_OPTION_CONTRACT:
+                    covered_call_candidates = [
+                        candidate.model_dump(mode="json", by_alias=True)
+                        for candidate in intelligence.options_scorecard.covered_call_candidates
+                    ]
         except Exception:
             pass
 

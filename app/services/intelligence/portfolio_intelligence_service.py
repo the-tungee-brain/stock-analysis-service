@@ -179,6 +179,20 @@ class PortfolioIntelligenceService:
                 short_put_strikes=short_puts,
                 profile=profile,
             )
+            if options_scorecard is not None:
+                from app.broker.strategy_detector import SHARES_PER_OPTION_CONTRACT
+                from app.services.strategy.strategy_journey_service import (
+                    StrategyJourneyService,
+                )
+
+                share_qty = StrategyJourneyService.share_quantity_for_symbol(
+                    symbol,
+                    positions,
+                )
+                if share_qty < SHARES_PER_OPTION_CONTRACT:
+                    options_scorecard = options_scorecard.model_copy(
+                        update={"covered_call_candidates": []},
+                    )
             option_chain_preview = _build_option_chain_preview(
                 option_chain,
                 underlying_iv_percent=underlying_iv_percent,

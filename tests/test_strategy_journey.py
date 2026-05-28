@@ -60,6 +60,59 @@ def test_detect_wheel_phase_ready_for_csp():
     assert phase == WheelPhase.READY_FOR_CSP
 
 
+def test_detect_wheel_phase_partial_lot_suggests_csp_not_cc():
+    from app.models.schwab_models import Instrument, Position
+
+    positions = [
+        Position(
+            shortQuantity=0,
+            averagePrice=100,
+            currentDayProfitLoss=0,
+            currentDayProfitLossPercentage=0,
+            longQuantity=50,
+            settledLongQuantity=50,
+            settledShortQuantity=0,
+            instrument=Instrument(
+                assetType="EQUITY",
+                cusip="123",
+                symbol="AAPL",
+            ),
+            marketValue=5000,
+            maintenanceRequirement=0,
+            currentDayCost=0,
+        )
+    ]
+    phase = StrategyJourneyService.detect_wheel_phase(symbol="AAPL", positions=positions)
+    assert phase == WheelPhase.READY_FOR_CSP
+    assert StrategyJourneyService.share_quantity_for_symbol("AAPL", positions) == 50
+
+
+def test_detect_wheel_phase_full_lot_ready_for_covered_call():
+    from app.models.schwab_models import Instrument, Position
+
+    positions = [
+        Position(
+            shortQuantity=0,
+            averagePrice=100,
+            currentDayProfitLoss=0,
+            currentDayProfitLossPercentage=0,
+            longQuantity=100,
+            settledLongQuantity=100,
+            settledShortQuantity=0,
+            instrument=Instrument(
+                assetType="EQUITY",
+                cusip="123",
+                symbol="AAPL",
+            ),
+            marketValue=10000,
+            maintenanceRequirement=0,
+            currentDayCost=0,
+        )
+    ]
+    phase = StrategyJourneyService.detect_wheel_phase(symbol="AAPL", positions=positions)
+    assert phase == WheelPhase.ASSIGNED_SHARES
+
+
 def test_update_step_unlocks_next_step():
     profile_adapter = MagicMock()
     journey_adapter = MagicMock()
