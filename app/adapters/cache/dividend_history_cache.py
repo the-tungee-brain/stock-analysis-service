@@ -35,6 +35,7 @@ class DividendHistoryCache:
         project_years: int | None,
         dividend_cagr_pct: float | None,
         history_start_year: int | None = None,
+        annual_contribution_usd: float = 0.0,
     ) -> str:
         parts = [f"sh:{shares:.2f}"]
 
@@ -60,6 +61,9 @@ class DividendHistoryCache:
             parts.append(f"hist:{history_start_year}")
         else:
             parts.append("hist:auto")
+
+        if annual_contribution_usd > 0:
+            parts.append(f"contrib:{annual_contribution_usd:.2f}")
 
         return "|".join(parts)
 

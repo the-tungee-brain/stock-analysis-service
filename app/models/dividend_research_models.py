@@ -25,6 +25,10 @@ class DividendAdvancedSnowballScenario(BaseModel):
     total_dividends_reinvested: float = Field(
         serialization_alias="totalDividendsReinvested"
     )
+    total_annual_contributions_usd: float = Field(
+        default=0.0,
+        serialization_alias="totalAnnualContributionsUsd",
+    )
 
 
 class DividendHistoricalBacktest(BaseModel):

@@ -62,6 +62,13 @@ async def get_dividend_history(
         le=2100,
         description="Optional first year for the historical cash-collected backtest",
     ),
+    annual_contribution_usd: float = Query(
+        default=0.0,
+        ge=0,
+        le=100_000_000,
+        alias="annualContributionUsd",
+        description="New cash invested at the start of each projected year (after year one)",
+    ),
     dividend_research_service: DividendResearchService = Depends(
         get_dividend_research_service
     ),
@@ -78,6 +85,7 @@ async def get_dividend_history(
         project_years=project_years,
         dividend_cagr_pct=dividend_cagr_pct,
         history_start_year=history_start_year,
+        annual_contribution_usd=annual_contribution_usd,
     )
     if context is None:
         raise HTTPException(

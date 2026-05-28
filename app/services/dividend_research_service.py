@@ -63,6 +63,7 @@ class DividendResearchService:
         project_years: int | None = None,
         dividend_cagr_pct: float | None = None,
         history_start_year: int | None = None,
+        annual_contribution_usd: float = 0.0,
     ) -> DividendHistoryContext | None:
         resolved_shares = max(float(shares), 0.0) or DEFAULT_SCENARIO_SHARES
         resolved_investment = (
@@ -85,6 +86,7 @@ class DividendResearchService:
                 project_years=project_years,
                 dividend_cagr_pct=dividend_cagr_pct,
                 history_start_year=history_start_year,
+                annual_contribution_usd=annual_contribution_usd,
             )
             cached = self.dividend_history_cache.get(symbol, cache_key)
             if cached is not None:
@@ -133,6 +135,7 @@ class DividendResearchService:
             price_cagr_pct=resolved_price_cagr,
             project_years=project_years,
             dividend_cagr_pct=dividend_cagr_pct,
+            annual_contribution_usd=annual_contribution_usd,
         )
 
         all_payments = _parse_payment_items(dividend_rows)
@@ -166,6 +169,7 @@ class DividendResearchService:
             investment_usd=resolved_investment,
             price_cagr_pct=resolved_price_cagr,
             symbol=symbol_upper,
+            annual_contribution_usd=annual_contribution_usd,
         )
         historical_backtest = (
             DividendHistoricalBacktest.model_validate(historical_data)

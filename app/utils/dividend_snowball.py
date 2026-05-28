@@ -166,36 +166,50 @@ def simulate_forward_projection(
     share_price: float | None,
     price_cagr_pct: float | None,
     reinvest_dividends: bool,
+    annual_contribution_usd: float = 0.0,
     current_year: int | None = None,
 ) -> dict[str, Any]:
     today_year = current_year or date.today().year
     end_year = today_year + project_years
     div_rate = dividend_cagr_pct / 100.0
     price_rate = (price_cagr_pct or 0.0) / 100.0
+    contribution = max(float(annual_contribution_usd), 0.0)
 
     annual_income_start = round(base_dps * shares, 2)
     total_collected = 0.0
 
     if not reinvest_dividends or share_price is None or share_price <= 0:
+        share_count = shares
+        price = share_price if share_price is not None and share_price > 0 else None
+        total_contributions = 0.0
+
         for offset in range(project_years + 1):
+            if offset > 0 and contribution > 0 and price is not None and price > 0:
+                share_count += contribution / price
+                total_contributions += contribution
+
             year_dps = base_dps * ((1.0 + div_rate) ** offset)
-            total_collected += year_dps * shares
+            total_collected += year_dps * share_count
+
+            if offset < project_years and price is not None and price > 0:
+                price *= 1.0 + price_rate
 
         final_dps = base_dps * ((1.0 + div_rate) ** project_years)
-        annual_income_latest = round(final_dps * shares, 2)
+        annual_income_latest = round(final_dps * share_count, 2)
         advanced = None
-        if not reinvest_dividends and share_price is not None and share_price > 0:
-            final_price = share_price * ((1.0 + price_rate) ** project_years)
+        if share_price is not None and share_price > 0:
+            final_price = price if price is not None else share_price
             advanced = {
                 "enabled": True,
                 "initial_shares": round(shares, 2),
-                "final_shares": round(shares, 2),
+                "final_shares": round(share_count, 2),
                 "share_price_at_start": round(share_price, 2),
                 "share_price_latest": round(final_price, 2),
                 "price_cagr_pct": round(price_cagr_pct or 0.0, 2),
                 "annual_income_latest_drip": annual_income_latest,
-                "portfolio_value_latest": round(shares * final_price, 2),
+                "portfolio_value_latest": round(share_count * final_price, 2),
                 "total_dividends_reinvested": 0.0,
+                "total_annual_contributions_usd": round(total_contributions, 2),
             }
         return {
             "start_year": today_year,
@@ -211,8 +225,13 @@ def simulate_forward_projection(
     price = share_price
     share_count = shares
     total_reinvested = 0.0
+    total_contributions = 0.0
 
     for offset in range(project_years + 1):
+        if offset > 0 and contribution > 0 and price > 0:
+            share_count += contribution / price
+            total_contributions += contribution
+
         year_dps = base_dps * ((1.0 + div_rate) ** offset)
         dividend_cash = year_dps * share_count
         total_collected += dividend_cash
@@ -244,6 +263,7 @@ def simulate_forward_projection(
             "annual_income_latest_drip": annual_income_latest,
             "portfolio_value_latest": round(share_count * price, 2),
             "total_dividends_reinvested": round(total_reinvested, 2),
+            "total_annual_contributions_usd": round(total_contributions, 2),
         },
     }
 
@@ -259,6 +279,7 @@ def build_scenario(
     price_cagr_pct: float | None = None,
     project_years: int | None = None,
     dividend_cagr_pct: float | None = None,
+    annual_contribution_usd: float = 0.0,
 ) -> dict[str, Any]:
     _ = dividends
 
@@ -286,6 +307,7 @@ def build_scenario(
         share_price=share_price,
         price_cagr_pct=price_cagr_pct,
         reinvest_dividends=reinvest_dividends,
+        annual_contribution_usd=annual_contribution_usd,
     )
 
     scenario: dict[str, Any] = {
@@ -318,6 +340,7 @@ def build_historical_backtest(
     share_price: float | None = None,
     investment_usd: float | None = None,
     price_cagr_pct: float | None = None,
+    annual_contribution_usd: float = 0.0,
     symbol: str,
 ) -> dict[str, Any] | None:
     completed = completed_annual_totals(annual_totals)
@@ -371,6 +394,7 @@ def build_historical_backtest(
             share_price_at_start=share_price_at_start,
             price_cagr_pct=resolved_price_cagr,
             current_share_price=share_price,
+            annual_contribution_usd=annual_contribution_usd,
         )
 
     return {
@@ -407,6 +431,7 @@ def simulate_drip_backtest(
     share_price_at_start: float,
     price_cagr_pct: float,
     current_share_price: float,
+    annual_contribution_usd: float = 0.0,
 ) -> dict[str, Any]:
     if (
         initial_investment_usd <= 0
@@ -423,6 +448,7 @@ def simulate_drip_backtest(
             "annual_income_latest_drip": 0.0,
             "portfolio_value_latest": 0.0,
             "total_dividends_reinvested": 0.0,
+            "total_annual_contributions_usd": 0.0,
         }
 
     shares = initial_investment_usd / share_price_at_start
@@ -430,8 +456,14 @@ def simulate_drip_backtest(
     price = share_price_at_start
     rate = price_cagr_pct / 100.0
     total_reinvested = 0.0
+    contribution = max(float(annual_contribution_usd), 0.0)
+    total_contributions = 0.0
 
     for year in range(start_year, end_year + 1):
+        if year > start_year and contribution > 0 and price > 0:
+            shares += contribution / price
+            total_contributions += contribution
+
         dps = annual_totals.get(year, 0.0)
         if dps > 0:
             dividend_cash = dps * shares
@@ -455,4 +487,5 @@ def simulate_drip_backtest(
         "annual_income_latest_drip": round(latest_dps * shares, 2),
         "portfolio_value_latest": round(portfolio_value, 2),
         "total_dividends_reinvested": round(total_reinvested, 2),
+        "total_annual_contributions_usd": round(total_contributions, 2),
     }

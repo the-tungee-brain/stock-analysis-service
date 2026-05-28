@@ -204,6 +204,40 @@ def test_build_scenario_with_advanced_drip():
     assert scenario["advanced"]["final_shares"] > scenario["advanced"]["initial_shares"]
 
 
+def test_simulate_forward_projection_with_annual_contributions():
+    current_year = 2026
+    baseline = simulate_forward_projection(
+        shares=100,
+        project_years=10,
+        base_dps=0.995,
+        dividend_cagr_pct=5.0,
+        share_price=80,
+        price_cagr_pct=8.0,
+        reinvest_dividends=True,
+        current_year=current_year,
+    )
+    with_contrib = simulate_forward_projection(
+        shares=100,
+        project_years=10,
+        base_dps=0.995,
+        dividend_cagr_pct=5.0,
+        share_price=80,
+        price_cagr_pct=8.0,
+        reinvest_dividends=True,
+        annual_contribution_usd=5_000,
+        current_year=current_year,
+    )
+    assert with_contrib["advanced"] is not None
+    assert baseline["advanced"] is not None
+    assert (
+        with_contrib["advanced"]["final_shares"]
+        > baseline["advanced"]["final_shares"]
+    )
+    assert with_contrib["advanced"]["total_annual_contributions_usd"] == pytest.approx(
+        50_000
+    )
+
+
 def test_build_historical_backtest_includes_cash_and_drip():
     result = build_historical_backtest(
         dividends=SCHD_DIVIDENDS,
