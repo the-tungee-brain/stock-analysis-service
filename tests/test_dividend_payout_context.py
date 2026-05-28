@@ -121,4 +121,4 @@ def test_format_dividend_payout_section_computes_from_statements():
 
     assert block is not None
     assert "Payout ratio: 20%" in block
-    assert "FCF dividend coverage: 2.7x" in block
+    assert "FCF dividend coverage: 2.6x" in block

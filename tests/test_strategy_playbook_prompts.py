@@ -47,11 +47,13 @@ def test_build_playbook_ask_prompt_is_concise_hold_verdict():
 
 def test_playbook_research_system_message_includes_format_and_strategy_focus():
     message = playbook_research_system_message(strategy=InvestmentStrategy.DIVIDEND)
+    lowered = message.lower()
     assert "**Verdict:**" in message
-    assert "data I need" in message.lower()
     assert "dividend investing playbook" in message
-    assert "payout ratio" in message.lower()
-    assert "calculate payout" in message.lower()
+    assert "payout ratio" in lowered
+    assert "fcf dividend coverage" in lowered
+    assert "data i need" in lowered
+    assert "never claim payout" in lowered
 
 
 def test_playbook_research_user_message_uses_verdict_instruction():

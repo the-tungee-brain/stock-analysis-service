@@ -11,6 +11,12 @@ class Settings:
     OPENAI_MODEL: str = os.getenv("OPENAI_QUALITY_MODEL", "gpt-4.1-mini")
     OPENAI_FAST_MODEL: str = os.getenv("OPENAI_FAST_MODEL", "gpt-4.1-mini")
     OPENAI_QUALITY_MODEL: str = os.getenv("OPENAI_QUALITY_MODEL", "gpt-4.1-mini")
+    OPENAI_FREE_MODEL: str = os.getenv("OPENAI_FREE_MODEL", "gpt-4.1-mini")
+    PAID_USER_IDS: frozenset[str] = frozenset(
+        user_id.strip()
+        for user_id in os.getenv("PAID_USER_IDS", "").split(",")
+        if user_id.strip()
+    )
     MAX_OUTPUT_TOKENS: int = int(os.getenv("MAX_OUTPUT_TOKENS", "2500"))
     MAX_OUTPUT_TOKENS_SUMMARY: int = int(os.getenv("MAX_OUTPUT_TOKENS_SUMMARY", "2000"))
     MAX_OUTPUT_TOKENS_BUSINESS: int = int(os.getenv("MAX_OUTPUT_TOKENS_BUSINESS", "2500"))

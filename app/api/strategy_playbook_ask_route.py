@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.auth.dependencies import get_current_user_id
 from app.core.llm_config import settings
+from app.core.llm_model_policy import resolve_llm_model
 from app.core.prompts import (
     AnalysisAction,
     SYSTEM_NATURAL_MESSAGE,
@@ -104,6 +105,7 @@ async def strategy_playbook_ask(
         action,
         strategy=request.strategy,
     )
+    model = resolve_llm_model(request.model, user_id)
 
     if playbook_ask_prefers_research_chat(action):
         return await _stream_research_playbook_ask(
@@ -111,7 +113,8 @@ async def strategy_playbook_ask(
             symbol=symbol,
             secret_prompt=secret_prompt,
             display_message=display_message,
-            model=request.model,
+            strategy=request.strategy,
+            model=model,
             chat_session_id=request.chat_session_id,
             new_chat_session=request.new_chat_session,
             company_research_service=company_research_service,
@@ -128,7 +131,7 @@ async def strategy_playbook_ask(
         symbol=symbol,
         secret_prompt=secret_prompt,
         display_message=display_message,
-        model=request.model,
+        model=model,
         chat_session_id=request.chat_session_id,
         new_chat_session=request.new_chat_session,
         chat_service=chat_service,
@@ -146,6 +149,7 @@ async def _stream_research_playbook_ask(
     symbol: str,
     secret_prompt: str,
     display_message: str,
+    strategy: InvestmentStrategy,
     model: Optional[ResponsesModel],
     chat_session_id: Optional[str],
     new_chat_session: bool,
@@ -220,7 +224,7 @@ async def _stream_research_playbook_ask(
         playbook_history = recent_messages[-8:]
         async for chunk in llm_service.analyze_option_position(
             model=model or settings.OPENAI_MODEL,
-            system_prompt=playbook_research_system_message(strategy=request.strategy),
+            system_prompt=playbook_research_system_message(strategy=strategy),
             user_prompt=[*playbook_history, user_message],
         ):
             assistant_content_parts.append(chunk)

@@ -7,7 +7,7 @@ from openai.types.shared import ResponsesModel
 from pydantic import BaseModel
 
 from app.auth.dependencies import get_current_user_id
-from app.core.llm_config import settings
+from app.core.llm_model_policy import resolve_llm_model
 from app.dependencies.service_dependencies import (
     get_chat_service,
     get_company_research_service,
@@ -65,11 +65,13 @@ async def research_chat(
             media_type="text/plain; charset=utf-8",
         )
 
+    model = resolve_llm_model(request.model, user_id)
+
     session_id, is_first_chat = chat_service.get_research_chat_session_id(
         user_id=user_id,
         symbol=symbol,
         prompt=prompt,
-        model=request.model,
+        model=model,
         chat_session_id=request.chat_session_id,
         new_chat_session=request.new_chat_session,
     )
@@ -131,7 +133,7 @@ async def research_chat(
         )
 
         async for chunk in llm_service.analyze_option_position(
-            model=request.model or settings.OPENAI_MODEL,
+            model=model,
             system_prompt=RESEARCH_CHAT_SYSTEM_MESSAGE,
             user_prompt=[*recent_messages, user_message],
         ):
