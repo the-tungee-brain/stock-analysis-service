@@ -64,6 +64,13 @@ class WheelBacktestEquityPoint(BaseModel):
     cash_usd: float = Field(alias="cashUsd")
     shares: int
     phase: str
+    stock_close_usd: float | None = Field(default=None, alias="stockCloseUsd")
+    buy_and_hold_equity_usd: float | None = Field(
+        default=None, alias="buyAndHoldEquityUsd"
+    )
+    collateral_reserved_usd: float | None = Field(
+        default=None, alias="collateralReservedUsd"
+    )
 
 
 class WheelBacktestAnnualRow(BaseModel):

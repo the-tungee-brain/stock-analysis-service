@@ -718,6 +718,20 @@ def run_wheel_backtest(
             2,
         )
 
+    buy_hold_shares_curve = buy_hold_shares
+    bah_div_running = 0.0
+    for i, point in enumerate(equity_curve):
+        bar = bars[i]
+        if i >= first_trade_idx:
+            div_per_share = dividends.get(bar.trading_date)
+            if div_per_share:
+                bah_div_running += div_per_share * buy_hold_shares_curve
+            bah_equity = buy_hold_shares_curve * bar.close + bah_div_running
+        else:
+            bah_equity = starting_cash
+        point["stockCloseUsd"] = round(bar.close, 2)
+        point["buyAndHoldEquityUsd"] = round(bah_equity, 2)
+
     wheel_cycles = _build_wheel_cycles(trades)
     annual_summary = _build_annual_summary(equity_curve, trades)
 
