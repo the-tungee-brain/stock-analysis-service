@@ -45,7 +45,7 @@ from app.api.get_option_chain_debug_route import router as get_option_chain_debu
 from app.api.internal_morning_brief_route import router as internal_morning_brief_router
 from app.api.portfolio_memory_routes import router as portfolio_memory_router
 from app.api.strategy_playbook_ask_route import router as strategy_playbook_ask_router
-from app.api.strategy_routes import router as strategy_router
+from app.api.get_account_plan_route import router as get_account_plan_router
 
 API_PREFIX = "/api/v1"
 AUTH_SCHWAB_PREFIX = f"{API_PREFIX}/auth/schwab"
@@ -95,6 +95,7 @@ protected_api = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
+protected_api.include_router(get_account_plan_router)
 protected_api.include_router(get_account_positions_router)
 protected_api.include_router(get_portfolio_brief_router)
 protected_api.include_router(portfolio_memory_router)

@@ -513,7 +513,8 @@ class PortfolioAnalysisService:
 
         if self._should_auto_enrich_news(action):
             await self.portfolio_intelligence_service.enriched_news_service.ensure_enriched(
-                symbol=symbol
+                symbol=symbol,
+                user_id=user_id,
             )
 
         research_context_block, intelligence_block, has_options_scorecard, symbol_intelligence = await asyncio.to_thread(

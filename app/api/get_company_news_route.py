@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Query
+from app.auth.dependencies import get_current_user_id
 from app.services.news_service import NewsService
 from app.dependencies.service_dependencies import (
     get_news_service,
@@ -22,6 +23,7 @@ async def get_company_news(
         default=False,
         description="Bypass cached news and re-fetch from Finnhub",
     ),
+    user_id: str = Depends(get_current_user_id),
     news_service: NewsService = Depends(get_news_service),
     prompt_enrichment_service: PromptEnrichmentService = Depends(
         get_prompt_enrichment_service
@@ -43,7 +45,10 @@ async def get_company_news(
         news = NewsResponse(root=[])
     prompts = prompt_enrichment_service.enrich_news_prompt(symbol=symbol, news=news)
     stock_news_view = await llm_service.analyze_news(
-        symbol=symbol, prompts=prompts, news=news
+        symbol=symbol,
+        prompts=prompts,
+        news=news,
+        user_id=user_id,
     )
     enriched_news_service.store_view(symbol=symbol, view=stock_news_view)
     return stock_news_view

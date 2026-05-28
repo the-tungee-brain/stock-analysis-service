@@ -33,6 +33,7 @@ def test_get_company_news_returns_cached_view_without_refresh():
         get_company_news(
             symbol="AAPL",
             refresh=False,
+            user_id="free-user",
             news_service=news_service,
             prompt_enrichment_service=MagicMock(),
             llm_service=MagicMock(),
@@ -68,6 +69,7 @@ def test_get_company_news_refresh_bypasses_cache():
         get_company_news(
             symbol="AAPL",
             refresh=True,
+            user_id="paid-user",
             news_service=news_service,
             prompt_enrichment_service=prompt_enrichment_service,
             llm_service=llm_service,
@@ -82,6 +84,11 @@ def test_get_company_news_refresh_bypasses_cache():
     )
     enriched_news_service.get_cached_view.assert_not_called()
     news_service.get_company_news.assert_called_once()
-    llm_service.analyze_news.assert_awaited_once()
+    llm_service.analyze_news.assert_awaited_once_with(
+        symbol="AAPL",
+        prompts=["system", "user"],
+        news=news,
+        user_id="paid-user",
+    )
     enriched_news_service.store_view.assert_called_once_with(symbol="AAPL", view=fresh)
     assert result.summary == "Fresh"

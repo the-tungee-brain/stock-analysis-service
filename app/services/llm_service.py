@@ -10,6 +10,7 @@ from app.adapters.llm.openai_adapter import OpenAIAdapter
 from app.builders.news_analytics_builder import NewsAnalyticsBuilder
 from app.builders.prompt_builder import PromptBuilder
 from app.core.llm_config import settings
+from app.core.llm_model_policy import resolve_llm_model
 from app.core.llm_json import validate_llm_model
 from app.core.llm_routes import LLMRoute
 from app.models.finnhub_news_models import NewsResponse
@@ -51,7 +52,9 @@ class LLMService:
         prompts: List[str],
         news: NewsResponse,
         model: Optional[ResponsesModel] = settings.OPENAI_FAST_MODEL,
+        user_id: str | None = None,
     ) -> StockNewsView:
+        resolved_model = resolve_llm_model(model, user_id or "")
         if not news.root:
             return StockNewsView(
                 symbol=symbol,
@@ -67,10 +70,10 @@ class LLMService:
                 items=[],
             )
         enriched_news = await self.news_analytics_builder.get_enriched_news_items(
-            model=model, prompts=prompts, news=news.root
+            model=resolved_model, prompts=prompts, news=news.root
         )
         return await self.prompt_builder.get_enriched_news_sentiment(
-            model=model,
+            model=resolved_model,
             symbol=symbol,
             enriched_news=enriched_news,
         )

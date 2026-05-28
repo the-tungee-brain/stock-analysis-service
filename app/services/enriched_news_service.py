@@ -67,6 +67,7 @@ class EnrichedNewsService:
         symbol: str,
         *,
         news: NewsResponse | None = None,
+        user_id: str | None = None,
     ) -> EnrichedNewsSummary | None:
         cached = self.get_cached_summary(symbol=symbol)
         if cached is not None:
@@ -94,6 +95,7 @@ class EnrichedNewsService:
                 symbol=symbol,
                 prompts=prompts,
                 news=news,
+                user_id=user_id,
             )
             self.store_view(symbol=symbol, view=view)
             return self._to_summary(view)
