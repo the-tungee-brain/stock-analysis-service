@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
+from app.core.llm_config import settings
 from app.api.get_dividend_history_route import get_dividend_history
 from app.models.dividend_research_models import (
     AnnualDividendIncome,
@@ -43,12 +44,18 @@ def _sample_context(symbol: str = "SCHD") -> DividendHistoryContext:
     )
 
 
+@pytest.fixture(autouse=True)
+def paid_user(monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset({"user-pro"}))
+
+
 def test_get_dividend_history_returns_context():
     service = MagicMock()
     service.build_history_context.return_value = _sample_context()
 
     result = asyncio.run(
         get_dividend_history(
+            user_id="user-pro",
             symbol="SCHD",
             shares=100,
             investment_usd=None,
@@ -75,6 +82,7 @@ def test_get_dividend_history_returns_context():
         dividend_cagr_pct=None,
         history_start_year=None,
         annual_contribution_usd=0.0,
+        include_snowball=True,
     )
 
 
@@ -85,6 +93,7 @@ def test_get_dividend_history_raises_404_when_missing():
     with pytest.raises(HTTPException) as exc:
         asyncio.run(
             get_dividend_history(
+                user_id="user-pro",
                 symbol="UNKNOWN",
                 shares=100,
                 annual_contribution_usd=0.0,
@@ -101,6 +110,7 @@ def test_route_json_uses_camel_case_aliases():
 
     payload = asyncio.run(
         get_dividend_history(
+            user_id="user-pro",
             symbol="SCHD",
             shares=100,
             annual_contribution_usd=0.0,

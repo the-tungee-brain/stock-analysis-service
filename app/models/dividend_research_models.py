@@ -73,7 +73,7 @@ class DividendHistoryContext(BaseModel):
         default_factory=list, serialization_alias="recentPayments"
     )
     payments: list[DividendPaymentItem] = Field(default_factory=list)
-    scenario: DividendSnowballScenario
+    scenario: DividendSnowballScenario | None = None
     historical_backtest: DividendHistoricalBacktest | None = Field(
         default=None,
         serialization_alias="historicalBacktest",

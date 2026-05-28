@@ -2,6 +2,8 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.auth.dependencies import get_current_user_id
+from app.core.llm_model_policy import is_paid_user
 from app.dependencies.service_dependencies import get_dividend_research_service
 from app.models.dividend_research_models import DividendHistoryContext
 from app.services.dividend_research_service import DividendResearchService
@@ -15,6 +17,7 @@ router = APIRouter()
     response_model_by_alias=True,
 )
 async def get_dividend_history(
+    user_id: str = Depends(get_current_user_id),
     symbol: str = Query(..., min_length=1, max_length=12),
     shares: float = Query(
         default=100.0,
@@ -74,18 +77,20 @@ async def get_dividend_history(
     ),
 ) -> DividendHistoryContext:
     symbol_upper = symbol.strip().upper()
+    include_snowball = is_paid_user(user_id)
     context = await asyncio.to_thread(
         dividend_research_service.build_history_context,
         symbol_upper,
         shares=shares,
         investment_usd=investment_usd,
         share_price=share_price,
-        reinvest_dividends=reinvest_dividends,
-        price_cagr_pct=price_cagr_pct,
-        project_years=project_years,
-        dividend_cagr_pct=dividend_cagr_pct,
-        history_start_year=history_start_year,
-        annual_contribution_usd=annual_contribution_usd,
+        reinvest_dividends=reinvest_dividends if include_snowball else False,
+        price_cagr_pct=price_cagr_pct if include_snowball else None,
+        project_years=project_years if include_snowball else None,
+        dividend_cagr_pct=dividend_cagr_pct if include_snowball else None,
+        history_start_year=history_start_year if include_snowball else None,
+        annual_contribution_usd=annual_contribution_usd if include_snowball else 0.0,
+        include_snowball=include_snowball,
     )
     if context is None:
         raise HTTPException(

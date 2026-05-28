@@ -64,6 +64,7 @@ class DividendResearchService:
         dividend_cagr_pct: float | None = None,
         history_start_year: int | None = None,
         annual_contribution_usd: float = 0.0,
+        include_snowball: bool = True,
     ) -> DividendHistoryContext | None:
         resolved_shares = max(float(shares), 0.0) or DEFAULT_SCENARIO_SHARES
         resolved_investment = (
@@ -125,18 +126,38 @@ class DividendResearchService:
         if resolved_share_price is not None and resolved_price_cagr is None:
             resolved_price_cagr = 0.0
 
-        scenario_data = build_scenario(
-            dividends=dividend_rows,
-            annual_totals=annual_totals,
-            shares=resolved_shares,
-            investment_usd=resolved_investment,
-            share_price=resolved_share_price,
-            reinvest_dividends=reinvest_dividends,
-            price_cagr_pct=resolved_price_cagr,
-            project_years=project_years,
-            dividend_cagr_pct=dividend_cagr_pct,
-            annual_contribution_usd=annual_contribution_usd,
-        )
+        scenario_model: DividendSnowballScenario | None = None
+        historical_backtest: DividendHistoricalBacktest | None = None
+        if include_snowball:
+            scenario_data = build_scenario(
+                dividends=dividend_rows,
+                annual_totals=annual_totals,
+                shares=resolved_shares,
+                investment_usd=resolved_investment,
+                share_price=resolved_share_price,
+                reinvest_dividends=reinvest_dividends,
+                price_cagr_pct=resolved_price_cagr,
+                project_years=project_years,
+                dividend_cagr_pct=dividend_cagr_pct,
+                annual_contribution_usd=annual_contribution_usd,
+            )
+            scenario_model = DividendSnowballScenario.model_validate(scenario_data)
+
+            historical_data = build_historical_backtest(
+                dividends=dividend_rows,
+                annual_totals=annual_totals,
+                shares=resolved_shares,
+                start_year=history_start_year,
+                share_price=resolved_share_price,
+                investment_usd=resolved_investment,
+                price_cagr_pct=resolved_price_cagr,
+                symbol=symbol_upper,
+                annual_contribution_usd=annual_contribution_usd,
+            )
+            if historical_data is not None:
+                historical_backtest = DividendHistoricalBacktest.model_validate(
+                    historical_data
+                )
 
         all_payments = _parse_payment_items(dividend_rows)
         recent_payments = list(reversed(all_payments[-DEFAULT_RECENT_PAYMENTS:]))
@@ -160,23 +181,6 @@ class DividendResearchService:
             symbol=str(data.get("ticker") or symbol).upper(),
         )
 
-        historical_data = build_historical_backtest(
-            dividends=dividend_rows,
-            annual_totals=annual_totals,
-            shares=resolved_shares,
-            start_year=history_start_year,
-            share_price=resolved_share_price,
-            investment_usd=resolved_investment,
-            price_cagr_pct=resolved_price_cagr,
-            symbol=symbol_upper,
-            annual_contribution_usd=annual_contribution_usd,
-        )
-        historical_backtest = (
-            DividendHistoricalBacktest.model_validate(historical_data)
-            if historical_data is not None
-            else None
-        )
-
         context = DividendHistoryContext(
             ticker=str(data.get("ticker") or symbol).upper(),
             total_dividends=total_dividends,
@@ -195,7 +199,7 @@ class DividendResearchService:
             ],
             recent_payments=recent_payments,
             payments=all_payments,
-            scenario=DividendSnowballScenario.model_validate(scenario_data),
+            scenario=scenario_model,
             historical_backtest=historical_backtest,
             data_as_of=self._extract_data_as_of(meta_dict),
             confidence_score=self._extract_confidence_score(meta_dict),

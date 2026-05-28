@@ -2,9 +2,19 @@ from app.core.llm_config import settings
 from app.core.llm_model_policy import is_paid_user, resolve_llm_model
 
 
-def test_free_user_always_gets_free_model(monkeypatch):
+def test_free_user_advanced_model_falls_back(monkeypatch):
     monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset())
     assert resolve_llm_model("gpt-5.4", "user-free") == settings.OPENAI_FREE_MODEL
+
+
+def test_free_user_can_pick_standard_model(monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset())
+    assert resolve_llm_model("gpt-4o", "user-free") == "gpt-4o"
+
+
+def test_free_user_can_pick_simple_model(monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset())
+    assert resolve_llm_model("gpt-5-nano", "user-free") == "gpt-5-nano"
 
 
 def test_paid_user_can_request_allowed_model(monkeypatch):

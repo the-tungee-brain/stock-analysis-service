@@ -4,6 +4,8 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.auth.dependencies import get_current_user_id
+from app.core.plan_features import PRO_FEATURE_WHEEL_BACKTEST, require_paid_feature
 from app.dependencies.service_dependencies import get_wheel_backtest_service
 from app.models.wheel_backtest_models import WheelBacktestResponse
 from app.services.strategy.wheel_backtest_service import WheelBacktestService
@@ -17,6 +19,7 @@ router = APIRouter()
     response_model_by_alias=True,
 )
 async def get_wheel_backtest(
+    user_id: str = Depends(get_current_user_id),
     symbol: str = Query(..., min_length=1, max_length=12),
     years: int = Query(5, ge=5, le=15, description="5, 10, or 15"),
     target_delta_min: float = Query(0.20, ge=0.05, le=0.50, alias="targetDeltaMin"),
@@ -43,6 +46,8 @@ async def get_wheel_backtest(
 ) -> WheelBacktestResponse:
     if years not in (5, 10, 15):
         raise HTTPException(status_code=400, detail="years must be 5, 10, or 15")
+
+    require_paid_feature(user_id, PRO_FEATURE_WHEEL_BACKTEST)
 
     try:
         return await asyncio.to_thread(
