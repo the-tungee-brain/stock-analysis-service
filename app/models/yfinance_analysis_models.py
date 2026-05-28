@@ -36,6 +36,18 @@ class PeriodEstimate(BaseModel):
     growth_pct: float | None = Field(default=None, serialization_alias="growthPct")
 
 
+class AnalystRatingAction(BaseModel):
+    """Single analyst upgrade/downgrade from Yahoo Finance."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    date: str
+    firm: str
+    to_grade: str = Field(serialization_alias="toGrade")
+    from_grade: str | None = Field(default=None, serialization_alias="fromGrade")
+    action: str | None = None
+
+
 class StreetAnalysisSnapshot(BaseModel):
     """Yahoo Finance analyst consensus (yfinance analysis APIs)."""
 
@@ -54,4 +66,10 @@ class StreetAnalysisSnapshot(BaseModel):
     )
     estimate_revision_headline: str | None = Field(
         default=None, serialization_alias="estimateRevisionHeadline"
+    )
+    estimate_drift_headline: str | None = Field(
+        default=None, serialization_alias="estimateDriftHeadline"
+    )
+    recent_rating_actions: list[AnalystRatingAction] = Field(
+        default_factory=list, serialization_alias="recentRatingActions"
     )

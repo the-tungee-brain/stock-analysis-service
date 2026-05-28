@@ -8,6 +8,7 @@ import pandas as pd
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.models.yfinance_analysis_models import (
     AnalystPriceTargets,
+    AnalystRatingAction,
     PeriodEstimate,
     RecommendationBreakdown,
     StreetAnalysisSnapshot,
@@ -50,6 +51,10 @@ class YFinanceAnalysisBuilder:
             raw.get("revenue_estimate"), "+1q", year_ago_key="yearAgoRevenue"
         )
         revision_headline = self._revision_headline(raw.get("eps_revisions"), "+1q")
+        drift_headline = self._eps_trend_headline(raw.get("eps_trend"), "+1q")
+        recent_actions = self._parse_recent_rating_actions(
+            raw.get("upgrades_downgrades")
+        )
 
         if not any(
             [
@@ -58,6 +63,8 @@ class YFinanceAnalysisBuilder:
                 next_q_eps,
                 next_q_revenue,
                 revision_headline,
+                drift_headline,
+                recent_actions,
             ]
         ):
             return None
@@ -73,6 +80,8 @@ class YFinanceAnalysisBuilder:
             next_quarter_eps=next_q_eps,
             next_quarter_revenue=next_q_revenue,
             estimate_revision_headline=revision_headline,
+            estimate_drift_headline=drift_headline,
+            recent_rating_actions=recent_actions,
         )
 
     @staticmethod
@@ -243,3 +252,88 @@ class YFinanceAnalysisBuilder:
             f"Next-quarter EPS estimates revised up {up30}× and down {down30}× "
             "in the last 30 days."
         )
+
+    def _eps_trend_headline(self, table: Any, period_key: str) -> str | None:
+        row = self._table_row(table, period_key)
+        if row is None:
+            return None
+
+        current = self._optional_float(row.get("current"))
+        if current is None:
+            return None
+
+        ago30 = self._optional_float(row.get("30daysAgo"))
+        label = _PERIOD_LABELS.get(period_key, period_key).lower()
+        if ago30 is None or ago30 == 0:
+            return f"{label.capitalize()} EPS consensus is ${current:.2f}."
+
+        pct = ((current - ago30) / abs(ago30)) * 100
+        if abs(pct) < 0.05:
+            drift = "unchanged"
+        elif pct > 0:
+            drift = f"up {pct:.1f}%"
+        else:
+            drift = f"down {abs(pct):.1f}%"
+
+        return (
+            f"{label.capitalize()} EPS consensus is ${current:.2f} ({drift} vs "
+            f"30 days ago at ${ago30:.2f})."
+        )
+
+    def _parse_recent_rating_actions(
+        self, df: Any, *, limit: int = 8
+    ) -> list[AnalystRatingAction]:
+        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+            return []
+
+        try:
+            sorted_df = df.sort_index(ascending=False).head(limit)
+        except Exception:
+            sorted_df = df.head(limit)
+
+        actions: list[AnalystRatingAction] = []
+        for idx, row in sorted_df.iterrows():
+            date_str = self._index_to_iso_date(idx)
+            if date_str is None:
+                continue
+
+            firm = self._row_str(row, "Firm", "firm")
+            to_grade = self._row_str(row, "To Grade", "toGrade", "to_grade")
+            if not firm or not to_grade:
+                continue
+
+            actions.append(
+                AnalystRatingAction(
+                    date=date_str,
+                    firm=firm,
+                    to_grade=to_grade,
+                    from_grade=self._row_str(row, "From Grade", "fromGrade", "from_grade"),
+                    action=self._row_str(row, "Action", "action"),
+                )
+            )
+        return actions
+
+    @staticmethod
+    def _index_to_iso_date(idx: Any) -> str | None:
+        if isinstance(idx, pd.Timestamp):
+            return idx.strftime("%Y-%m-%d")
+        try:
+            parsed = pd.Timestamp(idx)
+            if pd.isna(parsed):
+                return None
+            return parsed.strftime("%Y-%m-%d")
+        except Exception:
+            return None
+
+    @staticmethod
+    def _row_str(row: Any, *candidates: str) -> str | None:
+        for name in candidates:
+            for key in row.index:
+                if str(key).lower().replace(" ", "") == name.lower().replace(" ", ""):
+                    value = row[key]
+                    if value is None or (isinstance(value, float) and pd.isna(value)):
+                        continue
+                    text = str(value).strip()
+                    if text:
+                        return text
+        return None
