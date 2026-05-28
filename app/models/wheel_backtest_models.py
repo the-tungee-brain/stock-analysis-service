@@ -97,7 +97,7 @@ class WheelBacktestResponse(BaseModel):
     csp_rounds: int = Field(alias="cspRounds")
     end_date: date = Field(alias="endDate")
     trading_days: int = Field(alias="tradingDays")
-    config: dict[str, float | int | bool]
+    config: dict[str, float | int | bool | str]
     assumptions: list[str]
     starting_cash_usd: float = Field(alias="startingCashUsd")
     ending_equity_usd: float = Field(alias="endingEquityUsd")
