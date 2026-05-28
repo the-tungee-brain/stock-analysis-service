@@ -58,13 +58,15 @@ class WheelBacktestService:
             symbol_upper,
             period=period,
             interval="1d",
-            auto_adjust=False,
+            auto_adjust=True,
         )
         bars = _bars_from_history(hist)
         if not bars:
             raise ValueError(f"No price history for {symbol_upper}")
 
-        dividends, splits = self._yfinance.get_dividends_and_splits(symbol_upper)
+        # Split/dividend adjusted closes — do not apply splits or cash dividends again.
+        dividends: dict[date, float] = {}
+        splits: dict[date, float] = {}
 
         result = run_wheel_backtest(
             bars,
@@ -107,6 +109,9 @@ class WheelBacktestService:
             buyAndHoldEndingUsd=result.buy_and_hold_ending_usd,
             spotPriceAtStart=result.spot_price_at_start,
             spotPriceAtEnd=result.spot_price_at_end,
+            initialStockPriceUsd=result.initial_stock_price_usd,
+            initialPutStrikeUsd=result.initial_put_strike_usd,
+            initialCollateralUsd=result.initial_collateral_usd,
             wheelCycles=[
                 WheelBacktestCycle.model_validate(row) for row in result.wheel_cycles
             ],

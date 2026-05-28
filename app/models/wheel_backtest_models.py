@@ -28,6 +28,10 @@ class WheelBacktestTrade(BaseModel):
     expiration_date: str | None = Field(default=None, alias="expirationDate")
     iv_percent: float | None = Field(default=None, alias="ivPercent")
     wheel_cycle: int | None = Field(default=None, alias="wheelCycle")
+    cycle_month: str | None = Field(default=None, alias="cycleMonth")
+    collateral_reserved_usd: float | None = Field(
+        default=None, alias="collateralReservedUsd"
+    )
     cash_flow_usd: float | None = Field(default=None, alias="cashFlowUsd")
     note: str | None = None
 
@@ -95,6 +99,9 @@ class WheelBacktestResponse(BaseModel):
     capital_top_ups_usd: float = Field(alias="capitalTopUpsUsd")
     spot_price_at_start: float = Field(alias="spotPriceAtStart")
     spot_price_at_end: float = Field(alias="spotPriceAtEnd")
+    initial_stock_price_usd: float = Field(alias="initialStockPriceUsd")
+    initial_put_strike_usd: float = Field(alias="initialPutStrikeUsd")
+    initial_collateral_usd: float = Field(alias="initialCollateralUsd")
     total_premium_collected_usd: float = Field(alias="totalPremiumCollectedUsd")
     total_fees_usd: float = Field(alias="totalFeesUsd")
     total_dividends_usd: float = Field(alias="totalDividendsUsd")

@@ -86,6 +86,8 @@ class WheelTradeEvent:
     expiration_date: date | None = None
     iv_percent: float | None = None
     wheel_cycle: int | None = None
+    cycle_month: str | None = None
+    collateral_reserved_usd: float | None = None
     cash_flow_usd: float | None = None
     note: str | None = None
 
@@ -119,6 +121,9 @@ class WheelBacktestResult:
     buy_and_hold_ending_usd: float
     spot_price_at_start: float
     spot_price_at_end: float
+    initial_stock_price_usd: float
+    initial_put_strike_usd: float
+    initial_collateral_usd: float
     wheel_cycles: list[dict[str, Any]]
     trades: list[dict[str, Any]]
     equity_curve: list[dict[str, Any]]
@@ -214,6 +219,8 @@ def run_wheel_backtest(
     calls_assigned = 0
     calls_expired_otm = 0
     skipped_cash = 0
+    collateral_reserved = 0.0
+    current_cycle_month: str | None = None
     trades: list[WheelTradeEvent] = []
     equity_curve: list[dict[str, Any]] = []
 
@@ -261,6 +268,8 @@ def run_wheel_backtest(
         expiration_date: date | None = None,
         iv_percent: float | None = None,
         wheel_cycle: int | None = None,
+        cycle_month: str | None = None,
+        collateral_reserved_usd: float | None = None,
         cash_flow_usd: float | None = None,
         note: str | None = None,
     ) -> None:
@@ -281,6 +290,8 @@ def run_wheel_backtest(
                 expiration_date=expiration_date,
                 iv_percent=iv_percent,
                 wheel_cycle=wheel_cycle,
+                cycle_month=cycle_month,
+                collateral_reserved_usd=collateral_reserved_usd,
                 cash_flow_usd=cash_flow_usd,
                 note=note,
             )
@@ -288,7 +299,7 @@ def run_wheel_backtest(
 
     def open_short_put(idx: int) -> None:
         nonlocal phase, cash, open_leg, total_premium, total_fees, skipped_cash, next_entry_idx
-        nonlocal capital_top_ups, wheel_cycle_id
+        nonlocal capital_top_ups, wheel_cycle_id, collateral_reserved, current_cycle_month
 
         bar = bars[idx]
         exp_idx = min(idx + config.dte_days, n - 1)
@@ -363,6 +374,8 @@ def run_wheel_backtest(
             iv_percent=iv,
         )
         wheel_cycle_id += 1
+        current_cycle_month = bar.trading_date.strftime("%Y-%m")
+        collateral_reserved = collateral
         phase = WheelPhase.SHORT_PUT
         record(
             bar.trading_date,
@@ -378,10 +391,13 @@ def run_wheel_backtest(
             expiration_date=bars[exp_idx].trading_date,
             iv_percent=round(iv, 2),
             wheel_cycle=wheel_cycle_id,
+            cycle_month=current_cycle_month,
+            collateral_reserved_usd=round(collateral_reserved, 2),
             cash_flow_usd=round(premium_total - fees, 2),
             note=(
                 f"Sell put ${strike:.2f} · stock ${bar.close:.2f} · "
-                f"${premium_ps:.2f}/sh premium · {dte} DTE"
+                f"${premium_ps:.2f}/sh premium · {dte} DTE · "
+                f"${collateral:,.0f} cash secured (100 sh)"
             ),
         )
 
@@ -453,6 +469,7 @@ def run_wheel_backtest(
             expiration_date=bars[exp_idx].trading_date,
             iv_percent=round(iv, 2),
             wheel_cycle=wheel_cycle_id,
+            cycle_month=current_cycle_month,
             cash_flow_usd=round(premium_total - fees, 2),
             note=(
                 f"Sell call ${strike:.2f} · stock ${bar.close:.2f} · "
@@ -463,6 +480,7 @@ def run_wheel_backtest(
     def settle_put(idx: int) -> None:
         nonlocal phase, cash, shares, cost_basis_per_share, open_leg
         nonlocal put_assignments, puts_expired_otm, next_entry_idx
+        nonlocal collateral_reserved, current_cycle_month
 
         leg = open_leg
         if leg is None:
@@ -487,12 +505,14 @@ def run_wheel_backtest(
                 effective_entry_price_usd=round(effective_entry, 4),
                 expiration_date=leg.expiration_date,
                 wheel_cycle=wheel_cycle_id,
+                cycle_month=current_cycle_month,
                 cash_flow_usd=round(-assign_cost, 2),
                 note=(
                     f"Bought 100 sh at ${leg.strike:.2f} · close ${close:.2f} · "
-                    f"effective ${effective_entry:.2f}/sh"
+                    f"effective ${effective_entry:.2f}/sh · collateral released"
                 ),
             )
+            collateral_reserved = 0.0
             phase = WheelPhase.LONG_STOCK
         else:
             puts_expired_otm += 1
@@ -505,9 +525,12 @@ def run_wheel_backtest(
                 stock_price_usd=round(close, 4),
                 expiration_date=leg.expiration_date,
                 wheel_cycle=wheel_cycle_id,
+                cycle_month=current_cycle_month,
                 cash_flow_usd=0.0,
                 note=f"Keep premium · close ${close:.2f} > put ${leg.strike:.2f}",
             )
+            collateral_reserved = 0.0
+            current_cycle_month = None
             phase = WheelPhase.CASH
 
         open_leg = None
@@ -516,6 +539,7 @@ def run_wheel_backtest(
     def settle_call(idx: int) -> None:
         nonlocal phase, cash, shares, cost_basis_per_share, open_leg
         nonlocal calls_assigned, calls_expired_otm, completed_cycles, next_entry_idx
+        nonlocal current_cycle_month
 
         leg = open_leg
         if leg is None:
@@ -540,11 +564,13 @@ def run_wheel_backtest(
                 effective_exit_price_usd=round(leg.strike, 4),
                 expiration_date=leg.expiration_date,
                 wheel_cycle=wheel_cycle_id,
+                cycle_month=current_cycle_month,
                 cash_flow_usd=round(proceeds, 2),
                 note=(
                     f"Sold 100 sh at ${leg.strike:.2f} · close ${close:.2f}"
                 ),
             )
+            current_cycle_month = None
             phase = WheelPhase.CASH
         else:
             calls_expired_otm += 1
@@ -557,6 +583,7 @@ def run_wheel_backtest(
                 stock_price_usd=round(close, 4),
                 expiration_date=leg.expiration_date,
                 wheel_cycle=wheel_cycle_id,
+                cycle_month=current_cycle_month,
                 cash_flow_usd=0.0,
                 note=f"Keep premium · close ${close:.2f} < call ${leg.strike:.2f}",
             )
@@ -584,7 +611,10 @@ def run_wheel_backtest(
     )
     if seed_strike is None:
         raise ValueError("Could not derive initial collateral from price history")
-    cash = seed_strike * shares_per_lot * 1.05
+    initial_stock_price = bars[seed_idx].close
+    initial_put_strike = seed_strike
+    initial_collateral = seed_strike * shares_per_lot
+    cash = initial_collateral * 1.05
     starting_cash = cash
 
     for idx in range(n):
@@ -608,6 +638,8 @@ def run_wheel_backtest(
                 "date": bar.trading_date.isoformat(),
                 "equityUsd": round(equity_mark(bar.close), 2),
                 "cashUsd": round(cash, 2),
+                "collateralReservedUsd": round(collateral_reserved, 2),
+                "availableCashUsd": round(max(cash - collateral_reserved, 0), 2),
                 "shares": shares,
                 "phase": phase.value,
             }
@@ -653,8 +685,11 @@ def run_wheel_backtest(
     annual_summary = _build_annual_summary(equity_curve, trades)
 
     assumptions = [
-        f"Starting cash ${starting_cash:,.0f} = cash-secured put collateral for "
-        f"{config.contracts} contract(s) at the first trade, plus 5% buffer.",
+        (
+            f"Starting wallet ${starting_cash:,.0f} = ${initial_collateral:,.0f} cash secured "
+            f"for 1 CSP (put strike ${initial_put_strike:.2f} × 100 sh, stock "
+            f"${initial_stock_price:.2f} on first trade date) plus 5% buffer."
+        ),
     ]
     if capital_top_ups > 0:
         assumptions.append(
@@ -674,7 +709,7 @@ def run_wheel_backtest(
         "European-style expiration: puts assign if close <= strike; calls assign if close >= strike.",
         "No early assignment, rolls, or margin interest modeled.",
         "Stock splits adjust share count and strike; dividends paid on ex-dates while long shares.",
-        "Unadjusted daily closes used for settlement (yfinance auto_adjust=False).",
+        "Split- and dividend-adjusted daily closes (yfinance auto_adjust=True).",
         f"Fixed {config.dte_days} trading-day holding period between entries (approx. calendar DTE).",
         (
             f"Buy & hold benchmark: ${starting_cash:,.0f} buys shares at "
@@ -720,6 +755,9 @@ def run_wheel_backtest(
         buy_and_hold_ending_usd=round(buy_hold_equity, 2),
         spot_price_at_start=round(spot_start, 4),
         spot_price_at_end=round(spot_end, 4),
+        initial_stock_price_usd=round(initial_stock_price, 4),
+        initial_put_strike_usd=round(initial_put_strike, 4),
+        initial_collateral_usd=round(initial_collateral, 2),
         wheel_cycles=wheel_cycles,
         trades=[_trade_to_dict(event) for event in trades],
         equity_curve=equity_curve,
@@ -755,6 +793,10 @@ def _trade_to_dict(event: WheelTradeEvent) -> dict[str, Any]:
         payload["ivPercent"] = event.iv_percent
     if event.wheel_cycle is not None:
         payload["wheelCycle"] = event.wheel_cycle
+    if event.cycle_month is not None:
+        payload["cycleMonth"] = event.cycle_month
+    if event.collateral_reserved_usd is not None:
+        payload["collateralReservedUsd"] = event.collateral_reserved_usd
     if event.cash_flow_usd is not None:
         payload["cashFlowUsd"] = event.cash_flow_usd
     return payload
