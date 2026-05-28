@@ -14,6 +14,7 @@ from app.models.wheel_backtest_models import (
 )
 from app.services.strategy.wheel_backtest_engine import (
     ALLOWED_LOOKBACK_YEARS,
+    ALLOWED_WHEEL_BACKTEST_DTE_DAYS,
     CallStrikeMode,
     PriceBar,
     WheelBacktestConfig,
@@ -49,8 +50,11 @@ class WheelBacktestService:
             raise ValueError("target delta must be positive")
         if target_delta_min > target_delta_max:
             raise ValueError("target_delta_min cannot exceed target_delta_max")
-        if dte_days < 1 or dte_days > 60:
-            raise ValueError("dte_days must be between 1 and 60")
+        if dte_days not in ALLOWED_WHEEL_BACKTEST_DTE_DAYS:
+            raise ValueError(
+                f"dte_days must be one of {sorted(ALLOWED_WHEEL_BACKTEST_DTE_DAYS)} "
+                "(5=1 week, 10=2 weeks, 30=1 month, 63=3 months trading days)"
+            )
         if contracts < 1 or contracts > 20:
             raise ValueError("contracts must be between 1 and 20")
         if call_strike_mode not in ("delta", "at_or_above_assignment"):

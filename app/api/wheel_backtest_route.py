@@ -21,7 +21,13 @@ async def get_wheel_backtest(
     years: int = Query(5, ge=5, le=15, description="5, 10, or 15"),
     target_delta_min: float = Query(0.20, ge=0.05, le=0.50, alias="targetDeltaMin"),
     target_delta_max: float = Query(0.30, ge=0.05, le=0.50, alias="targetDeltaMax"),
-    dte_days: int = Query(30, ge=5, le=60, alias="dteDays"),
+    dte_days: int = Query(
+        30,
+        ge=5,
+        le=63,
+        alias="dteDays",
+        description="Trading days to expiration: 5, 10, 30, or 63",
+    ),
     contracts: int = Query(1, ge=1, le=20),
     maintain_one_lot: bool = Query(
         True,
