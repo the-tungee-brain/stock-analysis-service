@@ -36,8 +36,10 @@ def test_build_playbook_ask_prompt_is_concise_hold_verdict():
     prompt = build_playbook_ask_prompt(action, InvestmentStrategy.WHEEL)
     assert "SBUX" in prompt
     assert "**Verdict:**" in prompt
-    assert "**What drives this**" in prompt
-    assert "max ~160 words" in prompt
+    assert "**Business:**" in prompt
+    assert "**Financials:**" in prompt
+    assert "**News:**" in prompt
+    assert "220" in prompt or "320" in prompt
     assert "Business model" not in prompt
     assert "Put zone" in prompt
     assert "Confirm ownership comfort" not in prompt
