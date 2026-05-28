@@ -45,6 +45,7 @@ RECENT_ACTIVITY_DAYS = 7
 WASH_SALE_WINDOW_DAYS = 30
 PORTFOLIO_LATEST_ORDERS_LIMIT = 5
 PORTFOLIO_SYMBOLS_LIMIT = 8
+RECENT_ORDERS_PAGE_LIMIT = 25
 TAX_RELEVANT_SELL_INSTRUCTIONS = frozenset({"SELL", "SELL_TO_CLOSE"})
 RISK_RELEVANT_BUY_INSTRUCTIONS = frozenset({"BUY", "BUY_TO_OPEN"})
 
@@ -459,6 +460,8 @@ class TransactionService:
         user_id: Optional[str] = None,
         symbol: Optional[str] = None,
         days_back: int = DEFAULT_DAYS_BACK,
+        limit: int = RECENT_ORDERS_PAGE_LIMIT,
+        offset: int = 0,
         refresh: bool = False,
     ) -> RecentOrdersResponse:
         orders = self.get_filled_orders(
@@ -482,10 +485,24 @@ class TransactionService:
             for sym in order_symbols(order):
                 activity_by_symbol[sym] = activity_by_symbol.get(sym, 0) + 1
 
+        recent_order_count = sum(
+            1
+            for order in orders
+            if is_order_within_days(order, within_days=RECENT_ACTIVITY_DAYS)
+        )
+
+        total_orders = len(entries)
+        bounded_offset = min(max(offset, 0), total_orders)
+        page_entries = entries[bounded_offset : bounded_offset + limit]
+
         return RecentOrdersResponse(
             days_back=days_back,
             symbol=symbol.upper() if symbol else None,
-            orders=entries,
+            orders=page_entries,
+            total_orders=total_orders,
+            recent_order_count=recent_order_count,
+            limit=limit,
+            offset=bounded_offset,
             suggested_actions=self.suggest_analysis_actions(
                 orders,
                 symbol=symbol,

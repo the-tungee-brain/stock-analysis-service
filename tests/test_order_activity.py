@@ -271,6 +271,41 @@ def test_build_recent_activity_summary():
     assert AnalysisAction.WHAT_CHANGED in [item.action for item in summary.suggested_actions]
 
 
+def test_build_recent_orders_response_paginates():
+    now = datetime.now(timezone.utc)
+    orders = [
+        _make_filled_order(
+            symbol=f"SYM{i}",
+            instruction="BUY",
+            fill_time=now - timedelta(days=1),
+        )
+        for i in range(30)
+    ]
+
+    builder = MagicMock()
+    builder.get_orders = MagicMock(return_value=orders)
+    service = TransactionService(schwab_trader_builder=builder)
+
+    first_page = service.build_recent_orders_response(
+        account_number="123",
+        access_token="token",
+        limit=25,
+        offset=0,
+    )
+    second_page = service.build_recent_orders_response(
+        account_number="123",
+        access_token="token",
+        limit=25,
+        offset=25,
+    )
+
+    assert first_page.total_orders == 30
+    assert len(first_page.orders) == 25
+    assert first_page.offset == 0
+    assert len(second_page.orders) == 5
+    assert second_page.offset == 25
+
+
 def test_fetch_filled_orders_uses_cache():
     now = datetime.now(timezone.utc)
     cached_orders = [

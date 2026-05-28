@@ -93,6 +93,10 @@ class RecentOrdersResponse(BaseModel):
     days_back: int = Field(serialization_alias="daysBack")
     symbol: Optional[str] = None
     orders: List[RecentOrderEntry]
+    total_orders: int = Field(serialization_alias="totalOrders")
+    recent_order_count: int = Field(serialization_alias="recentOrderCount")
+    limit: int
+    offset: int
     suggested_actions: List[SuggestedAnalysisAction] = Field(
         serialization_alias="suggestedActions"
     )

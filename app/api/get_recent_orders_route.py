@@ -11,7 +11,11 @@ from app.dependencies.service_dependencies import (
 from app.models.recent_order_models import RecentOrdersResponse
 from app.services.portfolio_service import PortfolioService
 from app.services.schwab_auth_service import SchwabAuthService, SchwabReauthRequired
-from app.services.transaction_service import DEFAULT_DAYS_BACK, TransactionService
+from app.services.transaction_service import (
+    DEFAULT_DAYS_BACK,
+    RECENT_ORDERS_PAGE_LIMIT,
+    TransactionService,
+)
 
 router = APIRouter()
 
@@ -25,6 +29,17 @@ def get_recent_orders(
         ge=1,
         le=60,
         description="How many days of filled orders to include (Schwab max 60)",
+    ),
+    limit: int = Query(
+        default=RECENT_ORDERS_PAGE_LIMIT,
+        ge=1,
+        le=100,
+        description="Maximum orders to return in this page",
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0,
+        description="Number of orders to skip (newest-first)",
     ),
     refresh: bool = Query(
         default=False,
@@ -53,5 +68,7 @@ def get_recent_orders(
         user_id=user_id,
         symbol=symbol,
         days_back=days_back,
+        limit=limit,
+        offset=offset,
         refresh=refresh,
     )
