@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from app.adapters.user.user_investment_profile_adapter import UserInvestmentProfileAdapter
 from app.adapters.user.user_strategy_journey_adapter import UserStrategyJourneyAdapter
 from app.broker.strategy_detector import SHARES_PER_OPTION_CONTRACT, detect_option_strategy
-from app.core.prompts import AnalysisAction
 from app.models.schwab_models import Position, SchwabAccounts
 from app.models.strategy_models import (
     InvestmentStrategy,
@@ -26,6 +25,10 @@ from app.services.strategy.strategy_catalog import (
     STRATEGY_CATALOG,
     build_initial_steps,
     catalog_item,
+)
+from app.services.strategy.strategy_playbook import (
+    build_symbol_statuses,
+    pick_focus_symbol,
 )
 
 logger = logging.getLogger(__name__)
@@ -318,13 +321,34 @@ class StrategyJourneyService:
         )
 
         positions = positions or []
+        symbol_statuses = build_symbol_statuses(
+            profile=profile,
+            strategy=target,
+            positions=positions,
+            account=account,
+            csp_candidates=csp_candidates,
+            covered_call_candidates=covered_call_candidates,
+            focus_symbol=symbol.upper() if symbol else None,
+        )
         focus_symbol = (
             symbol.upper()
             if symbol
-            else self._primary_symbol(profile, positions)
+            else pick_focus_symbol(symbol_statuses)
+            or self._primary_symbol(profile, positions)
         )
+        if focus_symbol and symbol_statuses:
+            symbol_statuses = build_symbol_statuses(
+                profile=profile,
+                strategy=target,
+                positions=positions,
+                account=account,
+                csp_candidates=csp_candidates,
+                covered_call_candidates=covered_call_candidates,
+                focus_symbol=focus_symbol,
+            )
+
         wheel_phase = None
-        if target in WHEEL_LIKE:
+        if target in WHEEL_LIKE and focus_symbol:
             wheel_phase = self.detect_wheel_phase(
                 symbol=focus_symbol,
                 positions=positions,
@@ -346,11 +370,9 @@ class StrategyJourneyService:
                 wheel_phase=wheel_phase,
                 readiness=readiness,
                 symbol=focus_symbol,
+                symbol_statuses=symbol_statuses,
                 next_actions=next_actions,
             )
-
-        if target in WHEEL_LIKE and not profile.wheel:
-            profile = profile.model_copy(update={"wheel": profile.wheel or None})
 
         if target in WHEEL_LIKE and profile.wheel and not profile.wheel.wheel_symbols:
             next_actions.append(
@@ -360,124 +382,35 @@ class StrategyJourneyService:
                     reason="Choose a stock you're comfortable owning if assigned on a cash-secured put.",
                 )
             )
-
-        if focus_symbol and wheel_phase == WheelPhase.READY_FOR_CSP:
+        elif target == InvestmentStrategy.DIVIDEND and profile.dividend and not profile.dividend.dividend_symbols:
             next_actions.append(
                 StrategyNextAction(
-                    type="research",
-                    title=f"Research {focus_symbol} before selling a put",
-                    reason="Confirm you'd be happy to own shares near your chosen strike.",
-                    symbol=focus_symbol,
-                    action_id=AnalysisAction.RISK_CHECK.value,
+                    type="education",
+                    title="Pick dividend names",
+                    reason="Choose 3–5 reliable payers to research and hold.",
                 )
             )
-            if csp_candidates:
-                top = csp_candidates[0]
-                next_actions.append(
-                    StrategyNextAction(
-                        type="options",
-                        title=f"Consider CSP on {focus_symbol}",
-                        reason=top.get("rationale")
-                        or "Top cash-secured put candidate from your option chain.",
-                        symbol=focus_symbol,
-                        metadata=top,
-                    )
-                )
-
-        if focus_symbol and wheel_phase == WheelPhase.SHORT_PUT_OPEN:
+        elif target == InvestmentStrategy.ETF_CORE and profile.etf_core and not profile.etf_core.target_allocation:
             next_actions.append(
                 StrategyNextAction(
-                    type="monitor",
-                    title=f"Monitor your {focus_symbol} short put",
-                    reason="Watch delta and days to expiration; roll or hold before assignment.",
-                    symbol=focus_symbol,
-                    action_id=AnalysisAction.ASSIGNMENT_RISK.value,
+                    type="education",
+                    title="Set your target allocation",
+                    reason="Define your broad market / bond mix before buying.",
                 )
             )
+        else:
+            for status in symbol_statuses:
+                if status.next_action is not None:
+                    next_actions.append(status.next_action)
 
-        if focus_symbol and wheel_phase == WheelPhase.ASSIGNED_SHARES:
+        if target == InvestmentStrategy.ETF_CORE and profile.etf_core and profile.etf_core.target_allocation:
             next_actions.append(
                 StrategyNextAction(
-                    type="options",
-                    title=f"Sell a covered call on {focus_symbol}",
-                    reason="You hold shares — the next wheel leg is selling an out-of-the-money call.",
-                    symbol=focus_symbol,
+                    type="rebalance",
+                    title="Review allocation drift",
+                    reason="Compare current weights to your target mix.",
                 )
             )
-            if covered_call_candidates:
-                top = covered_call_candidates[0]
-                next_actions.append(
-                    StrategyNextAction(
-                        type="options",
-                        title=f"Covered call candidate on {focus_symbol}",
-                        reason=top.get("rationale")
-                        or "Top covered call candidate from your option chain.",
-                        symbol=focus_symbol,
-                        metadata=top,
-                    )
-                )
-
-        if focus_symbol and wheel_phase == WheelPhase.SHORT_CALL_OPEN:
-            next_actions.append(
-                StrategyNextAction(
-                    type="monitor",
-                    title=f"Monitor {focus_symbol} call assignment risk",
-                    reason="If called away, you're ready to sell another cash-secured put.",
-                    symbol=focus_symbol,
-                    action_id=AnalysisAction.ASSIGNMENT_RISK.value,
-                )
-            )
-
-        if target == InvestmentStrategy.DIVIDEND:
-            symbols = profile.dividend.dividend_symbols if profile.dividend else []
-            if not symbols:
-                next_actions.append(
-                    StrategyNextAction(
-                        type="education",
-                        title="Pick dividend names",
-                        reason="Choose 3–5 reliable payers to research and hold.",
-                    )
-                )
-            else:
-                next_actions.append(
-                    StrategyNextAction(
-                        type="research",
-                        title=f"Review fundamentals for {symbols[0]}",
-                        reason="Check yield, payout ratio, and cash flow before adding size.",
-                        symbol=symbols[0],
-                        action_id=AnalysisAction.RISK_CHECK.value,
-                    )
-                )
-
-        if target == InvestmentStrategy.ETF_CORE:
-            allocation = (
-                profile.etf_core.target_allocation if profile.etf_core else {}
-            )
-            if not allocation:
-                next_actions.append(
-                    StrategyNextAction(
-                        type="education",
-                        title="Set your target allocation",
-                        reason="Define your broad market / bond mix before buying.",
-                    )
-                )
-            else:
-                primary = next(iter(allocation.keys()))
-                next_actions.append(
-                    StrategyNextAction(
-                        type="buy",
-                        title=f"Add to {primary}",
-                        reason="Start or continue building your core ETF position.",
-                        symbol=primary,
-                    )
-                )
-                next_actions.append(
-                    StrategyNextAction(
-                        type="rebalance",
-                        title="Review allocation drift",
-                        reason="Compare current weights to your target mix.",
-                    )
-                )
 
         if not next_actions and current_step:
             next_actions.append(
@@ -494,6 +427,7 @@ class StrategyJourneyService:
             wheel_phase=wheel_phase,
             readiness=readiness,
             symbol=focus_symbol,
+            symbol_statuses=symbol_statuses,
             next_actions=next_actions,
         )
 

@@ -246,6 +246,23 @@ class StrategyScreenerQuote(BaseModel):
     pe_ratio: float | None = Field(default=None, alias="peRatio")
     dividend_yield: float | None = Field(default=None, alias="dividendYield")
     price: float | None = None
+    preset_fit: bool | None = Field(default=None, alias="presetFit")
+
+
+class StrategySymbolStatus(BaseModel):
+    model_config = _STRATEGY_MODEL_CONFIG
+
+    symbol: str
+    held: bool = False
+    portfolio_weight_pct: float | None = Field(
+        default=None, alias="portfolioWeightPct"
+    )
+    wheel_phase: WheelPhase | None = Field(default=None, alias="wheelPhase")
+    status_label: str = Field(alias="statusLabel")
+    next_action: StrategyNextAction | None = Field(
+        default=None, alias="nextAction"
+    )
+    priority: int = 50
 
 
 class ScreenerResultSection(BaseModel):
@@ -265,6 +282,9 @@ class StrategyStockScreenerResult(BaseModel):
     strategy: InvestmentStrategy
     preset: ScreenerPresetSummary
     quotes: list[StrategyScreenerQuote] = Field(default_factory=list)
+    pinned_quotes: list[StrategyScreenerQuote] = Field(
+        default_factory=list, alias="pinnedQuotes"
+    )
     total_count: int = Field(default=0, alias="totalCount")
     page: int = 1
     page_size: int = Field(default=20, alias="pageSize")
@@ -304,6 +324,9 @@ class StrategyRecommendations(BaseModel):
     wheel_phase: WheelPhase | None = Field(default=None, alias="wheelPhase")
     readiness: StrategyReadiness
     symbol: str | None = None
+    symbol_statuses: list[StrategySymbolStatus] = Field(
+        default_factory=list, alias="symbolStatuses"
+    )
     next_actions: list[StrategyNextAction] = Field(
         default_factory=list, alias="nextActions"
     )

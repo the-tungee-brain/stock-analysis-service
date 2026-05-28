@@ -30,8 +30,10 @@ from app.services.strategy.strategy_journey_service import StrategyJourneyServic
 from app.services.strategy.strategy_stock_screener_service import (
     StrategyStockScreenerService,
 )
-from app.services.strategy.strategy_stock_suggestion_service import (
-    StrategyStockSuggestionService,
+from app.broker.strategy_symbol_alignment import strategy_symbol_list
+from app.services.strategy.strategy_playbook import (
+    build_symbol_statuses,
+    pick_focus_symbol,
 )
 
 router = APIRouter()
@@ -219,17 +221,15 @@ async def get_strategy_recommendations(
         strategy_journey_service.get_profile,
         user_id=user_id,
     )
-    journey = await asyncio.to_thread(
-        strategy_journey_service.get_journey,
-        user_id=user_id,
-        strategy=strategy,
-    )
-    focus_symbol = symbol
+    focus_symbol = symbol.upper() if symbol else None
     if not focus_symbol and profile:
-        if profile.wheel and profile.wheel.wheel_symbols:
-            focus_symbol = profile.wheel.wheel_symbols[0]
-        elif profile.dividend and profile.dividend.dividend_symbols:
-            focus_symbol = profile.dividend.dividend_symbols[0]
+        preliminary_statuses = build_symbol_statuses(
+            profile=profile,
+            strategy=strategy,
+            positions=positions,
+            account=account,
+        )
+        focus_symbol = pick_focus_symbol(preliminary_statuses)
 
     if focus_symbol and access_token:
         try:
@@ -268,15 +268,18 @@ async def get_strategy_recommendations(
     if recommendations is None:
         raise HTTPException(status_code=404, detail="Strategy profile not found")
 
-    if profile and strategy_stock_screener_service.supports_stock_screener(strategy):
+    approved_symbols = strategy_symbol_list(profile) if profile else []
+    if (
+        profile
+        and not approved_symbols
+        and strategy_stock_screener_service.supports_stock_screener(strategy)
+    ):
         screener = await asyncio.to_thread(
             strategy_stock_screener_service.screen_stocks,
             profile=profile,
             strategy=strategy,
-            limit=25,
             page=1,
             page_size=25,
-            held_symbols=_held_symbols(positions),
         )
         if screener is not None:
             recommendations = recommendations.model_copy(

@@ -21,6 +21,7 @@ from app.models.strategy_models import (
     StrategyStockScreenerResult,
     UserInvestmentProfile,
 )
+from app.broker.strategy_symbol_alignment import strategy_symbol_list
 from app.screener.equity_query_compiler import compile_equity_query
 from app.screener.etf_universe_screener import screen_etf_preset
 from app.screener.preset_registry import (
@@ -213,12 +214,19 @@ class StrategyStockScreenerService:
             strategy=strategy,
             preset_id=preset_id,
         )
+        screener_filters = filters_from_preset(preset)
+        pinned_quotes = self._fetch_pinned_quotes(
+            profile=profile,
+            strategy=strategy,
+            filters=screener_filters,
+        )
 
         return StrategyStockScreenerResult(
             strategy=strategy,
             preset=preset_summary(preset),
-            filters=filters_from_preset(preset),
+            filters=screener_filters,
             quotes=quotes,
+            pinned_quotes=pinned_quotes,
             total_count=total,
             page=resolved_page,
             page_size=resolved_page_size,
@@ -257,6 +265,70 @@ class StrategyStockScreenerService:
                 )
             )
         return sections
+
+    @staticmethod
+    def _fetch_pinned_quotes(
+        *,
+        profile: UserInvestmentProfile,
+        strategy: InvestmentStrategy,
+        filters: StrategyScreenerFilters | None,
+    ) -> list[StrategyScreenerQuote]:
+        symbols = strategy_symbol_list(profile)
+        if not symbols:
+            return []
+
+        pinned: list[StrategyScreenerQuote] = []
+        for symbol in symbols:
+            upper = symbol.upper()
+            if not upper:
+                continue
+            try:
+                info = yf.Ticker(upper).info or {}
+            except Exception:
+                logger.debug("Unable to load pinned quote for %s", upper)
+                continue
+
+            quote = StrategyStockScreenerService._map_equity_quote(
+                {
+                    "symbol": upper,
+                    "shortName": info.get("shortName") or info.get("longName"),
+                    "sector": info.get("sector") or info.get("category"),
+                    "marketCap": info.get("marketCap") or info.get("totalAssets"),
+                    "trailingPE": info.get("trailingPE"),
+                    "dividendYield": info.get("dividendYield") or info.get("yield"),
+                    "regularMarketPrice": info.get("regularMarketPrice"),
+                }
+            )
+            if not quote.symbol:
+                continue
+            quote = quote.model_copy(
+                update={
+                    "preset_fit": _quote_meets_filters(quote, filters),
+                }
+            )
+            pinned.append(quote)
+        return pinned
+
+
+def _quote_meets_filters(
+    quote: StrategyScreenerQuote,
+    filters: StrategyScreenerFilters | None,
+) -> bool | None:
+    if filters is None:
+        return None
+    if filters.min_market_cap and quote.market_cap is not None:
+        if quote.market_cap < filters.min_market_cap:
+            return False
+    if filters.max_pe is not None and quote.pe_ratio is not None:
+        if quote.pe_ratio > filters.max_pe:
+            return False
+    if filters.require_dividend:
+        if quote.dividend_yield is None or quote.dividend_yield <= 0:
+            return False
+    if filters.min_dividend_yield is not None and quote.dividend_yield is not None:
+        if quote.dividend_yield < filters.min_dividend_yield:
+            return False
+    return True
 
 
 def _load_preset_or_raise(preset_id: str) -> ScreenerPreset:
