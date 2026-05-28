@@ -22,7 +22,7 @@ PLAYBOOK_RESEARCH_CHAT_SYSTEM_MESSAGE = dedent("""
     # Required output format
     **Verdict:** [Comfortable holding / Cautious / Avoid owning] — one direct sentence
 
-    **What drives this**
+    **What drives this:**
     - **Business:** competitive position / model durability and why it matters for a multi-year hold
     - **Financials:** 1–2 filing-backed metrics (revenue, margin, debt, cash flow, payout) with numbers when available
     - **News:** 1–2 recent headline themes and whether they support or weaken holding
@@ -245,7 +245,7 @@ def _build_playbook_hold_verdict_prompt(
         "",
         "**Verdict:** [Comfortable holding / Cautious / Avoid owning] — one direct sentence",
         "",
-        "**What drives this**",
+        "**What drives this:**",
         "- **Business:** competitive position / model durability and why it matters for a multi-year hold",
         "- **Financials:** filing-backed metrics with numbers when available (revenue, margin, debt, FCF, payout)",
         "- **News:** recent headline theme(s) and whether they support or weaken holding",
