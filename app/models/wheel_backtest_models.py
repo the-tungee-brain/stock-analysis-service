@@ -84,6 +84,10 @@ class WheelBacktestResponse(BaseModel):
     symbol: str
     lookback_years: int = Field(alias="lookbackYears")
     start_date: date = Field(alias="startDate")
+    history_start_date: date = Field(alias="historyStartDate")
+    first_trade_date: date | None = Field(default=None, alias="firstTradeDate")
+    last_trade_date: date | None = Field(default=None, alias="lastTradeDate")
+    csp_rounds: int = Field(alias="cspRounds")
     end_date: date = Field(alias="endDate")
     trading_days: int = Field(alias="tradingDays")
     config: dict[str, float | int | bool]

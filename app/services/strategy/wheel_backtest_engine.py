@@ -97,6 +97,12 @@ class WheelBacktestResult:
     symbol: str
     lookback_years: int
     start_date: date
+    """First CSP date; P/L and CAGR use this through end_date."""
+    history_start_date: date
+    """First bar in the downloaded window (vol warmup before first trade)."""
+    first_trade_date: date | None
+    last_trade_date: date | None
+    csp_rounds: int
     end_date: date
     trading_days: int
     config: dict[str, Any]
@@ -219,6 +225,9 @@ def run_wheel_backtest(
     calls_assigned = 0
     calls_expired_otm = 0
     skipped_cash = 0
+    csp_blocked_active = False
+    first_trade_date: date | None = None
+    last_trade_date: date | None = None
     collateral_reserved = 0.0
     current_cycle_month: str | None = None
     trades: list[WheelTradeEvent] = []
@@ -300,6 +309,7 @@ def run_wheel_backtest(
     def open_short_put(idx: int) -> None:
         nonlocal phase, cash, open_leg, total_premium, total_fees, skipped_cash, next_entry_idx
         nonlocal capital_top_ups, wheel_cycle_id, collateral_reserved, current_cycle_month
+        nonlocal csp_blocked_active, first_trade_date, last_trade_date
 
         bar = bars[idx]
         exp_idx = min(idx + config.dte_days, n - 1)
@@ -341,9 +351,13 @@ def run_wheel_backtest(
                         note=f"Added cash to secure ${strike:.2f} put (1 lot)",
                     )
             else:
-                skipped_cash += 1
+                if not csp_blocked_active:
+                    skipped_cash += 1
+                    csp_blocked_active = True
                 next_entry_idx = idx + 1
                 return
+
+        csp_blocked_active = False
 
         premium_ps = _premium_per_share(
             underlying=bar.close,
@@ -377,6 +391,9 @@ def run_wheel_backtest(
         current_cycle_month = bar.trading_date.strftime("%Y-%m")
         collateral_reserved = collateral
         phase = WheelPhase.SHORT_PUT
+        if first_trade_date is None:
+            first_trade_date = bar.trading_date
+        last_trade_date = bar.trading_date
         record(
             bar.trading_date,
             "sell_csp",
@@ -403,6 +420,7 @@ def run_wheel_backtest(
 
     def open_short_call(idx: int) -> None:
         nonlocal phase, cash, open_leg, total_premium, total_fees, next_entry_idx
+        nonlocal last_trade_date
 
         bar = bars[idx]
         exp_idx = min(idx + config.dte_days, n - 1)
@@ -455,6 +473,7 @@ def run_wheel_backtest(
             iv_percent=iv,
         )
         phase = WheelPhase.SHORT_CALL
+        last_trade_date = bar.trading_date
         record(
             bar.trading_date,
             "sell_cc",
@@ -480,7 +499,7 @@ def run_wheel_backtest(
     def settle_put(idx: int) -> None:
         nonlocal phase, cash, shares, cost_basis_per_share, open_leg
         nonlocal put_assignments, puts_expired_otm, next_entry_idx
-        nonlocal collateral_reserved, current_cycle_month
+        nonlocal collateral_reserved, current_cycle_month, last_trade_date
 
         leg = open_leg
         if leg is None:
@@ -495,6 +514,7 @@ def run_wheel_backtest(
             cost_basis_per_share = leg.strike - leg.premium_per_share
             put_assignments += 1
             effective_entry = leg.strike - leg.premium_per_share
+            last_trade_date = bar.trading_date
             record(
                 bar.trading_date,
                 "put_assigned",
@@ -516,6 +536,7 @@ def run_wheel_backtest(
             phase = WheelPhase.LONG_STOCK
         else:
             puts_expired_otm += 1
+            last_trade_date = bar.trading_date
             record(
                 bar.trading_date,
                 "put_expired",
@@ -539,7 +560,7 @@ def run_wheel_backtest(
     def settle_call(idx: int) -> None:
         nonlocal phase, cash, shares, cost_basis_per_share, open_leg
         nonlocal calls_assigned, calls_expired_otm, completed_cycles, next_entry_idx
-        nonlocal current_cycle_month
+        nonlocal current_cycle_month, last_trade_date
 
         leg = open_leg
         if leg is None:
@@ -554,6 +575,7 @@ def run_wheel_backtest(
             cost_basis_per_share = 0.0
             calls_assigned += 1
             completed_cycles += 1
+            last_trade_date = bar.trading_date
             record(
                 bar.trading_date,
                 "call_assigned",
@@ -574,6 +596,7 @@ def run_wheel_backtest(
             phase = WheelPhase.CASH
         else:
             calls_expired_otm += 1
+            last_trade_date = bar.trading_date
             record(
                 bar.trading_date,
                 "call_expired",
@@ -645,16 +668,18 @@ def run_wheel_backtest(
             }
         )
 
-    start_date = bars[0].trading_date
+    history_start_date = bars[0].trading_date
     end_date = bars[-1].trading_date
+    start_date = first_trade_date or history_start_date
     ending_equity = equity_mark(bars[-1].close)
+    csp_rounds = sum(1 for event in trades if event.action == "sell_csp")
     capital_deployed = starting_cash + capital_top_ups
     total_pl_usd = ending_equity - capital_deployed
     total_return_pct = (
         ((ending_equity / capital_deployed) - 1.0) * 100.0 if capital_deployed > 0 else 0.0
     )
 
-    elapsed_years = (end_date - start_date).days / 365.25
+    elapsed_years = max((end_date - start_date).days, 1) / 365.25
     cagr_pct = None
     if elapsed_years >= 1 and capital_deployed > 0 and ending_equity > 0:
         cagr_pct = round(
@@ -662,11 +687,20 @@ def run_wheel_backtest(
             2,
         )
 
-    spot_start = bars[seed_idx].close
+    first_csp = next((e for e in trades if e.action == "sell_csp"), None)
+    spot_start = (
+        first_csp.stock_price_usd
+        if first_csp and first_csp.stock_price_usd is not None
+        else bars[seed_idx].close
+    )
     spot_end = bars[-1].close
     buy_hold_shares = starting_cash / spot_start if spot_start > 0 else 0.0
     bah_dividends = 0.0
-    for bar in bars[seed_idx:]:
+    first_trade_idx = next(
+        (i for i, bar in enumerate(bars) if bar.trading_date == start_date),
+        seed_idx,
+    )
+    for bar in bars[first_trade_idx:]:
         div_per_share = dividends.get(bar.trading_date)
         if div_per_share:
             bah_dividends += div_per_share * buy_hold_shares
@@ -706,7 +740,13 @@ def run_wheel_backtest(
         )
     if skipped_cash > 0:
         assumptions.append(
-            f"{skipped_cash} days could not open a new CSP — insufficient cash."
+            f"{skipped_cash} period(s) with insufficient cash for the next CSP "
+            f"(strike × 100 exceeds wallet; no new puts until cash is enough)."
+        )
+    if csp_rounds > 0 and last_trade_date and last_trade_date < end_date:
+        assumptions.append(
+            f"Last option trade {last_trade_date.isoformat()}; "
+            f"wallet could not fund further CSP collateral before {end_date.isoformat()}."
         )
     assumptions.extend(
         [
@@ -717,7 +757,8 @@ def run_wheel_backtest(
         "European-style expiration: puts assign if close <= strike; calls assign if close >= strike.",
         "No early assignment, rolls, or margin interest modeled.",
         "Stock splits adjust share count and strike; dividends paid on ex-dates while long shares.",
-        "Split- and dividend-adjusted daily closes (yfinance auto_adjust=True).",
+        "Total-return-adjusted daily closes (yfinance auto_adjust=True; "
+        "historical prices differ from raw quotes).",
         f"Fixed {config.dte_days} trading-day holding period between entries (approx. calendar DTE).",
         (
             f"Buy & hold benchmark: ${starting_cash:,.0f} buys shares at "
@@ -731,6 +772,10 @@ def run_wheel_backtest(
         symbol=config.symbol.upper(),
         lookback_years=config.lookback_years,
         start_date=start_date,
+        history_start_date=history_start_date,
+        first_trade_date=first_trade_date,
+        last_trade_date=last_trade_date,
+        csp_rounds=csp_rounds,
         end_date=end_date,
         trading_days=n,
         config={
