@@ -42,6 +42,8 @@ class WheelBacktestConfig:
     iv_cap_pct: float = 120.0
     premium_haircut: float = 0.95
     """Multiply theoretical premium to approximate bid vs mid (conservative)."""
+    maintain_one_lot: bool = True
+    """Top up cash to sell one CSP when SPY/notional rises above idle cash (disclosed)."""
 
 
 @dataclass
@@ -65,6 +67,9 @@ class WheelTradeEvent:
     premium_usd: float
     fees_usd: float
     close_at_event: float
+    stock_price_usd: float | None = None
+    effective_entry_price_usd: float | None = None
+    effective_exit_price_usd: float | None = None
     note: str | None = None
 
 
@@ -79,6 +84,7 @@ class WheelBacktestResult:
     assumptions: list[str]
     starting_cash_usd: float
     ending_equity_usd: float
+    total_pl_usd: float
     total_return_pct: float
     cagr_pct: float | None
     buy_and_hold_return_pct: float
@@ -92,6 +98,11 @@ class WheelBacktestResult:
     calls_expired_otm: int
     completed_wheel_cycles: int
     skipped_trades_insufficient_cash: int
+    capital_top_ups_usd: float
+    buy_and_hold_ending_usd: float
+    spot_price_at_start: float
+    spot_price_at_end: float
+    wheel_cycles: list[dict[str, Any]]
     trades: list[dict[str, Any]]
     equity_curve: list[dict[str, Any]]
     annual_summary: list[dict[str, Any]]
@@ -175,6 +186,7 @@ def run_wheel_backtest(
     cost_basis_per_share = 0.0
     open_leg: OpenOptionLeg | None = None
     completed_cycles = 0
+    capital_top_ups = 0.0
 
     total_premium = 0.0
     total_fees = 0.0
@@ -223,6 +235,9 @@ def run_wheel_backtest(
         premium_usd: float = 0.0,
         fees_usd: float = 0.0,
         close_at_event: float,
+        stock_price_usd: float | None = None,
+        effective_entry_price_usd: float | None = None,
+        effective_exit_price_usd: float | None = None,
         note: str | None = None,
     ) -> None:
         trades.append(
@@ -234,12 +249,16 @@ def run_wheel_backtest(
                 premium_usd=round(premium_usd, 2),
                 fees_usd=round(fees_usd, 2),
                 close_at_event=round(close_at_event, 4),
+                stock_price_usd=stock_price_usd,
+                effective_entry_price_usd=effective_entry_price_usd,
+                effective_exit_price_usd=effective_exit_price_usd,
                 note=note,
             )
         )
 
     def open_short_put(idx: int) -> None:
         nonlocal phase, cash, open_leg, total_premium, total_fees, skipped_cash, next_entry_idx
+        nonlocal capital_top_ups
 
         bar = bars[idx]
         exp_idx = min(idx + config.dte_days, n - 1)
@@ -265,9 +284,15 @@ def run_wheel_backtest(
 
         collateral = strike * shares_per_lot
         if cash < collateral:
-            skipped_cash += 1
-            next_entry_idx = idx + 1
-            return
+            if config.maintain_one_lot:
+                target_cash = collateral * 1.05
+                if cash < target_cash:
+                    capital_top_ups += target_cash - cash
+                    cash = target_cash
+            else:
+                skipped_cash += 1
+                next_entry_idx = idx + 1
+                return
 
         premium_ps = _premium_per_share(
             underlying=bar.close,
@@ -306,6 +331,7 @@ def run_wheel_backtest(
             premium_usd=premium_total,
             fees_usd=fees,
             close_at_event=bar.close,
+            stock_price_usd=round(bar.close, 4),
             note=f"DTE={dte}, IV={iv:.1f}%",
         )
 
@@ -371,6 +397,7 @@ def run_wheel_backtest(
             premium_usd=premium_total,
             fees_usd=fees,
             close_at_event=bar.close,
+            stock_price_usd=round(bar.close, 4),
             note=f"DTE={dte}, IV={iv:.1f}%",
         )
 
@@ -389,13 +416,19 @@ def run_wheel_backtest(
             shares = shares_per_lot
             cost_basis_per_share = leg.strike - leg.premium_per_share
             put_assignments += 1
+            effective_entry = leg.strike - leg.premium_per_share
             record(
                 bar.trading_date,
                 "put_assigned",
                 put_call="PUT",
                 strike=leg.strike,
                 close_at_event=close,
-                note=f"Close {close:.2f} <= strike {leg.strike:.2f}",
+                stock_price_usd=round(close, 4),
+                effective_entry_price_usd=round(effective_entry, 4),
+                note=(
+                    f"Assigned at strike ${leg.strike:.2f}; "
+                    f"effective ~${effective_entry:.2f}/sh after put premium"
+                ),
             )
             phase = WheelPhase.LONG_STOCK
         else:
@@ -435,7 +468,12 @@ def run_wheel_backtest(
                 put_call="CALL",
                 strike=leg.strike,
                 close_at_event=close,
-                note=f"Close {close:.2f} >= strike {leg.strike:.2f}",
+                stock_price_usd=round(close, 4),
+                effective_exit_price_usd=round(leg.strike, 4),
+                note=(
+                    f"Called away at ${leg.strike:.2f}/sh; "
+                    f"stock closed ${close:.2f}"
+                ),
             )
             phase = WheelPhase.CASH
         else:
@@ -504,31 +542,57 @@ def run_wheel_backtest(
     start_date = bars[0].trading_date
     end_date = bars[-1].trading_date
     ending_equity = equity_mark(bars[-1].close)
-    total_return_pct = ((ending_equity / starting_cash) - 1.0) * 100.0 if starting_cash > 0 else 0.0
+    capital_deployed = starting_cash + capital_top_ups
+    total_pl_usd = ending_equity - capital_deployed
+    total_return_pct = (
+        ((ending_equity / capital_deployed) - 1.0) * 100.0 if capital_deployed > 0 else 0.0
+    )
 
     elapsed_years = (end_date - start_date).days / 365.25
     cagr_pct = None
-    if elapsed_years >= 1 and starting_cash > 0 and ending_equity > 0:
+    if elapsed_years >= 1 and capital_deployed > 0 and ending_equity > 0:
         cagr_pct = round(
-            ((ending_equity / starting_cash) ** (1 / elapsed_years) - 1) * 100.0,
+            ((ending_equity / capital_deployed) ** (1 / elapsed_years) - 1) * 100.0,
             2,
         )
 
-    first_close = bars[0].close
-    last_close = bars[-1].close
+    spot_start = bars[seed_idx].close
+    spot_end = bars[-1].close
+    buy_hold_shares = starting_cash / spot_start if spot_start > 0 else 0.0
+    bah_dividends = 0.0
+    for bar in bars[seed_idx:]:
+        div_per_share = dividends.get(bar.trading_date)
+        if div_per_share:
+            bah_dividends += div_per_share * buy_hold_shares
+    buy_hold_equity = buy_hold_shares * spot_end + bah_dividends
     buy_hold_return = (
-        ((last_close / first_close) - 1.0) * 100.0 if first_close > 0 else 0.0
+        ((buy_hold_equity / starting_cash) - 1.0) * 100.0 if starting_cash > 0 else 0.0
     )
     buy_hold_cagr = None
-    if elapsed_years >= 1 and first_close > 0 and last_close > 0:
+    if elapsed_years >= 1 and starting_cash > 0 and buy_hold_equity > 0:
         buy_hold_cagr = round(
-            ((last_close / first_close) ** (1 / elapsed_years) - 1) * 100.0,
+            ((buy_hold_equity / starting_cash) ** (1 / elapsed_years) - 1) * 100.0,
             2,
         )
 
+    wheel_cycles = _build_wheel_cycles(trades)
     annual_summary = _build_annual_summary(equity_curve, trades)
 
     assumptions = [
+        f"Starting cash ${starting_cash:,.0f} = cash-secured put collateral for "
+        f"{config.contracts} contract(s) at the first trade, plus 5% buffer.",
+    ]
+    if capital_top_ups > 0:
+        assumptions.append(
+            f"Capital top-ups ${capital_top_ups:,.0f} when cash could not cover "
+            f"the next CSP (maintain one {config.contracts}-lot wheel as underlying rises)."
+        )
+    if skipped_cash > 0:
+        assumptions.append(
+            f"{skipped_cash} trading days skipped — insufficient cash and top-ups disabled."
+        )
+    assumptions.extend(
+        [
         "Premiums estimated with Black-Scholes using rolling realized volatility "
         f"({config.vol_lookback_days} trading-day window), not historical option quotes.",
         f"Short options opened at {config.premium_haircut * 100:.0f}% of theoretical "
@@ -538,7 +602,13 @@ def run_wheel_backtest(
         "Stock splits adjust share count and strike; dividends paid on ex-dates while long shares.",
         "Unadjusted daily closes used for settlement (yfinance auto_adjust=False).",
         f"Fixed {config.dte_days} trading-day holding period between entries (approx. calendar DTE).",
-    ]
+        (
+            f"Buy & hold benchmark: ${starting_cash:,.0f} buys shares at "
+            f"${spot_start:.2f} on first trade date; dividends collected; "
+            f"marked at ${spot_end:.2f} on last day."
+        ),
+        ]
+    )
 
     return WheelBacktestResult(
         symbol=config.symbol.upper(),
@@ -558,6 +628,7 @@ def run_wheel_backtest(
         assumptions=assumptions,
         starting_cash_usd=round(starting_cash, 2),
         ending_equity_usd=round(ending_equity, 2),
+        total_pl_usd=round(total_pl_usd, 2),
         total_return_pct=round(total_return_pct, 2),
         cagr_pct=cagr_pct,
         buy_and_hold_return_pct=round(buy_hold_return, 2),
@@ -571,6 +642,11 @@ def run_wheel_backtest(
         calls_expired_otm=calls_expired_otm,
         completed_wheel_cycles=completed_cycles,
         skipped_trades_insufficient_cash=skipped_cash,
+        capital_top_ups_usd=round(capital_top_ups, 2),
+        buy_and_hold_ending_usd=round(buy_hold_equity, 2),
+        spot_price_at_start=round(spot_start, 4),
+        spot_price_at_end=round(spot_end, 4),
+        wheel_cycles=wheel_cycles,
         trades=[_trade_to_dict(event) for event in trades],
         equity_curve=equity_curve,
         annual_summary=annual_summary,
@@ -578,7 +654,7 @@ def run_wheel_backtest(
 
 
 def _trade_to_dict(event: WheelTradeEvent) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "date": event.event_date.isoformat(),
         "action": event.action,
         "putCall": event.put_call,
@@ -588,6 +664,55 @@ def _trade_to_dict(event: WheelTradeEvent) -> dict[str, Any]:
         "close": event.close_at_event,
         "note": event.note,
     }
+    if event.stock_price_usd is not None:
+        payload["stockPrice"] = event.stock_price_usd
+    if event.effective_entry_price_usd is not None:
+        payload["effectiveEntryPrice"] = event.effective_entry_price_usd
+    if event.effective_exit_price_usd is not None:
+        payload["effectiveExitPrice"] = event.effective_exit_price_usd
+    return payload
+
+
+def _build_wheel_cycles(trades: list[WheelTradeEvent]) -> list[dict[str, Any]]:
+    cycles: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+
+    for event in trades:
+        if event.action == "put_assigned":
+            if current and not current.get("completed"):
+                cycles.append(current)
+            current = {
+                "cycle": len(cycles) + 1,
+                "putStrike": event.strike,
+                "stockEntryDate": event.event_date.isoformat(),
+                "stockEntryClose": event.stock_price_usd or event.close_at_event,
+                "effectiveEntryPrice": event.effective_entry_price_usd,
+                "callStrike": None,
+                "stockExitDate": None,
+                "stockExitClose": None,
+                "effectiveExitPrice": None,
+                "completed": False,
+            }
+        elif event.action == "sell_cc" and current is not None:
+            current["callStrike"] = event.strike
+        elif event.action == "call_assigned" and current is not None:
+            current["stockExitDate"] = event.event_date.isoformat()
+            current["stockExitClose"] = event.stock_price_usd or event.close_at_event
+            current["effectiveExitPrice"] = event.effective_exit_price_usd
+            current["completed"] = True
+            entry = current.get("effectiveEntryPrice")
+            exit_px = current.get("effectiveExitPrice")
+            if entry is not None and exit_px is not None:
+                current["stockRoundTripPlUsd"] = round(
+                    (exit_px - entry) * SHARES_PER_CONTRACT, 2
+                )
+            cycles.append(current)
+            current = None
+
+    if current is not None and not current.get("completed"):
+        cycles.append(current)
+
+    return cycles
 
 
 def _build_annual_summary(
@@ -631,12 +756,14 @@ def _build_annual_summary(
         row = by_year[year]
         start = row["startEquityUsd"]
         end = row["endEquityUsd"]
-        row_return = ((end / start) - 1.0) * 100.0 if start > 0 else 0.0
+        pl_usd = end - start
+        row_return = (pl_usd / start) * 100.0 if start > 0 else 0.0
         summary.append(
             {
                 "year": year,
                 "startEquityUsd": round(start, 2),
                 "endEquityUsd": round(end, 2),
+                "plUsd": round(pl_usd, 2),
                 "returnPct": round(row_return, 2),
                 "premiumUsd": row["premiumUsd"],
                 "feesUsd": row["feesUsd"],

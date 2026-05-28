@@ -7,6 +7,7 @@ import pandas as pd
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.models.wheel_backtest_models import (
     WheelBacktestAnnualRow,
+    WheelBacktestCycle,
     WheelBacktestEquityPoint,
     WheelBacktestResponse,
     WheelBacktestTrade,
@@ -88,6 +89,7 @@ class WheelBacktestService:
             assumptions=result.assumptions,
             startingCashUsd=result.starting_cash_usd,
             endingEquityUsd=result.ending_equity_usd,
+            totalPlUsd=result.total_pl_usd,
             totalReturnPct=result.total_return_pct,
             cagrPct=result.cagr_pct,
             buyAndHoldReturnPct=result.buy_and_hold_return_pct,
@@ -101,6 +103,13 @@ class WheelBacktestService:
             callsExpiredOtm=result.calls_expired_otm,
             completedWheelCycles=result.completed_wheel_cycles,
             skippedTradesInsufficientCash=result.skipped_trades_insufficient_cash,
+            capitalTopUpsUsd=result.capital_top_ups_usd,
+            buyAndHoldEndingUsd=result.buy_and_hold_ending_usd,
+            spotPriceAtStart=result.spot_price_at_start,
+            spotPriceAtEnd=result.spot_price_at_end,
+            wheelCycles=[
+                WheelBacktestCycle.model_validate(row) for row in result.wheel_cycles
+            ],
             trades=[WheelBacktestTrade.model_validate(row) for row in result.trades],
             equityCurve=[
                 WheelBacktestEquityPoint.model_validate(row)
