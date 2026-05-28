@@ -111,10 +111,14 @@ def estimate_delta_black_scholes(
 def standard_strike_increment(underlying: float) -> float:
     """
     US equity/ETF standard strike spacing (approximate OCC listing intervals).
-    Under $200: $2.50 steps (e.g. 100, 102.5, 105). $200+: $5 steps (e.g. 500, 505, 510).
+    Under $5: $0.50; $5–$25: $1; $25–$200: $2.50; $200+: $5.
     """
     if underlying <= 0:
-        return 2.5
+        return 0.5
+    if underlying < 5.0:
+        return 0.5
+    if underlying < 25.0:
+        return 1.0
     if underlying < 200.0:
         return 2.5
     return 5.0
@@ -224,11 +228,25 @@ def _nearest_listed_strike(
 
     if not candidates:
         if is_put:
-            strike = round(snap_strike_to_standard_grid(underlying - step, underlying), 2)
-            return strike if 0 < strike < underlying else None
+            return _fallback_put_strike_below_spot(underlying)
         return None
 
     return min(candidates, key=lambda strike: abs(strike - continuous))
+
+
+def _fallback_put_strike_below_spot(underlying: float) -> float | None:
+    """Listed OTM put strike strictly below spot when delta grid search has no candidates."""
+    if underlying <= 0:
+        return None
+    step = standard_strike_increment(underlying)
+    strike = snap_strike_to_standard_grid(underlying - step * 0.01, underlying)
+    while strike >= underlying and strike > 0:
+        strike = round(strike - step, 2)
+    if strike <= 0:
+        strike = step
+    if 0 < strike < underlying:
+        return strike
+    return None
 
 
 def find_strike_for_abs_delta(

@@ -70,12 +70,26 @@ def test_find_strike_targets_put_delta():
 
 
 def test_standard_strike_grid_spacing():
+    assert standard_strike_increment(3.0) == 0.5
+    assert standard_strike_increment(10.0) == 1.0
     assert standard_strike_increment(100.0) == 2.5
     assert standard_strike_increment(199.0) == 2.5
     assert standard_strike_increment(200.0) == 5.0
     assert standard_strike_increment(500.0) == 5.0
     assert snap_strike_to_standard_grid(171.08, 100.0) == 170.0
     assert snap_strike_to_standard_grid(503.2, 500.0) == 505.0
+
+
+def test_find_put_strike_for_low_priced_underlying():
+    strike = find_strike_for_abs_delta(
+        underlying=2.0,
+        days_to_expiration=30,
+        put_call="PUT",
+        target_abs_delta=0.25,
+        iv_percent=25.0,
+    )
+    assert strike is not None
+    assert 0 < strike < 2.0
 
 
 def test_find_call_strike_at_or_above_assignment_floor():
@@ -90,6 +104,29 @@ def test_find_call_strike_at_or_above_assignment_floor():
     )
     assert strike is not None
     assert strike >= assignment_strike
+
+
+def test_seed_collateral_when_early_spot_is_below_two_fifty():
+    """Early history can be under $2.50; seed scan + finer strike grid must still start."""
+    prices = [2.0] * 30 + [100.0] * 40
+    bars = [
+        PriceBar(trading_date=date(2020, 1, 2) + timedelta(days=i), close=p)
+        for i, p in enumerate(prices)
+    ]
+    result = run_wheel_backtest(
+        bars,
+        dividends={},
+        splits={},
+        config=WheelBacktestConfig(
+            symbol="TEST",
+            lookback_years=5,
+            target_delta=0.25,
+            dte_days=30,
+            vol_lookback_days=5,
+        ),
+    )
+    assert result.initial_put_strike_usd > 0
+    assert result.trades
 
 
 def test_covered_calls_respect_assignment_strike_floor_in_backtest():

@@ -640,25 +640,38 @@ def run_wheel_backtest(
         open_leg = None
         next_entry_idx = idx + 1
 
-    # Seed starting cash from first CSP collateral at first trade window.
-    seed_idx = config.vol_lookback_days
-    seed_iv = realized_volatility_percent(
-        closes,
-        seed_idx,
-        lookback=config.vol_lookback_days,
-        floor_pct=config.iv_floor_pct,
-        cap_pct=config.iv_cap_pct,
-    )
-    seed_strike = find_strike_for_abs_delta(
-        underlying=bars[seed_idx].close,
-        days_to_expiration=config.dte_days,
-        put_call="PUT",
-        target_abs_delta=config.target_delta,
-        iv_percent=seed_iv,
-        risk_free_rate=config.risk_free_rate,
-    )
-    if seed_strike is None:
-        raise ValueError("Could not derive initial collateral from price history")
+    # Seed starting cash from first CSP collateral once vol window + put strike exist.
+    seed_search_start = config.vol_lookback_days
+    seed_search_end = min(n - 1, seed_search_start + 252)
+    seed_idx: int | None = None
+    seed_strike: float | None = None
+    for idx in range(seed_search_start, seed_search_end + 1):
+        seed_iv = realized_volatility_percent(
+            closes,
+            idx,
+            lookback=config.vol_lookback_days,
+            floor_pct=config.iv_floor_pct,
+            cap_pct=config.iv_cap_pct,
+        )
+        strike = find_strike_for_abs_delta(
+            underlying=bars[idx].close,
+            days_to_expiration=config.dte_days,
+            put_call="PUT",
+            target_abs_delta=config.target_delta,
+            iv_percent=seed_iv,
+            risk_free_rate=config.risk_free_rate,
+        )
+        if strike is not None:
+            seed_idx = idx
+            seed_strike = strike
+            break
+
+    if seed_idx is None or seed_strike is None:
+        raise ValueError(
+            f"Could not derive initial collateral from price history for {config.symbol} "
+            f"(no listed put strike in the first ~{seed_search_end - seed_search_start + 1} "
+            f"trading days after the vol window; spot may be too low for standard strikes)"
+        )
     initial_stock_price = bars[seed_idx].close
     initial_put_strike = seed_strike
     initial_collateral = seed_strike * shares_per_lot
