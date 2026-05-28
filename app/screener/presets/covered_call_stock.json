@@ -1,0 +1,43 @@
+{
+  "id": "covered_call_stock",
+  "label": "Covered Call Stocks",
+  "description": "Stocks suitable for holding and selling covered calls: stable, moderately volatile, with tight option spreads.",
+  "equity_query": {
+    "operator": "and",
+    "clauses": [
+      {"op": "is-in", "field": "exchange", "values": ["NMS", "NYQ"]},
+      {"op": "eq", "field": "region", "value": "us"},
+      {"op": "gte", "field": "marketCap", "value": 5000000000},
+      {"op": "gte", "field": "regularMarketPrice", "value": 20},
+      {"op": "lte", "field": "regularMarketPrice", "value": 300},
+      {"op": "lte", "field": "trailingPE", "value": 40},
+      {
+        "op": "is-in",
+        "field": "sector",
+        "values": [
+          "Consumer Defensive",
+          "Healthcare",
+          "Utilities",
+          "Financial Services",
+          "Industrials",
+          "Technology"
+        ]
+      }
+    ]
+  },
+  "post_filters": {
+    "trend": {
+      "min_200dma_slope": 0.0,
+      "price_above_200dma": true
+    },
+    "options_liquidity": {
+      "target_dte_range": [21, 60],
+      "target_delta_range": [0.20, 0.40],
+      "min_oi": 300,
+      "max_bid_ask_spread_pct": 0.10
+    },
+    "premium": {
+      "min_monthly_return_pct": 0.01
+    }
+  }
+}

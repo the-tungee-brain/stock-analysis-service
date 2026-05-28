@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.screener_preset_models import ScreenerPresetSummary
+
 _STRATEGY_MODEL_CONFIG = ConfigDict(populate_by_name=True)
 
 
@@ -223,6 +225,42 @@ class StrategyStockSuggestions(BaseModel):
     generated_at: datetime | None = Field(default=None, alias="generatedAt")
 
 
+class StrategyScreenerFilters(BaseModel):
+    model_config = _STRATEGY_MODEL_CONFIG
+
+    min_market_cap: int = Field(default=5_000_000_000, alias="minMarketCap")
+    max_pe: float | None = Field(default=50.0, alias="maxPe")
+    require_dividend: bool = Field(default=True, alias="requireDividend")
+    min_dividend_yield: float | None = Field(default=None, alias="minDividendYield")
+    sectors: list[str] | None = None
+    exchanges: list[str] = Field(default_factory=lambda: ["NMS", "NYQ"])
+
+
+class StrategyScreenerQuote(BaseModel):
+    model_config = _STRATEGY_MODEL_CONFIG
+
+    symbol: str
+    company_name: str | None = Field(default=None, alias="companyName")
+    sector: str | None = None
+    market_cap: float | None = Field(default=None, alias="marketCap")
+    pe_ratio: float | None = Field(default=None, alias="peRatio")
+    dividend_yield: float | None = Field(default=None, alias="dividendYield")
+    price: float | None = None
+
+
+class StrategyStockScreenerResult(BaseModel):
+    model_config = _STRATEGY_MODEL_CONFIG
+
+    strategy: InvestmentStrategy
+    preset: ScreenerPresetSummary
+    quotes: list[StrategyScreenerQuote] = Field(default_factory=list)
+    total_count: int = Field(default=0, alias="totalCount")
+    summary: str = ""
+    generated_at: datetime | None = Field(default=None, alias="generatedAt")
+    # Legacy shape kept for clients that still read flat filter chips.
+    filters: StrategyScreenerFilters | None = None
+
+
 class StrategyStockPickLLM(BaseModel):
     """Strict-schema LLM output shape (every field required for OpenAI json_schema)."""
 
@@ -255,9 +293,13 @@ class StrategyRecommendations(BaseModel):
     next_actions: list[StrategyNextAction] = Field(
         default_factory=list, alias="nextActions"
     )
-    suggested_stocks: list[StrategyStockPick] = Field(
-        default_factory=list, alias="suggestedStocks"
+    screened_stocks: list[StrategyScreenerQuote] = Field(
+        default_factory=list, alias="screenedStocks"
     )
-    stock_suggestions_summary: str | None = Field(
-        default=None, alias="stockSuggestionsSummary"
+    screener_summary: str | None = Field(default=None, alias="screenerSummary")
+    screener_filters: StrategyScreenerFilters | None = Field(
+        default=None, alias="screenerFilters"
+    )
+    screener_preset: ScreenerPresetSummary | None = Field(
+        default=None, alias="screenerPreset"
     )

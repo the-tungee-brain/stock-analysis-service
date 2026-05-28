@@ -1,0 +1,28 @@
+{
+  "id": "core_etf",
+  "label": "Core ETFs (Broad Market)",
+  "description": "Low-cost, broad-market index ETFs suitable as portfolio core holdings.",
+  "fund_universe": {
+    "region": "us",
+    "asset_class": "equity"
+  },
+  "post_filters": {
+    "structure": {
+      "min_total_assets": 5000000000,
+      "max_expense_ratio": 0.0007,
+      "examples_preferred": ["SPY", "VOO", "IVV", "VTI", "SCHB"]
+    },
+    "index_type": {
+      "allowed_indices": [
+        "S&P 500",
+        "Total US Market",
+        "MSCI World",
+        "All-World"
+      ]
+    },
+    "diversification": {
+      "min_holdings": 300,
+      "max_top10_weight_pct": 0.35
+    }
+  }
+}

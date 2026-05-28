@@ -92,6 +92,9 @@ from app.services.intelligence.portfolio_intelligence_service import (
 from app.services.morning_brief_delivery_service import MorningBriefDeliveryService
 from app.services.portfolio_memory_service import PortfolioMemoryService
 from app.services.strategy.strategy_journey_service import StrategyJourneyService
+from app.services.strategy.strategy_stock_screener_service import (
+    StrategyStockScreenerService,
+)
 from app.services.strategy.strategy_stock_suggestion_service import (
     StrategyStockSuggestionService,
 )
@@ -347,6 +350,7 @@ async def lifespan(app: FastAPI):
         prompt_enrichment_service=prompt_enrichment_service,
         llm_service=llm_service,
     )
+    strategy_stock_screener_service = StrategyStockScreenerService()
 
     app.state.http_session = session
     app.state.redis_client = redis_client
@@ -379,6 +383,7 @@ async def lifespan(app: FastAPI):
     app.state.morning_brief_delivery_service = morning_brief_delivery_service
     app.state.strategy_journey_service = strategy_journey_service
     app.state.strategy_stock_suggestion_service = strategy_stock_suggestion_service
+    app.state.strategy_stock_screener_service = strategy_stock_screener_service
 
     try:
         yield

@@ -6,12 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth.dependencies import get_current_user_id
 from app.dependencies.service_dependencies import (
-    get_market_service,
     get_portfolio_analysis_service,
     get_portfolio_service,
     get_schwab_auth_service,
     get_strategy_journey_service,
-    get_strategy_stock_suggestion_service,
+    get_strategy_stock_screener_service,
 )
 from app.models.schwab_models import Position, SchwabAccounts
 from app.models.strategy_models import (
@@ -19,16 +18,18 @@ from app.models.strategy_models import (
     JourneyStepUpdate,
     StrategyCatalogItem,
     StrategyRecommendations,
-    StrategyStockSuggestions,
+    StrategyStockScreenerResult,
     UserInvestmentProfile,
     UserInvestmentProfileUpdate,
     UserStrategyJourney,
 )
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.services.portfolio_service import PortfolioService
-from app.services.market_service import MarketService
 from app.services.schwab_auth_service import SchwabAuthService, SchwabReauthRequired
 from app.services.strategy.strategy_journey_service import StrategyJourneyService
+from app.services.strategy.strategy_stock_screener_service import (
+    StrategyStockScreenerService,
+)
 from app.services.strategy.strategy_stock_suggestion_service import (
     StrategyStockSuggestionService,
 )
@@ -36,32 +37,8 @@ from app.services.strategy.strategy_stock_suggestion_service import (
 router = APIRouter()
 
 
-def _build_stock_suggestion_kwargs(
-    *,
-    strategy: InvestmentStrategy,
-    strategy_stock_suggestion_service: StrategyStockSuggestionService,
-    market_service: MarketService,
-    positions: list[Position],
-    account: SchwabAccounts | None,
-    access_token: str | None,
-    journey: UserStrategyJourney | None,
-) -> dict[str, object]:
-    current_step = strategy_stock_suggestion_service.resolve_journey_step(journey)
-    held_symbols = strategy_stock_suggestion_service.held_underlying_symbols(positions)
-    return {
-        "held_symbols": held_symbols,
-        "portfolio_context": strategy_stock_suggestion_service.format_portfolio_context(
-            positions,
-            account=account,
-            strategy=strategy,
-        ),
-        "macro_context": strategy_stock_suggestion_service.build_macro_context(
-            market_service,
-            access_token,
-        ),
-        "journey_step_id": current_step.step_id if current_step else None,
-        "journey_step_title": current_step.title if current_step else None,
-    }
+def _held_symbols(positions: list[Position]) -> list[str]:
+    return StrategyStockSuggestionService.held_underlying_symbols(positions)
 
 
 async def _load_schwab_positions(
@@ -221,10 +198,9 @@ async def get_strategy_recommendations(
     user_id: str = Depends(get_current_user_id),
     symbol: str | None = Query(default=None),
     strategy_journey_service: StrategyJourneyService = Depends(get_strategy_journey_service),
-    strategy_stock_suggestion_service: StrategyStockSuggestionService = Depends(
-        get_strategy_stock_suggestion_service
+    strategy_stock_screener_service: StrategyStockScreenerService = Depends(
+        get_strategy_stock_screener_service
     ),
-    market_service: MarketService = Depends(get_market_service),
     schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
     portfolio_service: PortfolioService = Depends(get_portfolio_service),
     portfolio_analysis_service: PortfolioAnalysisService = Depends(
@@ -292,28 +268,20 @@ async def get_strategy_recommendations(
     if recommendations is None:
         raise HTTPException(status_code=404, detail="Strategy profile not found")
 
-    if profile and strategy_stock_suggestion_service.supports_stock_suggestions(
-        strategy
-    ):
-        suggestion_kwargs = _build_stock_suggestion_kwargs(
-            strategy=strategy,
-            strategy_stock_suggestion_service=strategy_stock_suggestion_service,
-            market_service=market_service,
-            positions=positions,
-            account=account,
-            access_token=access_token,
-            journey=journey,
-        )
-        suggestions = await strategy_stock_suggestion_service.suggest_stocks(
+    if profile and strategy_stock_screener_service.supports_stock_screener(strategy):
+        screener = await asyncio.to_thread(
+            strategy_stock_screener_service.screen_stocks,
             profile=profile,
             strategy=strategy,
-            **suggestion_kwargs,
+            limit=25,
+            held_symbols=_held_symbols(positions),
         )
-        if suggestions is not None:
+        if screener is not None:
             recommendations = recommendations.model_copy(
                 update={
-                    "suggested_stocks": suggestions.picks,
-                    "stock_suggestions_summary": suggestions.summary,
+                    "screened_stocks": screener.quotes,
+                    "screener_summary": screener.summary,
+                    "screener_preset": screener.preset,
                 }
             )
 
@@ -321,22 +289,27 @@ async def get_strategy_recommendations(
 
 
 @router.get(
-    "/strategies/{strategy}/stock-suggestions",
-    response_model=StrategyStockSuggestions,
+    "/strategies/{strategy}/stock-screener",
+    response_model=StrategyStockScreenerResult,
     response_model_by_alias=True,
 )
-async def get_strategy_stock_suggestions(
+async def get_strategy_stock_screener(
     strategy: InvestmentStrategy,
-    limit: int = Query(default=5, ge=1, le=5),
+    limit: int = Query(default=50, ge=1, le=250),
+    preset_id: str | None = Query(default=None, alias="presetId"),
+    min_market_cap: int | None = Query(default=None, alias="minMarketCap", ge=0),
+    max_pe: float | None = Query(default=None, alias="maxPe", gt=0),
+    require_dividend: bool | None = Query(default=None, alias="requireDividend"),
+    min_dividend_yield: float | None = Query(default=None, alias="minDividendYield", ge=0),
+    sectors: list[str] | None = Query(default=None),
     user_id: str = Depends(get_current_user_id),
     strategy_journey_service: StrategyJourneyService = Depends(get_strategy_journey_service),
-    strategy_stock_suggestion_service: StrategyStockSuggestionService = Depends(
-        get_strategy_stock_suggestion_service
+    strategy_stock_screener_service: StrategyStockScreenerService = Depends(
+        get_strategy_stock_screener_service
     ),
-    market_service: MarketService = Depends(get_market_service),
     schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
     portfolio_service: PortfolioService = Depends(get_portfolio_service),
-) -> StrategyStockSuggestions:
+) -> StrategyStockScreenerResult:
     profile = await asyncio.to_thread(
         strategy_journey_service.get_profile,
         user_id=user_id,
@@ -344,38 +317,39 @@ async def get_strategy_stock_suggestions(
     if profile is None:
         raise HTTPException(status_code=404, detail="Investment profile not found")
 
-    if not strategy_stock_suggestion_service.supports_stock_suggestions(strategy):
-        raise HTTPException(status_code=404, detail="Strategy does not support stock suggestions")
+    if not strategy_stock_screener_service.supports_stock_screener(strategy):
+        raise HTTPException(status_code=404, detail="Strategy does not support stock screener")
 
-    positions, account, access_token, _schwab_linked = await _load_schwab_positions(
+    positions, _account, _access_token, _schwab_linked = await _load_schwab_positions(
         user_id=user_id,
         schwab_auth_service=schwab_auth_service,
         portfolio_service=portfolio_service,
     )
-    journey = await asyncio.to_thread(
-        strategy_journey_service.get_journey,
-        user_id=user_id,
-        strategy=strategy,
-    )
-    suggestion_kwargs = _build_stock_suggestion_kwargs(
-        strategy=strategy,
-        strategy_stock_suggestion_service=strategy_stock_suggestion_service,
-        market_service=market_service,
-        positions=positions,
-        account=account,
-        access_token=access_token,
-        journey=journey,
-    )
 
-    suggestions = await strategy_stock_suggestion_service.suggest_stocks(
+    filter_overrides: dict[str, object] = {}
+    if min_market_cap is not None:
+        filter_overrides["min_market_cap"] = min_market_cap
+    if max_pe is not None:
+        filter_overrides["max_pe"] = max_pe
+    if require_dividend is not None:
+        filter_overrides["require_dividend"] = require_dividend
+    if min_dividend_yield is not None:
+        filter_overrides["min_dividend_yield"] = min_dividend_yield
+    if sectors is not None:
+        filter_overrides["sectors"] = sectors
+
+    screener = await asyncio.to_thread(
+        strategy_stock_screener_service.screen_stocks,
         profile=profile,
         strategy=strategy,
+        preset_id=preset_id,
+        overrides=filter_overrides or None,
         limit=limit,
-        **suggestion_kwargs,
+        held_symbols=_held_symbols(positions),
     )
-    if suggestions is None:
+    if screener is None:
         raise HTTPException(
             status_code=503,
-            detail="Unable to generate stock suggestions right now.",
+            detail="Unable to run stock screener right now.",
         )
-    return suggestions
+    return screener

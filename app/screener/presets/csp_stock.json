@@ -1,0 +1,45 @@
+{
+  "id": "csp_stock",
+  "label": "Cash-Secured Put Stocks",
+  "description": "Stocks suitable for selling cash-secured puts with stable fundamentals and liquid options.",
+  "equity_query": {
+    "operator": "and",
+    "clauses": [
+      {"op": "is-in", "field": "exchange", "values": ["NMS", "NYQ"]},
+      {"op": "eq", "field": "region", "value": "us"},
+      {"op": "gte", "field": "marketCap", "value": 5000000000},
+      {"op": "gte", "field": "regularMarketPrice", "value": 15},
+      {"op": "lte", "field": "regularMarketPrice", "value": 200},
+      {"op": "lte", "field": "trailingPE", "value": 40},
+      {
+        "op": "is-in",
+        "field": "sector",
+        "values": [
+          "Technology",
+          "Consumer Defensive",
+          "Consumer Cyclical",
+          "Healthcare",
+          "Financial Services",
+          "Industrials",
+          "Communication Services"
+        ]
+      }
+    ]
+  },
+  "post_filters": {
+    "options_liquidity": {
+      "target_dte_range": [21, 60],
+      "target_delta_range": [0.15, 0.30],
+      "min_oi": 500,
+      "max_bid_ask_spread_pct": 0.10
+    },
+    "premium": {
+      "min_monthly_return_pct": 0.015,
+      "target_assignment_prob_max": 0.40
+    },
+    "events": {
+      "exclude_earnings_within_days": 7,
+      "exclude_known_binary_events": true
+    }
+  }
+}

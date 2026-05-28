@@ -1,0 +1,46 @@
+{
+  "id": "wheel_stock",
+  "label": "Wheel Stocks (CSP + CC)",
+  "description": "Stable, liquid large-caps with decent IV for running the full wheel.",
+  "equity_query": {
+    "operator": "and",
+    "clauses": [
+      {"op": "is-in", "field": "exchange", "values": ["NMS", "NYQ"]},
+      {"op": "eq", "field": "region", "value": "us"},
+      {"op": "gte", "field": "marketCap", "value": 5000000000},
+      {"op": "gte", "field": "regularMarketPrice", "value": 20},
+      {"op": "lte", "field": "regularMarketPrice", "value": 150},
+      {"op": "lte", "field": "trailingPE", "value": 40},
+      {
+        "op": "is-in",
+        "field": "sector",
+        "values": [
+          "Technology",
+          "Consumer Defensive",
+          "Consumer Cyclical",
+          "Healthcare",
+          "Financial Services",
+          "Industrials",
+          "Communication Services"
+        ]
+      }
+    ]
+  },
+  "post_filters": {
+    "options_liquidity": {
+      "min_oi": 1000,
+      "min_avg_options_volume": 1000,
+      "max_bid_ask_spread_pct": 0.05,
+      "weekly_options_required": true
+    },
+    "volatility": {
+      "min_iv_rank": 0.25,
+      "max_iv_rank": 0.60,
+      "exclude_earnings_within_days": 7
+    },
+    "fundamentals": {
+      "min_positive_eps_ttm": 0.01,
+      "exclude_high_debt_to_equity": 3.0
+    }
+  }
+}

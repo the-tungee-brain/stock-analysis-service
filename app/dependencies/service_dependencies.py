@@ -26,6 +26,9 @@ from app.services.intelligence.portfolio_intelligence_service import (
 from app.services.morning_brief_delivery_service import MorningBriefDeliveryService
 from app.services.portfolio_memory_service import PortfolioMemoryService
 from app.services.strategy.strategy_journey_service import StrategyJourneyService
+from app.services.strategy.strategy_stock_screener_service import (
+    StrategyStockScreenerService,
+)
 from app.services.strategy.strategy_stock_suggestion_service import (
     StrategyStockSuggestionService,
 )
@@ -137,3 +140,9 @@ def get_strategy_stock_suggestion_service(
     request: Request,
 ) -> StrategyStockSuggestionService:
     return request.app.state.strategy_stock_suggestion_service
+
+
+def get_strategy_stock_screener_service(
+    request: Request,
+) -> StrategyStockScreenerService:
+    return request.app.state.strategy_stock_screener_service

@@ -1,0 +1,104 @@
+from unittest.mock import patch
+
+from app.models.strategy_models import (
+    InvestmentStrategy,
+    WheelStrategyConfig,
+    UserInvestmentProfile,
+)
+from app.screener.equity_query_compiler import compile_equity_query
+from app.screener.preset_registry import get_preset, preset_for_strategy
+from app.services.strategy.strategy_stock_screener_service import (
+    StrategyStockScreenerService,
+)
+
+
+def _wheel_profile(*, risk: str = "moderate") -> UserInvestmentProfile:
+    return UserInvestmentProfile(
+        user_id="user-1",
+        primary_strategy=InvestmentStrategy.WHEEL,
+        risk_tolerance=risk,
+        options_experience="beginner",
+        income_vs_growth="balanced",
+        wheel=WheelStrategyConfig(wheel_symbols=["AAPL"]),
+    )
+
+
+def test_all_presets_load():
+    for strategy in InvestmentStrategy:
+        if not StrategyStockScreenerService.supports_stock_screener(strategy):
+            continue
+        preset = preset_for_strategy(strategy)
+        assert preset.id
+        assert preset.label
+        assert preset.post_filters
+
+
+def test_equity_presets_compile_to_yfinance_query():
+    preset = get_preset("wheel_stock")
+    assert preset is not None
+    assert preset.equity_query is not None
+    query = compile_equity_query(preset.equity_query)
+    assert query.operator == "AND"
+
+
+def test_profile_adjustments_change_wheel_preset():
+    conservative = StrategyStockScreenerService.resolve_preset(
+        InvestmentStrategy.WHEEL,
+        _wheel_profile(risk="conservative"),
+    )
+    aggressive = StrategyStockScreenerService.resolve_preset(
+        InvestmentStrategy.WHEEL,
+        _wheel_profile(risk="aggressive"),
+    )
+
+    def market_cap_clause(preset):
+        for clause in preset.equity_query.clauses:
+            if clause.field == "marketCap" and clause.op == "gte":
+                return clause.value
+        return None
+
+    assert market_cap_clause(conservative) == 10_000_000_000
+    assert market_cap_clause(aggressive) == 2_000_000_000
+
+
+def test_screen_stocks_excludes_existing_symbols():
+    raw = {
+        "total": 3,
+        "quotes": [
+            {
+                "symbol": "AAPL",
+                "shortName": "Apple Inc.",
+                "marketCap": 3_000_000_000_000,
+                "trailingPE": 28.5,
+                "dividendYield": 0.004,
+                "regularMarketPrice": 190.0,
+            },
+            {
+                "symbol": "MSFT",
+                "shortName": "Microsoft Corporation",
+                "marketCap": 3_100_000_000_000,
+                "trailingPE": 32.1,
+                "dividendYield": 0.007,
+                "regularMarketPrice": 420.0,
+            },
+        ],
+    }
+
+    service = StrategyStockScreenerService()
+    with patch("app.services.strategy.strategy_stock_screener_service.yf.screen", return_value=raw):
+        result = service.screen_stocks(
+            profile=_wheel_profile(),
+            strategy=InvestmentStrategy.WHEEL,
+            limit=10,
+        )
+
+    assert result is not None
+    assert [quote.symbol for quote in result.quotes] == ["MSFT"]
+    assert result.preset.id == "wheel_stock"
+
+
+def test_describe_preset_includes_key_constraints():
+    preset = preset_for_strategy(InvestmentStrategy.WHEEL)
+    summary = StrategyStockScreenerService.describe_preset(preset)
+    assert "market cap" in summary.lower()
+    assert "P/E" in summary

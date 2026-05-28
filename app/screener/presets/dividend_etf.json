@@ -1,0 +1,25 @@
+{
+  "id": "dividend_etf",
+  "label": "Dividend ETFs",
+  "description": "Dividend-focused equity ETFs with reasonable yield, size, and low fees.",
+  "fund_universe": {
+    "region": "us",
+    "asset_class": "equity"
+  },
+  "post_filters": {
+    "structure": {
+      "min_total_assets": 500000000,
+      "max_expense_ratio": 0.004,
+      "examples_preferred": ["SCHD", "VIG", "DGRO", "NOBL", "SDY"]
+    },
+    "dividend": {
+      "min_dividend_yield": 0.025,
+      "max_dividend_yield": 0.08,
+      "min_dividend_growth_5y": 0.03
+    },
+    "concentration": {
+      "max_top10_weight_pct": 0.60,
+      "min_holdings": 40
+    }
+  }
+}
