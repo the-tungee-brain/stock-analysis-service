@@ -89,7 +89,8 @@ def test_screen_stocks_excludes_existing_symbols():
         result = service.screen_stocks(
             profile=_wheel_profile(),
             strategy=InvestmentStrategy.WHEEL,
-            limit=10,
+            page=1,
+            page_size=10,
         )
 
     assert result is not None

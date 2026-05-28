@@ -1,7 +1,7 @@
 {
   "id": "covered_call_stock",
   "label": "Covered Call Stocks",
-  "description": "Stocks suitable for holding and selling covered calls: stable, moderately volatile, with tight option spreads.",
+  "description": "Steady, lower-beta names for holding 100+ shares and selling covered calls.",
   "equity_query": {
     "operator": "and",
     "clauses": [
@@ -20,7 +20,8 @@
           "Utilities",
           "Financial Services",
           "Industrials",
-          "Technology"
+          "Technology",
+          "Communication Services"
         ]
       }
     ]
@@ -38,6 +39,18 @@
     },
     "premium": {
       "min_monthly_return_pct": 0.01
+    },
+    "sector_guidance": {
+      "preferred": [
+        "Consumer Defensive",
+        "Healthcare",
+        "Utilities",
+        "Financial Services",
+        "Industrials",
+        "Technology",
+        "Communication Services"
+      ],
+      "less_preferred": ["Basic Materials", "Energy"]
     }
   }
 }

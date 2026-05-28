@@ -1,7 +1,7 @@
 {
   "id": "dividend_stock",
   "label": "Dividend Stocks (Quality/Growth)",
-  "description": "High-quality dividend stocks with sustainable payouts and growth.",
+  "description": "High-quality dividend payers with sustainable payouts and defensive sector tilts.",
   "equity_query": {
     "operator": "and",
     "clauses": [
@@ -16,12 +16,12 @@
         "field": "sector",
         "values": [
           "Consumer Defensive",
+          "Utilities",
           "Healthcare",
           "Financial Services",
-          "Industrials",
-          "Utilities",
+          "Real Estate",
           "Energy",
-          "Real Estate"
+          "Industrials"
         ]
       }
     ]
@@ -35,6 +35,18 @@
     "balance_sheet": {
       "max_debt_to_equity": 2.0,
       "min_interest_coverage": 3.0
+    },
+    "sector_guidance": {
+      "preferred": [
+        "Consumer Defensive",
+        "Utilities",
+        "Healthcare",
+        "Financial Services",
+        "Real Estate",
+        "Energy",
+        "Industrials"
+      ],
+      "less_preferred": ["Technology"]
     }
   }
 }

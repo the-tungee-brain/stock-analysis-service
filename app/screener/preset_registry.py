@@ -17,6 +17,15 @@ STRATEGY_PRESET_IDS: dict[InvestmentStrategy, str] = {
     InvestmentStrategy.ETF_CORE: "core_etf",
 }
 
+STRATEGY_COMPANION_PRESET_IDS: dict[InvestmentStrategy, list[str]] = {
+    InvestmentStrategy.DIVIDEND: ["dividend_etf"],
+}
+
+
+def presets_for_strategy(strategy: InvestmentStrategy) -> list[str]:
+    preset_ids = [STRATEGY_PRESET_IDS[strategy], *STRATEGY_COMPANION_PRESET_IDS.get(strategy, [])]
+    return preset_ids
+
 
 @lru_cache(maxsize=1)
 def load_all_presets() -> dict[str, ScreenerPreset]:

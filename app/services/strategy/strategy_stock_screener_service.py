@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,11 +12,10 @@ from app.models.screener_preset_models import (
     EquityQueryClause,
     EquityQuerySpec,
     ScreenerPreset,
-    ScreenerPresetSummary,
 )
-from app.models.screener_preset_models import ScreenerPresetSummary
 from app.models.strategy_models import (
     InvestmentStrategy,
+    ScreenerResultSection,
     StrategyScreenerFilters,
     StrategyScreenerQuote,
     StrategyStockScreenerResult,
@@ -23,7 +23,12 @@ from app.models.strategy_models import (
 )
 from app.screener.equity_query_compiler import compile_equity_query
 from app.screener.etf_universe_screener import screen_etf_preset
-from app.screener.preset_registry import preset_for_strategy, preset_summary
+from app.screener.preset_registry import (
+    STRATEGY_COMPANION_PRESET_IDS,
+    get_preset,
+    preset_for_strategy,
+    preset_summary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +41,8 @@ WHEEL_LIKE = frozenset(
 )
 
 DEFAULT_SCREEN_SIZE = 100
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 50
 MAX_SCREEN_SIZE = 250
 
 # API override keys -> preset equity clause field names.
@@ -180,7 +187,8 @@ class StrategyStockScreenerService:
         strategy: InvestmentStrategy,
         preset_id: str | None = None,
         overrides: dict[str, Any] | None = None,
-        limit: int = DEFAULT_SCREEN_SIZE,
+        page: int = 1,
+        page_size: int = DEFAULT_PAGE_SIZE,
         held_symbols: list[str] | None = None,
     ) -> StrategyStockScreenerResult | None:
         if not self.supports_stock_screener(strategy):
@@ -192,7 +200,9 @@ class StrategyStockScreenerService:
             preset_id=preset_id,
             overrides=overrides,
         )
-        resolved_limit = max(1, min(limit, MAX_SCREEN_SIZE))
+        resolved_page = max(1, page)
+        resolved_page_size = max(1, min(page_size, MAX_PAGE_SIZE))
+        offset = (resolved_page - 1) * resolved_page_size
         exclude = self.existing_symbols(profile, strategy, held_symbols=held_symbols)
 
         try:
@@ -200,7 +210,8 @@ class StrategyStockScreenerService:
                 query = compile_equity_query(preset.equity_query)
                 raw = yf.screen(
                     query,
-                    size=resolved_limit,
+                    size=resolved_page_size,
+                    offset=offset,
                     sortField="intradaymarketcap",
                     sortAsc=False,
                 )
@@ -216,8 +227,10 @@ class StrategyStockScreenerService:
                 quotes, total = screen_etf_preset(
                     preset,
                     exclude=exclude,
-                    limit=resolved_limit,
+                    limit=resolved_page_size,
                 )
+                resolved_page = 1
+                offset = 0
         except Exception:
             logger.exception(
                 "Screener failed preset=%s strategy=%s user=%s",
@@ -227,7 +240,13 @@ class StrategyStockScreenerService:
             )
             return None
 
+        total_pages = max(1, math.ceil(total / resolved_page_size)) if total else 1
         summary = self.describe_preset(preset)
+        sections = self._companion_sections(
+            strategy=strategy,
+            preset_id=preset_id,
+            exclude=exclude,
+        )
 
         return StrategyStockScreenerResult(
             strategy=strategy,
@@ -235,9 +254,45 @@ class StrategyStockScreenerService:
             filters=filters_from_preset(preset),
             quotes=quotes,
             total_count=total,
+            page=resolved_page,
+            page_size=resolved_page_size,
+            total_pages=total_pages,
             summary=summary,
+            sections=sections,
             generated_at=datetime.now(timezone.utc),
         )
+
+    @staticmethod
+    def _companion_sections(
+        *,
+        strategy: InvestmentStrategy,
+        preset_id: str | None,
+        exclude: set[str],
+    ) -> list[ScreenerResultSection]:
+        if preset_id is not None:
+            return []
+
+        sections: list[ScreenerResultSection] = []
+        for companion_id in STRATEGY_COMPANION_PRESET_IDS.get(strategy, []):
+            companion = get_preset(companion_id)
+            if companion is None or companion.equity_query is not None:
+                continue
+            quotes, total = screen_etf_preset(
+                companion,
+                exclude=exclude,
+                limit=20,
+            )
+            sections.append(
+                ScreenerResultSection(
+                    preset=preset_summary(companion),
+                    quotes=quotes,
+                    total_count=total,
+                    page=1,
+                    page_size=max(len(quotes), 1),
+                    total_pages=1,
+                )
+            )
+        return sections
 
 
 def _load_preset_or_raise(preset_id: str) -> ScreenerPreset:

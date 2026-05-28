@@ -1,7 +1,7 @@
 {
   "id": "dividend_etf",
   "label": "Dividend ETFs",
-  "description": "Dividend-focused equity ETFs with reasonable yield, size, and low fees.",
+  "description": "Dividend-focused equity ETFs with diversified sector exposure and reasonable fees.",
   "fund_universe": {
     "region": "us",
     "asset_class": "equity"
@@ -20,6 +20,17 @@
     "concentration": {
       "max_top10_weight_pct": 0.60,
       "min_holdings": 40
+    },
+    "sector_guidance": {
+      "underlying_tilts": [
+        "Consumer Defensive",
+        "Healthcare",
+        "Financial Services",
+        "Industrials",
+        "Utilities",
+        "Energy",
+        "Real Estate"
+      ]
     }
   }
 }

@@ -274,6 +274,8 @@ async def get_strategy_recommendations(
             profile=profile,
             strategy=strategy,
             limit=25,
+            page=1,
+            page_size=25,
             held_symbols=_held_symbols(positions),
         )
         if screener is not None:
@@ -295,7 +297,8 @@ async def get_strategy_recommendations(
 )
 async def get_strategy_stock_screener(
     strategy: InvestmentStrategy,
-    limit: int = Query(default=50, ge=1, le=250),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=50, alias="pageSize"),
     preset_id: str | None = Query(default=None, alias="presetId"),
     min_market_cap: int | None = Query(default=None, alias="minMarketCap", ge=0),
     max_pe: float | None = Query(default=None, alias="maxPe", gt=0),
@@ -348,7 +351,8 @@ async def get_strategy_stock_screener(
         strategy=strategy,
         preset_id=preset_id,
         overrides=filter_overrides or None,
-        limit=limit,
+        page=page,
+        page_size=page_size,
         held_symbols=_held_symbols(positions),
     )
     if screener is None:

@@ -248,6 +248,17 @@ class StrategyScreenerQuote(BaseModel):
     price: float | None = None
 
 
+class ScreenerResultSection(BaseModel):
+    model_config = _STRATEGY_MODEL_CONFIG
+
+    preset: ScreenerPresetSummary
+    quotes: list[StrategyScreenerQuote] = Field(default_factory=list)
+    total_count: int = Field(default=0, alias="totalCount")
+    page: int = 1
+    page_size: int = Field(default=20, alias="pageSize")
+    total_pages: int = Field(default=1, alias="totalPages")
+
+
 class StrategyStockScreenerResult(BaseModel):
     model_config = _STRATEGY_MODEL_CONFIG
 
@@ -255,10 +266,13 @@ class StrategyStockScreenerResult(BaseModel):
     preset: ScreenerPresetSummary
     quotes: list[StrategyScreenerQuote] = Field(default_factory=list)
     total_count: int = Field(default=0, alias="totalCount")
+    page: int = 1
+    page_size: int = Field(default=20, alias="pageSize")
+    total_pages: int = Field(default=0, alias="totalPages")
     summary: str = ""
     generated_at: datetime | None = Field(default=None, alias="generatedAt")
-    # Legacy shape kept for clients that still read flat filter chips.
     filters: StrategyScreenerFilters | None = None
+    sections: list[ScreenerResultSection] = Field(default_factory=list)
 
 
 class StrategyStockPickLLM(BaseModel):

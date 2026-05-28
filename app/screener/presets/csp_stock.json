@@ -1,7 +1,7 @@
 {
   "id": "csp_stock",
   "label": "Cash-Secured Put Stocks",
-  "description": "Stocks suitable for selling cash-secured puts with stable fundamentals and liquid options.",
+  "description": "Liquid large-caps for selling cash-secured puts — names you'd be comfortable owning if assigned.",
   "equity_query": {
     "operator": "and",
     "clauses": [
@@ -40,6 +40,18 @@
     "events": {
       "exclude_earnings_within_days": 7,
       "exclude_known_binary_events": true
+    },
+    "sector_guidance": {
+      "preferred": [
+        "Technology",
+        "Consumer Defensive",
+        "Consumer Cyclical",
+        "Healthcare",
+        "Financial Services",
+        "Industrials",
+        "Communication Services"
+      ],
+      "secondary": ["Energy", "Real Estate", "Utilities"]
     }
   }
 }

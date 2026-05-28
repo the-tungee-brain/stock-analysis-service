@@ -1,7 +1,7 @@
 {
   "id": "wheel_stock",
   "label": "Wheel Stocks (CSP + CC)",
-  "description": "Stable, liquid large-caps with decent IV for running the full wheel.",
+  "description": "Stable, liquid large-caps suited for the full wheel — robust options markets and predictable businesses.",
   "equity_query": {
     "operator": "and",
     "clauses": [
@@ -41,6 +41,18 @@
     "fundamentals": {
       "min_positive_eps_ttm": 0.01,
       "exclude_high_debt_to_equity": 3.0
+    },
+    "sector_guidance": {
+      "preferred": [
+        "Technology",
+        "Consumer Defensive",
+        "Consumer Cyclical",
+        "Healthcare",
+        "Financial Services",
+        "Industrials",
+        "Communication Services"
+      ],
+      "avoid_or_careful": ["Energy", "Real Estate", "Basic Materials", "Utilities"]
     }
   }
 }
