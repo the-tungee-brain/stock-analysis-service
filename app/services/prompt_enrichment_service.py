@@ -1764,7 +1764,7 @@ class PromptEnrichmentService:
                     lines.append(f"  - {holder.holder}{pct}")
             if ownership.recent_insider_transactions:
                 lines.append("- Recent insider transactions:")
-                for txn in ownership.recent_insider_transactions[:4]:
+                for txn in ownership.recent_insider_transactions[:12]:
                     detail = txn.transaction or "transaction"
                     lines.append(f"  - {txn.date}: {txn.insider} — {detail}")
 

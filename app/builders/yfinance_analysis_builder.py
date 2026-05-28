@@ -28,6 +28,8 @@ _PERIOD_LABELS = {
 }
 
 _ESTIMATE_PERIOD_KEYS = ("0q", "+1q", "0y", "+1y")
+# Yahoo can return many rows; cap payload size while exposing full history in the UI.
+_MAX_INSIDER_TRANSACTIONS = 500
 
 
 class YFinanceAnalysisBuilder:
@@ -552,9 +554,7 @@ class YFinanceAnalysisBuilder:
             )
         return holders
 
-    def _parse_insider_transactions(
-        self, df: Any, *, limit: int = 6
-    ) -> list[InsiderTransactionRow]:
+    def _parse_insider_transactions(self, df: Any) -> list[InsiderTransactionRow]:
         if df is None or not isinstance(df, pd.DataFrame) or df.empty:
             return []
 
@@ -579,7 +579,7 @@ class YFinanceAnalysisBuilder:
         value_col = self._find_column(working, "Value", "value", "Value ($)")
 
         rows: list[InsiderTransactionRow] = []
-        for idx, row in working.head(limit).iterrows():
+        for idx, row in working.head(_MAX_INSIDER_TRANSACTIONS).iterrows():
             date_str = (
                 self._cell_to_iso_date(row[date_col])
                 if date_col and date_col in row.index

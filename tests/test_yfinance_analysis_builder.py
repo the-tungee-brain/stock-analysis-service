@@ -188,6 +188,29 @@ def test_build_street_analysis_snapshot(mock_adapter_cls):
 
 
 @patch("app.builders.yfinance_analysis_builder.YFinanceAdapter")
+def test_insider_transactions_returns_all_rows_not_capped_at_six(mock_adapter_cls):
+    adapter = MagicMock()
+    raw = _sample_raw()
+    rows = [
+        {
+            "Insider": f"Insider {i}",
+            "Start Date": pd.Timestamp(f"2026-0{(i % 9) + 1}-15"),
+            "Transaction": "Sale",
+            "Shares": 1_000 + i,
+        }
+        for i in range(10)
+    ]
+    raw["insider_transactions"] = pd.DataFrame(rows)
+    adapter.get_street_analysis_raw.return_value = raw
+    adapter.get_ticker_info.return_value = {"currentPrice": 100.0}
+
+    snapshot = YFinanceAnalysisBuilder(adapter).build("NVDA")
+    assert snapshot is not None
+    assert snapshot.ownership is not None
+    assert len(snapshot.ownership.recent_insider_transactions) == 10
+
+
+@patch("app.builders.yfinance_analysis_builder.YFinanceAdapter")
 def test_insider_transactions_use_start_date_not_row_index(mock_adapter_cls):
     adapter = MagicMock()
     raw = _sample_raw()
