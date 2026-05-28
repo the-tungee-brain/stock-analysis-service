@@ -1714,69 +1714,28 @@ class PromptEnrichmentService:
         ).strip()
         return [system_msg, user_msg]
 
-    def build_business_details_stream_prompt(self, ctx: ResearchContext) -> List[str]:
-        context_block = self._format_research_context_block(ctx, compact=True)
-        system_msg = dedent(
-            f"""
-            {RESEARCH_SYSTEM_PREAMBLE}
-
-            # Your task
-            Explain this company's business model in Markdown for a retail investor.
-            Use these section headings exactly:
-
-            ## What they do
-            ## Business segments
-            ## Revenue model
-            ## Customers and markets
-            ## Competitive landscape
-            ## Moat and differentiators
-            ## Growth drivers
-            ## Key business risks
-
-            Be educational and specific to the supplied data. Do not invent figures.
-            """
-        ).strip()
-        user_msg = dedent(
-            f"""
-            Write the business breakdown for:
-
-            {context_block}
-            """
-        ).strip()
-        return [system_msg, user_msg]
-
     def build_business_details_prompt(self, ctx: ResearchContext) -> List[str]:
-        context_block = self._format_research_context_block(ctx)
+        context_block = self._format_research_context_block(ctx, compact=True)
 
         system_msg = dedent(
             f"""
             {RESEARCH_SYSTEM_PREAMBLE}
 
             # Your task
-            Explain this company's business model in depth so a retail investor can understand
-            exactly how the company makes money and what drives its success or failure.
+            Explain how this company makes money for a retail investor (~350–450 words total).
+            Use only supplied data — do not invent figures.
 
             # Depth requirements
-            - **whatTheyDo**: 6–10 sentences. What the company sells, who its customers are,
-              how it delivers value, and its role in its industry. Write as if explaining to
-              someone who has heard the brand name but knows nothing else.
-            - **segments**: 4–8 strings. Each string names a business segment or revenue line
-              and briefly explains what it includes and why it matters (e.g.,
-              "Cloud services (~40% of revenue) — subscription-based infrastructure and platform tools for enterprises").
-            - **revenueNotes**: 6–10 sentences. Which segments drive the most revenue and profit,
-              how revenue is recognized (subscriptions, transactions, licensing, etc.),
-              seasonality or cyclicality, and key dependencies (suppliers, platforms, regulation).
-              When SEC filed revenue or growth rates are provided, anchor revenue discussion to those figures.
-            - **customersAndMarkets**: 4–6 sentences. Who buys the product (consumers, enterprises,
-              governments), geographic mix, and whether the customer base is concentrated or diversified.
-            - **competitiveLandscape**: 4–6 sentences. Main competitors, market share dynamics,
-              and whether the industry is consolidating, fragmenting, or stable.
-            - **moatAndDifferentiators**: 4–6 sentences. What protects this company from competition
-              (brand, network effects, switching costs, scale, IP, regulation) and where it is vulnerable.
-            - **growthDrivers**: 4–6 bullet strings. Specific factors that could drive future revenue
-              and earnings growth (new products, market expansion, pricing power, M&A, etc.).
-            - **keyRisks**: 4–6 bullet strings. Business-model-level risks unrelated to short-term
-              stock price (disruption, customer concentration, regulatory change, technology shifts).
+            - **whatTheyDo**: 3–4 sentences. What they sell, who they serve, and their industry role.
+            - **segments**: 3–5 strings. One line each: segment name, rough importance, and what it includes.
+            - **revenueNotes**: 3–4 sentences. Main revenue drivers, recognition model, and seasonality.
+              Anchor to SEC revenue/growth figures when provided.
+            - **customersAndMarkets**: 2–3 sentences. Customer type, geography, concentration.
+            - **competitiveLandscape**: 2–3 sentences. Key competitors and industry structure.
+            - **moatAndDifferentiators**: 2–3 sentences. Defensibility and vulnerabilities.
+            - **growthDrivers**: 3–4 bullet strings. One line each.
+            - **keyRisks**: 3–4 bullet strings. Business-model risks only; one line each.
+            - Do not repeat the same point across fields.
 
             Return a single JSON object with exactly these keys:
             {{
@@ -1800,8 +1759,7 @@ class PromptEnrichmentService:
 
             {context_block}
 
-            Help the reader truly understand how this company operates, competes, and grows.
-            Anchor your analysis to the company name and sector from the data above.
+            Be concise and scannable — quality over length.
             """
         ).strip()
 

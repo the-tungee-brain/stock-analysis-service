@@ -1,7 +1,6 @@
 import asyncio
 
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends
 
 from app.core.llm_routes import LLMRoute
 from app.models.company_research_models import BusinessBlock
@@ -20,7 +19,6 @@ router = APIRouter()
 @router.get("/research/business")
 async def get_business_details(
     symbol: str,
-    stream: bool = Query(default=False),
     company_research_service: CompanyResearchService = Depends(
         get_company_research_service
     ),
@@ -33,27 +31,6 @@ async def get_business_details(
         company_research_service.build_context,
         symbol=symbol,
     )
-
-    if stream:
-        prompts = prompt_enrichment_service.build_business_details_stream_prompt(
-            ctx=ctx
-        )
-
-        async def streamer():
-            async for chunk in llm_service.generate_stream_from_prompts(
-                prompts=prompts,
-                route=LLMRoute.BUSINESS,
-            ):
-                yield chunk
-
-        return StreamingResponse(
-            streamer(),
-            media_type="text/plain; charset=utf-8",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
-        )
 
     prompts = prompt_enrichment_service.build_business_details_prompt(ctx=ctx)
     return await llm_service.generate_from_prompts(
