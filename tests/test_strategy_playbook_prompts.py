@@ -49,5 +49,7 @@ def test_playbook_ask_display_message_is_user_facing_not_secret():
         symbol="SBUX",
     )
     display = playbook_ask_display_message(action, strategy=InvestmentStrategy.WHEEL)
-    assert display == "Long-term research on SBUX before selling a put"
+    assert "thinking about selling a cash-secured put on SBUX" in display
+    assert "comfortable owning shares if assigned" in display
     assert "SEC financial" not in display
+    assert "Business model" not in display

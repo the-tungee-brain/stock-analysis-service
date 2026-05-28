@@ -27,26 +27,69 @@ def playbook_ask_display_message(
 ) -> str:
     symbol = (action.symbol or "").strip().upper()
     title_lower = action.title.lower()
+    reason = action.reason.strip()
+    _ = strategy
 
-    if symbol:
-        if action.type == "research":
-            if any(k in title_lower for k in ("put", "csp", "wheel")):
-                return f"Long-term research on {symbol} before selling a put"
-            if "dividend" in title_lower:
-                return f"Dividend research on {symbol}"
-            return f"Research {symbol} for my playbook"
-        if action.type == "options":
-            if "covered call" in title_lower:
-                return f"Covered call ideas for {symbol}"
-            if "csp" in title_lower or "put" in title_lower:
-                return f"Long-term research on {symbol} before selling a put"
-            return f"Options review for {symbol}"
-        if action.type == "monitor":
-            return f"Monitor my {symbol} options position"
-        if action.type == "buy":
-            return f"Build a position in {symbol}"
-        if action.type == "rebalance":
-            return f"Review {symbol} allocation"
+    if not symbol:
+        return action.title.strip() or "Strategy playbook question"
+
+    if action.type == "research":
+        if any(k in title_lower for k in ("put", "csp", "wheel")):
+            return (
+                f"I'm thinking about selling a cash-secured put on {symbol} for my strategy playbook. "
+                "Would I be comfortable owning shares if assigned? "
+                "Help me weigh fundamentals, timing, and a sensible strike range before I sell."
+            )
+        if "dividend" in title_lower:
+            return (
+                f"I'm researching {symbol} as a dividend name on my strategy playbook. "
+                "Is the payout sustainable, and does it fit my strategy? "
+                "What should I verify before buying?"
+            )
+        return (
+            f"I'm researching {symbol} for my strategy playbook. "
+            "What's the case for or against my next step — fundamentals, timing, and fit?"
+        )
+
+    if action.type == "options":
+        if "covered call" in title_lower:
+            return (
+                f"I hold {symbol} on my strategy playbook and I'm looking at writing a covered call. "
+                "What strike and expiration would you suggest, and what assignment risk should I plan for?"
+            )
+        if "csp" in title_lower or "put" in title_lower:
+            return (
+                f"I'm thinking about selling a cash-secured put on {symbol} for my strategy playbook. "
+                "Would I be comfortable owning shares if assigned? "
+                "Help me weigh fundamentals, timing, and a sensible strike range before I sell."
+            )
+        return (
+            f"For {symbol} on my strategy playbook: {action.title.strip()}. "
+            "What option trade would you consider next, and why?"
+        )
+
+    if action.type == "monitor":
+        lead = f"I have an open options position on {symbol}."
+        if reason:
+            return (
+                f"{lead} {reason} "
+                "What should I watch for, and when would you roll, close, or let it ride?"
+            )
+        return (
+            f"{lead} What should I watch for, and when would you roll, close, or let it ride?"
+        )
+
+    if action.type == "buy":
+        return (
+            f"I want to build a position in {symbol} for my strategy playbook. "
+            "What's a sensible way to size and enter without breaking my rules?"
+        )
+
+    if action.type == "rebalance":
+        return (
+            f"Review {symbol} in my portfolio for my strategy playbook. "
+            "Should I add, trim, or hold based on my targets?"
+        )
 
     return action.title.strip() or "Strategy playbook question"
 
