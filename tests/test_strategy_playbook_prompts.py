@@ -41,7 +41,7 @@ def test_build_playbook_ask_prompt_is_concise_hold_verdict():
     assert "**News:**" in prompt
     assert "220" in prompt or "320" in prompt
     assert "yfinance" in prompt.lower()
-    assert "(what)" not in prompt
+    assert "what/why parenthetical" in prompt.lower()
     assert "Business model" not in prompt
     assert "Put zone" in prompt
     assert "Confirm ownership comfort" not in prompt

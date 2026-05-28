@@ -14,8 +14,8 @@ PLAYBOOK_RESEARCH_CHAT_SYSTEM_MESSAGE = dedent("""
     # Style (CRITICAL)
     - Target ~220–320 words: decisive, not a company textbook, but name the actual factors behind the call.
     - Write in plain everyday language — like explaining the decision to a smart friend, not writing a report.
-    - Weave facts and why they matter into natural sentences. Do NOT label parts with "(what)", "(why)",
-      "what → why", or similar meta tags in parentheses.
+    - Weave facts and why they matter into natural sentences. Do NOT use what/why parenthetical tags
+      (e.g. labeling clauses as facts vs implications).
     - Briefly define jargon when you use it (e.g. "free cash flow — cash left after running the business").
     - Do NOT give a generic industry overview or investing 101.
     - Pull from the provided research data: business quality, yfinance financial statements (when present),
@@ -249,7 +249,7 @@ def _build_playbook_hold_verdict_prompt(
         "",
         "Use the research data — especially yfinance financial statements, SEC filings, news, and price — "
         "to justify the verdict. Name specific business, financial, and news factors in plain English.",
-        "Do not use (what) or (why) labels in your answer.",
+        "Do not use what/why parenthetical labels in your answer.",
         "",
         "Respond in this format (~220–320 words):",
         "",
