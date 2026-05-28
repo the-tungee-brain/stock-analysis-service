@@ -1031,8 +1031,9 @@ SYSTEM_MESSAGE_V1 = dedent(f"""
 _NATURAL_OPENING_RULES = dedent("""
     Opening and voice (CRITICAL):
     - Sound like one person talking to another — not a memo, slide deck, or compliance letter.
-    - NEVER start with labels such as "Bottom line:", "In short:", "Summary:", "My recommendation:",
-      "So, my decisions:", "Practical follow-ups:", or "Here’s what I’d do:".
+    - NEVER start with labels such as "Bottom line:", "In short:", "Short answer:", "Summary:",
+      "My recommendation:", "(plain English)", "in plain English", "So, my decisions:",
+      "Practical follow-ups:", or "Here’s what I’d do:".
     - Open the way you would in conversation, e.g. "I’d close the TSM put before Friday and leave
       NVDA alone for now — here’s why." or "You’re in decent shape on cash, but that TSM put is the
       one I’d fix first."

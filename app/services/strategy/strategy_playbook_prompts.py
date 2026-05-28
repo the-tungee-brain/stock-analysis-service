@@ -230,7 +230,7 @@ def _build_long_term_playbook_brief(
         "Use the company research data provided — business overview, recent news headlines, "
         "and SEC financial statements — and explain clearly:",
         "",
-        "1. **Business model** — what the company does and how it makes money, in plain English",
+        "1. **Business model** — what the company does and how it makes money",
         "2. **Recent news** — the most important headlines and why they matter for a long-term holder",
         (
             "3. **Financial health** — revenue, profitability, cash flow, and balance-sheet trends "
@@ -243,6 +243,7 @@ def _build_long_term_playbook_brief(
         f"5. **Strategy fit** — {fit}",
         "",
         "Be specific with figures from the data. If a section lacks data, say what's missing instead of guessing.",
+        "Do not echo these section labels or write '(plain English)' in your reply.",
     ]
     if follow_up:
         sections.extend(["", follow_up])
