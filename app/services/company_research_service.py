@@ -160,6 +160,18 @@ class CompanyResearchService:
             for item in releases_response.root[:5]
         ]
 
+    @staticmethod
+    def _cached_context_is_stale(cached: ResearchContext) -> bool:
+        """Invalidate older cached snapshots missing dividend / statement enrichment."""
+        if cached.asset_type == "ETF":
+            return False
+        if cached.yfinance_financials is None:
+            return True
+        labels = {metric.label.lower() for metric in cached.fundamentals}
+        if "dividend yield" in labels and "payout ratio" not in labels:
+            return True
+        return False
+
     def build_context(
         self, symbol: str, *, news_lookback_days: int = 7
     ) -> ResearchContext:
@@ -171,7 +183,7 @@ class CompanyResearchService:
                     symbol=symbol_upper,
                     lookback_days=news_lookback_days,
                 )
-                if cached is not None:
+                if cached is not None and not self._cached_context_is_stale(cached):
                     return self._attach_enriched_news(cached)
             except Exception:
                 pass

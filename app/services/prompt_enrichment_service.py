@@ -179,6 +179,48 @@ class PromptEnrichmentService:
         return filtered
 
     @staticmethod
+    def _fundamental_value(
+        metrics: list[FundamentalMetric],
+        label: str,
+    ) -> str | None:
+        target = label.lower()
+        for metric in metrics:
+            if metric.label.lower() == target:
+                return metric.value
+        return None
+
+    @classmethod
+    def _format_dividend_payout_section(cls, ctx: ResearchContext) -> str | None:
+        lines: list[str] = []
+
+        payout = cls._fundamental_value(ctx.fundamentals, "Payout ratio")
+        if payout:
+            lines.append(f"- Payout ratio: {payout}")
+
+        div_yield = cls._fundamental_value(ctx.fundamentals, "Dividend yield")
+        if div_yield:
+            lines.append(f"- Dividend yield: {div_yield}")
+
+        dps = cls._fundamental_value(ctx.fundamentals, "Annual dividend per share")
+        if dps:
+            lines.append(f"- Annual dividend per share: {dps}")
+
+        if ctx.yfinance_financials is not None:
+            for highlight in ctx.yfinance_financials.strength.highlights:
+                lower = highlight.lower()
+                if "payout ratio" in lower or "covers dividends" in lower:
+                    lines.append(f"- {highlight}")
+
+        if not lines:
+            return None
+
+        return (
+            "## Dividend & payout\n"
+            "Use these figures when discussing dividend safety and the Financials factor.\n"
+            + "\n".join(lines)
+        )
+
+    @staticmethod
     def _format_metric_lines(metrics: list[FundamentalMetric]) -> str:
         return "\n".join(
             f"- {metric.label}: {metric.value}"
@@ -479,7 +521,7 @@ class PromptEnrichmentService:
                 ]
                 if strength.highlights:
                     strength_lines.append(
-                        "- Highlights: " + "; ".join(strength.highlights[:4])
+                        "- Highlights: " + "; ".join(strength.highlights[:7])
                     )
                 if strength.strengths:
                     strength_lines.append(
@@ -490,6 +532,10 @@ class PromptEnrichmentService:
                         "- Risks: " + "; ".join(strength.risks[:3])
                     )
                 sections.append(f"{financials_block}\n\n" + "\n".join(strength_lines))
+
+        dividend_section = self._format_dividend_payout_section(ctx)
+        if include_market_fundamentals and dividend_section:
+            sections.append(dividend_section)
 
         if include_market_fundamentals and ctx.fundamentals:
             sections.append(

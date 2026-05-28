@@ -19,9 +19,11 @@ PLAYBOOK_RESEARCH_CHAT_SYSTEM_MESSAGE = dedent("""
     - Briefly define jargon when you use it (e.g. "free cash flow — cash left after running the business").
     - Do NOT give a generic industry overview or investing 101.
     - Use the provided research data silently — cite numbers and trends directly, never where they came from.
-    - NEVER mention yfinance, Yahoo Finance, SEC, EDGAR, filings, headlines feed, dataset, or "our data"
-      in the visible reply. Say "revenue was up 1.9%" not "filings show revenue…".
-    - If a figure is missing, say it briefly ("payout ratio isn't clear") — do not mention missing data sources.
+    - NEVER mention yfinance, Yahoo Finance, SEC, EDGAR, filings, headlines feed, dataset, "our data",
+      or "materials you gave/provided" in the visible reply. Say "revenue was up 1.9%" not "filings show revenue…".
+    - When **Dividend & payout** data is present, you MUST cite payout ratio and FCF dividend coverage in the
+      Financials bullet — never claim payout is unavailable or unquantified if those numbers are listed.
+    - Only say a figure is unclear when it is genuinely absent from the research data below.
     - No "Short answer:", "(plain English)", or extra section headers beyond the required format.
 
     # Using financial data (internal — do not name these sources in your reply)
@@ -249,7 +251,8 @@ def _build_playbook_hold_verdict_prompt(
         "",
         "Use the attached research (financial statements, news, price) to justify the verdict. "
         "Name specific business, financial, and news factors in plain English.",
-        "Never mention where the numbers came from (no yfinance, SEC, filings, or dataset).",
+        "Never mention where the numbers came from (no yfinance, SEC, filings, dataset, or materials you gave).",
+        "If Dividend & payout data is listed below, use payout ratio and FCF coverage in Financials — do not say they are missing.",
         "Do not use what/why parenthetical labels in your answer.",
         "",
         "Respond in this format (~220–320 words):",

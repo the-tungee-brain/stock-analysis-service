@@ -43,6 +43,7 @@ def test_build_playbook_ask_prompt_is_concise_hold_verdict():
     assert "220" in prompt or "320" in prompt
     assert "what/why parenthetical" in prompt.lower()
     assert "never mention where the numbers came from" in prompt.lower()
+    assert "dividend & payout" in prompt.lower()
     assert "yfinance/SEC metrics" not in prompt
     assert "Business model" not in prompt
     assert "Put zone" in prompt

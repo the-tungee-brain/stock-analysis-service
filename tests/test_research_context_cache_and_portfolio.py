@@ -36,7 +36,7 @@ def test_research_context_cache_uses_lookback_in_key():
 
     assert loaded is not None
     assert loaded.symbol == "AAPL"
-    assert "research:context:AAPL:14" in stored
+    assert "research:context:v2:AAPL:14" in stored
     assert cache.get(symbol="AAPL", lookback_days=7) is None
 
 
@@ -67,7 +67,7 @@ def test_research_context_cache_roundtrip():
     assert loaded.symbol == "AAPL"
     assert loaded.peers == ["MSFT", "GOOGL"]
     assert loaded.data_gaps == ["news"]
-    assert json.loads(stored["research:context:AAPL"])["symbol"] == "AAPL"
+    assert json.loads(stored["research:context:v2:AAPL"])["symbol"] == "AAPL"
 
 
 def test_research_chat_followup_message_omits_context_block():

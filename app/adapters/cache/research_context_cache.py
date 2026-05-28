@@ -8,11 +8,12 @@ from app.models.company_research_models import ResearchContext
 
 class ResearchContextCache:
     DEFAULT_TTL_SECONDS = 1800
+    DEFAULT_KEY_PREFIX = "research:context:v2"
 
     def __init__(
         self,
         redis_client: redis.Redis,
-        key_prefix: str = "research:context",
+        key_prefix: str = DEFAULT_KEY_PREFIX,
         ttl_seconds: int | None = None,
     ) -> None:
         self.redis_client = redis_client
