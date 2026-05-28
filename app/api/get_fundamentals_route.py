@@ -1,6 +1,7 @@
 import asyncio
 
 from fastapi import APIRouter, Depends
+from app.builders.yfinance_analysis_builder import YFinanceAnalysisBuilder
 from app.builders.yfinance_financials_builder import YFinanceFinancialsBuilder
 from app.models.company_research_models import (
     FundamentalsBlock,
@@ -15,6 +16,7 @@ from app.dependencies.service_dependencies import (
     get_llm_service,
     get_company_research_service,
     get_yfinance_financials_builder,
+    get_yfinance_analysis_builder,
 )
 
 router = APIRouter()
@@ -33,6 +35,9 @@ async def get_fundamentals(
     yfinance_financials_builder: YFinanceFinancialsBuilder = Depends(
         get_yfinance_financials_builder
     ),
+    yfinance_analysis_builder: YFinanceAnalysisBuilder = Depends(
+        get_yfinance_analysis_builder
+    ),
     prompt_enrichment_service: PromptEnrichmentService = Depends(
         get_prompt_enrichment_service
     ),
@@ -48,9 +53,14 @@ async def get_fundamentals(
     )
 
     financials_package = None
+    street_analysis = None
     if ctx.asset_type != "ETF":
         financials_package = await asyncio.to_thread(
             yfinance_financials_builder.build,
+            symbol=symbol,
+        )
+        street_analysis = await asyncio.to_thread(
+            yfinance_analysis_builder.build,
             symbol=symbol,
         )
 
@@ -77,4 +87,5 @@ async def get_fundamentals(
             financials_package.annual if financials_package else None
         ),
         strength=financials_package.strength if financials_package else None,
+        street_analysis=street_analysis,
     )

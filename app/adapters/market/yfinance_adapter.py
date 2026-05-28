@@ -25,11 +25,15 @@ class YFinanceAdapter:
     INFO_TTL_SECONDS = int(os.getenv("YFINANCE_INFO_CACHE_TTL_SECONDS", "900"))
     HISTORY_TTL_SECONDS = int(os.getenv("YFINANCE_HISTORY_CACHE_TTL_SECONDS", "300"))
     EARNINGS_TTL_SECONDS = int(os.getenv("YFINANCE_EARNINGS_CACHE_TTL_SECONDS", "3600"))
+    STREET_ANALYSIS_TTL_SECONDS = int(
+        os.getenv("YFINANCE_STREET_ANALYSIS_CACHE_TTL_SECONDS", "3600")
+    )
 
     def __init__(self) -> None:
         self._info_cache: dict[str, tuple[float, dict]] = {}
         self._history_cache: dict[str, tuple[float, pd.DataFrame]] = {}
         self._earnings_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._street_analysis_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._lock = Lock()
 
     def _get_cached(self, cache: dict, key: str, ttl_seconds: int):
@@ -206,6 +210,57 @@ class YFinanceAdapter:
         }
         self._set_cached(self._earnings_cache, cache_key, bundle)
         return bundle
+
+    def get_street_analysis_raw(self, symbol: str) -> dict[str, Any]:
+        """Cached Yahoo Finance analyst consensus tables for a symbol."""
+        symbol_upper = symbol.strip().upper()
+        cached = self._get_cached(
+            self._street_analysis_cache,
+            symbol_upper,
+            self.STREET_ANALYSIS_TTL_SECONDS,
+        )
+        if cached is not None:
+            return dict(cached)
+
+        ticker = yf.Ticker(symbol_upper)
+        bundle: dict[str, Any] = {
+            "price_targets": self._safe_call(ticker.get_analyst_price_targets),
+            "recommendations_summary": self._safe_dataframe(
+                ticker.get_recommendations_summary
+            ),
+            "earnings_estimate": self._safe_table(ticker.get_earnings_estimate, as_dict=True),
+            "revenue_estimate": self._safe_table(ticker.get_revenue_estimate, as_dict=True),
+            "eps_revisions": self._safe_table(ticker.get_eps_revisions, as_dict=True),
+        }
+        self._set_cached(self._street_analysis_cache, symbol_upper, bundle)
+        return bundle
+
+    @staticmethod
+    def _safe_call(method) -> Any:
+        try:
+            return method()
+        except Exception:
+            logger.debug("yfinance %s unavailable", getattr(method, "__name__", method))
+            return None
+
+    @staticmethod
+    def _safe_dataframe(method) -> pd.DataFrame | None:
+        try:
+            result = method()
+        except Exception:
+            logger.debug("yfinance %s unavailable", getattr(method, "__name__", method))
+            return None
+        if result is None or not isinstance(result, pd.DataFrame):
+            return None
+        return result
+
+    @staticmethod
+    def _safe_table(method, *, as_dict: bool) -> Any:
+        try:
+            return method(as_dict=as_dict)
+        except Exception:
+            logger.debug("yfinance %s unavailable", getattr(method, "__name__", method))
+            return None
 
     def _fetch_earnings_surprises(
         self,

@@ -5,6 +5,7 @@ from typing import Any
 
 from app.adapters.finnhub.finnhub_adapter import FinnhubAdapter
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
+from app.builders.yfinance_analysis_builder import YFinanceAnalysisBuilder
 from app.broker.fiscal_period import format_fiscal_period
 from app.models.company_research_models import NewsHeadline
 from app.models.earnings_models import (
@@ -30,16 +31,25 @@ class EarningsBuilder:
         self,
         yfinance_adapter: YFinanceAdapter,
         finnhub_adapter: FinnhubAdapter | None = None,
+        yfinance_analysis_builder: YFinanceAnalysisBuilder | None = None,
     ):
         self.yfinance_adapter = yfinance_adapter
         self.finnhub_adapter = finnhub_adapter
+        self.yfinance_analysis_builder = yfinance_analysis_builder
 
     def build_list(self, symbol: str, limit: int = 8) -> EarningsListResponse:
         symbol = symbol.upper()
         bundle = self.yfinance_adapter.get_earnings_bundle(symbol=symbol, limit=limit)
         surprises = bundle.get("surprises") or []
+        street_analysis = None
+        if self.yfinance_analysis_builder is not None:
+            street_analysis = self.yfinance_analysis_builder.build(symbol)
+
         if not surprises and not bundle.get("upcoming"):
-            return EarningsListResponse(symbol=symbol)
+            return EarningsListResponse(
+                symbol=symbol,
+                street_analysis=street_analysis,
+            )
 
         revenue_by_period: dict[str, float] = bundle.get("revenue_by_period") or {}
 
@@ -71,6 +81,7 @@ class EarningsBuilder:
             symbol=symbol,
             upcoming=upcoming,
             history=history,
+            street_analysis=street_analysis,
         )
 
     def build_event_for_date(

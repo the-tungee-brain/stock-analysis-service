@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.models.company_research_models import NewsHeadline
+from app.models.yfinance_analysis_models import StreetAnalysisSnapshot
 
 BeatLabel = Literal["beat", "miss", "inline", "pending"]
 EarningsTiming = Literal["bmo", "amc", "dmh"]
@@ -30,6 +31,9 @@ class EarningsListResponse(BaseModel):
     symbol: str
     upcoming: EarningsEvent | None = None
     history: list[EarningsEvent] = Field(default_factory=list)
+    street_analysis: StreetAnalysisSnapshot | None = Field(
+        default=None, serialization_alias="streetAnalysis"
+    )
 
 
 class TranscriptSegment(BaseModel):

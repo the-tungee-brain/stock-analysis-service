@@ -1,4 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+
+from app.models.yfinance_analysis_models import StreetAnalysisSnapshot
 from typing import Literal
 
 SentimentLabel = Literal["Bullish", "Neutral", "Bearish"]
@@ -165,6 +167,9 @@ class FundamentalsBlock(BaseModel):
         serialization_alias="annualFinancials",
     )
     strength: FinancialStrength | None = None
+    street_analysis: StreetAnalysisSnapshot | None = Field(
+        default=None, serialization_alias="streetAnalysis"
+    )
 
 
 class EarningsContext(BaseModel):

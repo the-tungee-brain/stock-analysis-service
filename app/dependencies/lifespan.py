@@ -55,6 +55,7 @@ from app.builders.performance_builder import PerformanceBuilder
 from app.builders.earnings_builder import EarningsBuilder
 from app.builders.ticker_symbol_builder import TickerSymbolBuilder
 from app.builders.fundamentals_builder import FundamentalsBuilder
+from app.builders.yfinance_analysis_builder import YFinanceAnalysisBuilder
 from app.builders.yfinance_financials_builder import YFinanceFinancialsBuilder
 
 from app.core.llm_config import settings
@@ -211,9 +212,13 @@ async def lifespan(app: FastAPI):
     yfinance_financials_builder = YFinanceFinancialsBuilder(
         yfinance_adapter=yfinance_adapter
     )
+    yfinance_analysis_builder = YFinanceAnalysisBuilder(
+        yfinance_adapter=yfinance_adapter
+    )
     earnings_builder = EarningsBuilder(
         yfinance_adapter=yfinance_adapter,
         finnhub_adapter=finnhub_adapter,
+        yfinance_analysis_builder=yfinance_analysis_builder,
     )
     sec_edgar_adapter = SecEdgarAdapter.from_env(session=session)
     securitiesdb_adapter = SecuritiesDbAdapter.from_env(session=session)
@@ -345,6 +350,7 @@ async def lifespan(app: FastAPI):
     app.state.redis_client = redis_client
     app.state.yfinance_adapter = yfinance_adapter
     app.state.yfinance_financials_builder = yfinance_financials_builder
+    app.state.yfinance_analysis_builder = yfinance_analysis_builder
     app.state.news_service = news_service
     app.state.prompt_enrichment_service = prompt_enrichment_service
     app.state.market_service = market_service
