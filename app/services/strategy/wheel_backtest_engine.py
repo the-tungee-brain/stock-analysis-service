@@ -22,7 +22,7 @@ TRADE_ACTION_LABELS: dict[str, str] = {
     "sell_cc": "Sell covered call",
     "call_expired": "Call expired (OTM)",
     "call_assigned": "Call assigned — shares called away",
-    "capital_top_up": "Capital top-up (CSP collateral)",
+    "capital_top_up": "Added cash (CSP needs more)",
 }
 
 
@@ -53,8 +53,8 @@ class WheelBacktestConfig:
     iv_cap_pct: float = 120.0
     premium_haircut: float = 0.95
     """Multiply theoretical premium to approximate bid vs mid (conservative)."""
-    maintain_one_lot: bool = False
-    """If True, inject cash when collateral exceeds wallet (not fixed-capital backtest)."""
+    maintain_one_lot: bool = True
+    """Top up cash when strike×100 exceeds wallet so one CSP lot can keep trading."""
 
 
 @dataclass
@@ -348,7 +348,10 @@ def run_wheel_backtest(
                         close_at_event=bar.close,
                         stock_price_usd=round(bar.close, 4),
                         cash_flow_usd=round(top_up, 2),
-                        note=f"Added cash to secure ${strike:.2f} put (1 lot)",
+                        note=(
+                            f"Deposited cash — CSP needs ${collateral:,.0f} secured "
+                            f"(${strike:.2f} × 100)"
+                        ),
                     )
             else:
                 if not csp_blocked_active:
@@ -727,16 +730,19 @@ def run_wheel_backtest(
     ]
     if config.maintain_one_lot:
         assumptions.append(
-            "Extra deposits allowed when cash cannot cover the next CSP (maintain one lot)."
+            "When cash cannot cover the next CSP (strike × 100 shares), the model "
+            "adds enough cash to keep selling one CSP."
         )
         if capital_top_ups > 0:
             assumptions.append(
-                f"Capital top-ups ${capital_top_ups:,.0f} injected over the run."
+                f"Additional deposits ${capital_top_ups:,.0f} over the run (stock rose, "
+                f"so each CSP needed more collateral). Total P/L and CAGR use all cash "
+                f"you put in: ${capital_deployed:,.0f} (starting wallet plus additions)."
             )
     else:
         assumptions.append(
-            "Fixed capital: no deposits after day one. Total P/L = ending equity minus "
-            "starting wallet only. New CSPs only when cash covers strike × 100."
+            "Fixed wallet only: no deposits after day one. Total P/L = ending equity "
+            "minus starting wallet. New CSPs only when cash covers strike × 100."
         )
     if skipped_cash > 0:
         assumptions.append(

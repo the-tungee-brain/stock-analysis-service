@@ -156,7 +156,7 @@ def test_realized_vol_clamped():
     assert 12.0 <= vol <= 80.0
 
 
-def test_fixed_capital_default_has_no_top_ups():
+def test_fixed_capital_has_no_top_ups():
     prices = [100.0] * 30 + [150.0] * 30
     bars = [
         PriceBar(trading_date=date(2020, 1, 2) + timedelta(days=i), close=p)
@@ -172,6 +172,7 @@ def test_fixed_capital_default_has_no_top_ups():
             target_delta=0.25,
             dte_days=5,
             vol_lookback_days=5,
+            maintain_one_lot=False,
         ),
     )
     assert result.capital_top_ups_usd == 0.0

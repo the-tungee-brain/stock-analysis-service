@@ -24,9 +24,9 @@ async def get_wheel_backtest(
     dte_days: int = Query(30, ge=5, le=60, alias="dteDays"),
     contracts: int = Query(1, ge=1, le=20),
     maintain_one_lot: bool = Query(
-        False,
+        True,
         alias="maintainOneLot",
-        description="Inject cash to keep selling one CSP when collateral rises",
+        description="Add cash when the next CSP needs more collateral than the wallet",
     ),
     service: WheelBacktestService = Depends(get_wheel_backtest_service),
 ) -> WheelBacktestResponse:
