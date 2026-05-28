@@ -28,12 +28,16 @@ class YFinanceAdapter:
     STREET_ANALYSIS_TTL_SECONDS = int(
         os.getenv("YFINANCE_STREET_ANALYSIS_CACHE_TTL_SECONDS", "3600")
     )
+    FUNDS_DATA_TTL_SECONDS = int(
+        os.getenv("YFINANCE_FUNDS_DATA_CACHE_TTL_SECONDS", "86400")
+    )
 
     def __init__(self) -> None:
         self._info_cache: dict[str, tuple[float, dict]] = {}
         self._history_cache: dict[str, tuple[float, pd.DataFrame]] = {}
         self._earnings_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._street_analysis_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._funds_data_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._lock = Lock()
 
     def _get_cached(self, cache: dict, key: str, ttl_seconds: int):
@@ -241,6 +245,39 @@ class YFinanceAdapter:
             "major_holders": self._safe_dataframe(ticker.get_major_holders),
         }
         self._set_cached(self._street_analysis_cache, symbol_upper, bundle)
+        return bundle
+
+    def get_funds_data_raw(self, symbol: str) -> dict[str, Any] | None:
+        """Cached Yahoo Finance ETF/mutual fund profile (get_funds_data)."""
+        symbol_upper = symbol.strip().upper()
+        cached = self._get_cached(
+            self._funds_data_cache,
+            symbol_upper,
+            self.FUNDS_DATA_TTL_SECONDS,
+        )
+        if cached is not None:
+            return dict(cached)
+
+        ticker = yf.Ticker(symbol_upper)
+        try:
+            funds = ticker.get_funds_data()
+        except Exception:
+            logger.exception("yfinance get_funds_data failed for %s", symbol_upper)
+            return None
+
+        if funds is None:
+            return None
+
+        bundle: dict[str, Any] = {
+            "description": getattr(funds, "description", None),
+            "fund_overview": getattr(funds, "fund_overview", None),
+            "fund_operations": getattr(funds, "fund_operations", None),
+            "asset_classes": getattr(funds, "asset_classes", None),
+            "sector_weightings": getattr(funds, "sector_weightings", None),
+            "bond_ratings": getattr(funds, "bond_ratings", None),
+            "top_holdings": getattr(funds, "top_holdings", None),
+        }
+        self._set_cached(self._funds_data_cache, symbol_upper, bundle)
         return bundle
 
     @staticmethod

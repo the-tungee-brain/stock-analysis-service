@@ -56,6 +56,7 @@ from app.builders.earnings_builder import EarningsBuilder
 from app.builders.ticker_symbol_builder import TickerSymbolBuilder
 from app.builders.fundamentals_builder import FundamentalsBuilder
 from app.builders.yfinance_analysis_builder import YFinanceAnalysisBuilder
+from app.builders.yfinance_funds_builder import YFinanceFundsBuilder
 from app.builders.yfinance_financials_builder import YFinanceFinancialsBuilder
 
 from app.core.llm_config import settings
@@ -215,6 +216,7 @@ async def lifespan(app: FastAPI):
     yfinance_analysis_builder = YFinanceAnalysisBuilder(
         yfinance_adapter=yfinance_adapter
     )
+    yfinance_funds_builder = YFinanceFundsBuilder(yfinance_adapter=yfinance_adapter)
     earnings_builder = EarningsBuilder(
         yfinance_adapter=yfinance_adapter,
         finnhub_adapter=finnhub_adapter,
@@ -351,6 +353,7 @@ async def lifespan(app: FastAPI):
     app.state.yfinance_adapter = yfinance_adapter
     app.state.yfinance_financials_builder = yfinance_financials_builder
     app.state.yfinance_analysis_builder = yfinance_analysis_builder
+    app.state.yfinance_funds_builder = yfinance_funds_builder
     app.state.news_service = news_service
     app.state.prompt_enrichment_service = prompt_enrichment_service
     app.state.market_service = market_service

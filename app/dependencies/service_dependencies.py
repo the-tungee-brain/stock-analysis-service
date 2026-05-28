@@ -1,5 +1,6 @@
 from fastapi import Request
 from app.builders.yfinance_analysis_builder import YFinanceAnalysisBuilder
+from app.builders.yfinance_funds_builder import YFinanceFundsBuilder
 from app.builders.yfinance_financials_builder import YFinanceFinancialsBuilder
 from app.services.llm_service import LLMService
 from app.services.market_service import MarketService
@@ -80,6 +81,10 @@ def get_yfinance_financials_builder(request: Request) -> YFinanceFinancialsBuild
 
 def get_yfinance_analysis_builder(request: Request) -> YFinanceAnalysisBuilder:
     return request.app.state.yfinance_analysis_builder
+
+
+def get_yfinance_funds_builder(request: Request) -> YFinanceFundsBuilder:
+    return request.app.state.yfinance_funds_builder
 
 
 def get_ticker_service(request: Request) -> TickerService:
