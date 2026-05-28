@@ -2,8 +2,9 @@ name: Morning brief
 
 on:
   schedule:
-    # 13:00 UTC daily (~8:00 AM US Eastern in standard time)
-    - cron: "0 13 * * *"
+    # 13:23 UTC daily (~6:23 AM Pacific / ~9:23 AM Eastern in daylight time).
+    # Off the hour to reduce GitHub schedule drops at :00.
+    - cron: "23 13 * * *"
   workflow_dispatch:
 
 jobs:
@@ -22,8 +23,8 @@ jobs:
             exit 1
           fi
 
-          response="$(curl -sS -w "\n%{http_code}" -X POST \
-            "${API_BASE_URL}/internal/dispatch-morning-briefs" \
+          response="$(curl -sS --max-time 300 -w "\n%{http_code}" -X POST \
+            "${API_BASE_URL%/}/internal/dispatch-morning-briefs" \
             -H "X-Cron-Secret: ${CRON_SECRET}" \
             -H "Content-Type: application/json")"
 
