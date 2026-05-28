@@ -103,11 +103,11 @@ def test_build_analysis_context_loads_market_data_when_requested():
     schwab_auth_service.get_valid_token_by_user_id.assert_called_once()
     assert market_service.get_enriched_quote_snapshot.call_count == 2
     market_service.get_option_chains.assert_called_once()
-    assert market_service.get_option_chains.call_args.kwargs["strike_count"] == 15
+    assert market_service.get_option_chains.call_args.kwargs["strike_count"] == 25
     prompt_enrichment_service.resolve_option_chain_block.assert_called_once()
     assert (
         prompt_enrichment_service.resolve_option_chain_block.call_args.kwargs[
             "strike_count"
         ]
-        == 15
+        == 25
     )

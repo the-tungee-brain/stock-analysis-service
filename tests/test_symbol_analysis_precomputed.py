@@ -260,6 +260,91 @@ def test_build_roll_cash_picture_math():
     assert picture.loss_on_closed_put_per_contract == -85.0
 
 
+def test_build_roll_cash_picture_partial_with_estimated_roll_net():
+    picture = SymbolAnalysisPrecomputedService._build_roll_cash_picture(
+        entry_premium_per_contract=200.0,
+        close_cost_per_contract=135.0,
+        open_collect_per_contract=None,
+        roll_net_per_contract=115.0,
+    )
+
+    assert picture is not None
+    assert picture.roll_net_per_contract == 115.0
+    assert picture.net_cash_after_roll_per_contract == 315.0
+
+
+def test_precomputed_uses_mark_when_ask_missing_for_close_cost():
+    near_exp = (date.today() + timedelta(days=3)).isoformat()
+    roll_exp = (date.today() + timedelta(days=10)).isoformat()
+    chain = OptionChain(
+        symbol="NVDA",
+        underlyingPrice=220.0,
+        putExpDateMap={
+            f"{near_exp}:3": {
+                "212.5": [
+                    OptionContract(
+                        putCall="PUT",
+                        symbol="NVDA",
+                        strikePrice=212.5,
+                        expirationDate=near_exp,
+                        daysToExpiration=3,
+                        delta=-0.44,
+                        openInterest=800,
+                        markPrice=1.3,
+                    )
+                ]
+            },
+            f"{roll_exp}:10": {
+                "205.0": [
+                    OptionContract(
+                        putCall="PUT",
+                        symbol="NVDA",
+                        strikePrice=205.0,
+                        expirationDate=roll_exp,
+                        daysToExpiration=10,
+                        delta=-0.28,
+                        openInterest=1200,
+                        markPrice=2.5,
+                    )
+                ]
+            },
+        },
+    )
+    intelligence = SymbolIntelligence(
+        symbol="NVDA",
+        roll_suggestions=[
+            OptionRollSuggestion(
+                side="put",
+                current_strike=212.5,
+                current_expiration=near_exp,
+                suggested_strike=205.0,
+                suggested_expiration=roll_exp,
+                current_delta=-0.44,
+                suggested_delta=-0.28,
+                estimated_credit=1.2,
+                rationale="roll",
+            )
+        ],
+    )
+
+    precomputed = SymbolAnalysisPrecomputedService.build(
+        symbol="NVDA",
+        account=_make_account(liquidation_value=100_000),
+        positions=[_short_nvda_put_position()],
+        intelligence=intelligence,
+        option_chain=chain,
+        underlying_price=220.0,
+    )
+
+    assert precomputed is not None
+    outcome = precomputed.held_option_outcomes[0]
+    assert outcome.close.cost_per_contract == 130.0
+    assert outcome.roll is not None
+    assert outcome.roll_cash_picture is not None
+    assert outcome.roll_cash_picture.close_cost_per_contract == 130.0
+    assert outcome.roll_cash_picture.open_collect_per_contract == 250.0
+
+
 def test_symbol_analysis_v1_envelope_serializes_camel_case():
     envelope = SymbolAnalysisV1Envelope(
         analysis=PortfolioAnalysisV1LLMResponse(

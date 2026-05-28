@@ -37,6 +37,27 @@ from app.models.symbol_analysis_precomputed_models import (
 from app.services.intelligence.options_scoring_service import OptionsScoringService
 
 OPTION_CONTRACT_MULTIPLIER = 100.0
+
+
+def _positive_price(value: float | None) -> float | None:
+    if value is None or value <= 0:
+        return None
+    return value
+
+
+def _buy_to_close_per_share(*, ask: float | None, mark: float | None) -> float | None:
+    return _positive_price(ask) or _positive_price(mark)
+
+
+def _sell_to_open_per_share(*, bid: float | None, mark: float | None) -> float | None:
+    return _positive_price(bid) or _positive_price(mark)
+
+
+def _cash_per_contract(per_share: float | None) -> float | None:
+    price = _positive_price(per_share)
+    if price is None:
+        return None
+    return round(price * OPTION_CONTRACT_MULTIPLIER, 2)
 PNL_ACTION_TRIGGER_PCT = -30.0
 ASSIGNMENT_DELTA_THRESHOLD = OptionsScoringService.ASSIGNMENT_DELTA_THRESHOLD
 
@@ -192,10 +213,15 @@ class SymbolAnalysisPrecomputedService:
         delta = sanitize_delta(greeks.delta if greeks else None)
         dte = max((expiration_date - date.today()).days, 0)
 
-        entry_per_share = position.averagePrice or position.averageShortPrice
+        entry_per_share = SymbolAnalysisPrecomputedService._entry_premium_per_share(
+            position
+        )
         open_pnl = position_open_profit_loss(position)
         open_pnl_pct = position_open_profit_loss_pct(position)
         weight_pct = position_portfolio_weight_pct(position, portfolio_value)
+
+        close_per_share = _buy_to_close_per_share(ask=ask, mark=mark)
+        close_cost_per_contract = _cash_per_contract(close_per_share)
 
         current_leg = OptionLegOutcome(
             put_call=put_call,
@@ -208,17 +234,13 @@ class SymbolAnalysisPrecomputedService:
             bid=bid,
             ask=ask,
             mark=mark,
-            cash_per_contract=round(ask * OPTION_CONTRACT_MULTIPLIER, 2)
-            if ask is not None
-            else None,
-            cash_direction="pay" if ask is not None else None,
+            cash_per_contract=close_cost_per_contract,
+            cash_direction="pay" if close_per_share is not None else None,
         )
 
         close = ClosePathOutcome(
-            cost_per_share=ask,
-            cost_per_contract=round(ask * OPTION_CONTRACT_MULTIPLIER, 2)
-            if ask is not None
-            else None,
+            cost_per_share=close_per_share,
+            cost_per_contract=close_cost_per_contract,
             open_pnl=open_pnl,
         )
 
@@ -495,14 +517,27 @@ class SymbolAnalysisPrecomputedService:
         return "; ".join(triggers)
 
     @staticmethod
+    def _entry_premium_per_share(position: Position) -> float | None:
+        if position.shortQuantity > 0:
+            avg = (
+                position.averageShortPrice
+                or position.taxLotAverageShortPrice
+                or position.averagePrice
+            )
+        else:
+            avg = position.averagePrice or position.averageShortPrice
+        return _positive_price(avg)
+
+    @staticmethod
     def _build_roll_cash_picture(
         *,
         entry_premium_per_contract: float | None,
         close_cost_per_contract: float | None,
         open_collect_per_contract: float | None,
+        roll_net_per_contract: float | None = None,
     ) -> RollCashPicture | None:
-        roll_net = None
-        if close_cost_per_contract is not None and open_collect_per_contract is not None:
+        roll_net = roll_net_per_contract
+        if roll_net is None and close_cost_per_contract is not None and open_collect_per_contract is not None:
             roll_net = round(
                 open_collect_per_contract - close_cost_per_contract, 2
             )
@@ -562,24 +597,30 @@ class SymbolAnalysisPrecomputedService:
 
         close_cost = close_cost_per_contract
         open_collect = None
+        roll_net_override = None
         if roll is not None:
             close_cost = roll.close_leg.cash_per_contract
             open_collect = roll.open_leg.cash_per_contract
+            roll_net_override = roll.net_credit_per_contract
         elif matched_suggestion is not None:
-            if (
-                close_cost is not None
-                and matched_suggestion.estimated_credit is not None
-            ):
-                open_collect = round(
-                    close_cost
-                    + matched_suggestion.estimated_credit * OPTION_CONTRACT_MULTIPLIER,
+            if matched_suggestion.estimated_credit is not None:
+                roll_net_override = round(
+                    matched_suggestion.estimated_credit * OPTION_CONTRACT_MULTIPLIER,
                     2,
                 )
+                if close_cost is not None:
+                    open_collect = round(
+                        close_cost + roll_net_override,
+                        2,
+                    )
 
         return SymbolAnalysisPrecomputedService._build_roll_cash_picture(
             entry_premium_per_contract=entry_premium_per_contract,
             close_cost_per_contract=close_cost,
             open_collect_per_contract=open_collect,
+            roll_net_per_contract=roll_net_override
+            if open_collect is None
+            else None,
         )
 
     @staticmethod
@@ -625,6 +666,11 @@ class SymbolAnalysisPrecomputedService:
         )
         open_dte = OptionsScoringService._expiration_dte(suggestion.suggested_expiration)
 
+        close_per_share = _buy_to_close_per_share(ask=close_ask, mark=close_mark)
+        open_per_share = _sell_to_open_per_share(bid=open_bid, mark=open_mark)
+        close_leg_cost = _cash_per_contract(close_per_share)
+        open_leg_collect = _cash_per_contract(open_per_share)
+
         close_leg = OptionLegOutcome(
             put_call=put_call,
             side=side,
@@ -636,10 +682,8 @@ class SymbolAnalysisPrecomputedService:
             bid=close_bid,
             ask=close_ask,
             mark=close_mark,
-            cash_per_contract=round(close_ask * OPTION_CONTRACT_MULTIPLIER, 2)
-            if close_ask is not None
-            else None,
-            cash_direction="pay" if close_ask is not None else None,
+            cash_per_contract=close_leg_cost,
+            cash_direction="pay" if close_per_share is not None else None,
         )
         open_leg = OptionLegOutcome(
             put_call=put_call,
@@ -652,15 +696,13 @@ class SymbolAnalysisPrecomputedService:
             bid=open_bid,
             ask=open_ask,
             mark=open_mark,
-            cash_per_contract=round(open_bid * OPTION_CONTRACT_MULTIPLIER, 2)
-            if open_bid is not None
-            else None,
-            cash_direction="collect" if open_bid is not None else None,
+            cash_per_contract=open_leg_collect,
+            cash_direction="collect" if open_per_share is not None else None,
         )
 
         net_per_share = (
-            round(open_bid - close_ask, 2)
-            if open_bid is not None and close_ask is not None
+            round(open_per_share - close_per_share, 2)
+            if open_per_share is not None and close_per_share is not None
             else suggestion.estimated_credit
         )
         net_per_contract = (
