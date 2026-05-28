@@ -11,7 +11,8 @@ PLAYBOOK_VERDICT_FORMAT = dedent("""
 
     **What drives this:**
     - **Business:** competitive position and model durability — why you'd be okay owning shares for years
-    - **Financials:** 2–3 concrete metrics with numbers in plain English (see strategy focus below)
+    - **Financials:** 2–3 concrete metrics with numbers in plain English (see strategy focus below).
+      Start each factor sentence with a capital letter — never mid-sentence fragments like "revenue = …".
     - **News:** 1–2 recent headline themes and how they affect your confidence in holding
     - **Strategy fit:** why this does or doesn't fit the investor's playbook strategy
 
@@ -36,6 +37,8 @@ PLAYBOOK_RESEARCH_CHAT_SYSTEM_MESSAGE = dedent(f"""
     - Define jargon briefly once when you use it (e.g. "free cash flow — cash left after running the business").
     - Use numbers from the current RESEARCH DATA block. Never name the source (no SEC, EDGAR, yfinance,
       Schwab, filings, dataset, or "materials you gave/pasted/discussed").
+    - Each factor bullet is one complete sentence starting with a capital letter — not a clause fragment
+      (bad: "From filings, revenue = …"; good: "Revenue grew to $X, which …").
     - Prefer current RESEARCH DATA over earlier messages in the thread — prior replies may be wrong.
     - Do not give generic industry overviews, investing 101, or extra section headers beyond the format above.
     - No "Short answer:", "(plain English)", or similar lead labels.
