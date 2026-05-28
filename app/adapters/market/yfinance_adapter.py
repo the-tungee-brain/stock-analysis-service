@@ -232,6 +232,7 @@ class YFinanceAdapter:
             "recommendations_summary": self._safe_dataframe(
                 ticker.get_recommendations_summary
             ),
+            "recommendations": self._safe_dataframe(ticker.get_recommendations),
             "earnings_estimate": self._safe_table(ticker.get_earnings_estimate, as_dict=True),
             "revenue_estimate": self._safe_table(ticker.get_revenue_estimate, as_dict=True),
             "eps_revisions": self._safe_table(ticker.get_eps_revisions, as_dict=True),

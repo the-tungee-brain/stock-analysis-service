@@ -111,6 +111,9 @@ class StreetAnalysisSnapshot(BaseModel):
     growth_context_headline: str | None = Field(
         default=None, serialization_alias="growthContextHeadline"
     )
+    rating_trend_headline: str | None = Field(
+        default=None, serialization_alias="ratingTrendHeadline"
+    )
     ownership: OwnershipSnapshot | None = None
     estimate_revision_headline: str | None = Field(
         default=None, serialization_alias="estimateRevisionHeadline"

@@ -49,6 +49,7 @@ class YFinanceAnalysisBuilder:
 
         price_targets = self._parse_price_targets(raw.get("price_targets"), current_price)
         recommendation = self._parse_recommendations(raw.get("recommendations_summary"))
+        rating_trend_headline = self._rating_trend_headline(raw.get("recommendations"))
         eps_estimates = self._parse_all_period_estimates(raw.get("earnings_estimate"))
         revenue_estimates = self._parse_all_period_estimates(
             raw.get("revenue_estimate")
@@ -95,6 +96,7 @@ class YFinanceAnalysisBuilder:
             estimate_revision_headline=revision_headline,
             estimate_drift_headline=drift_headline,
             growth_context_headline=growth_headline,
+            rating_trend_headline=rating_trend_headline,
             recent_rating_actions=recent_actions,
             ownership=ownership,
         )
@@ -169,6 +171,57 @@ class YFinanceAnalysisBuilder:
             + breakdown.strong_sell
         )
         return breakdown if total > 0 else None
+
+    def _rating_trend_headline(self, df: Any) -> str | None:
+        if df is None or not isinstance(df, pd.DataFrame) or len(df) < 2:
+            return None
+
+        working = df.copy()
+        if "period" in working.columns:
+            working = working.sort_values("period", ascending=True)
+
+        latest_row = working.iloc[-1]
+        prior_row = working.iloc[-2]
+        latest_bull, latest_total = self._recommendation_bullish_share(latest_row)
+        prior_bull, prior_total = self._recommendation_bullish_share(prior_row)
+        if latest_total <= 0 or prior_total <= 0:
+            return None
+
+        delta = latest_bull - prior_bull
+        if abs(delta) < 3:
+            return (
+                f"Analyst buy-side share steady at {latest_bull:.0f}% "
+                f"(was {prior_bull:.0f}%)."
+            )
+        if delta > 0:
+            return (
+                f"Analyst sentiment shifted more bullish: buy-side share "
+                f"{latest_bull:.0f}% vs {prior_bull:.0f}% prior period."
+            )
+        return (
+            f"Analyst sentiment shifted more cautious: buy-side share "
+            f"{latest_bull:.0f}% vs {prior_bull:.0f}% prior period."
+        )
+
+    def _recommendation_bullish_share(self, row: Any) -> tuple[float, int]:
+        def col(name: str) -> int:
+            for key in (name, name.replace("_", "")):
+                if key in row.index:
+                    value = row[key]
+                    if value is not None and not pd.isna(value):
+                        return int(value)
+            return 0
+
+        strong_buy = col("strongBuy")
+        buy = col("buy")
+        hold = col("hold")
+        sell = col("sell")
+        strong_sell = col("strongSell")
+        total = strong_buy + buy + hold + sell + strong_sell
+        if total <= 0:
+            return 0.0, 0
+        bullish = ((strong_buy + buy) / total) * 100
+        return bullish, total
 
     @staticmethod
     def _consensus_label(rec: RecommendationBreakdown) -> str:
@@ -346,16 +399,24 @@ class YFinanceAnalysisBuilder:
         return actions
 
     @staticmethod
-    def _index_to_iso_date(idx: Any) -> str | None:
-        if isinstance(idx, pd.Timestamp):
-            return idx.strftime("%Y-%m-%d")
+    def _cell_to_iso_date(value: Any) -> str | None:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
         try:
-            parsed = pd.Timestamp(idx)
-            if pd.isna(parsed):
-                return None
-            return parsed.strftime("%Y-%m-%d")
+            parsed = pd.Timestamp(value)
         except Exception:
             return None
+        if pd.isna(parsed):
+            return None
+        if parsed.year < 1990:
+            return None
+        return parsed.strftime("%Y-%m-%d")
+
+    @staticmethod
+    def _index_to_iso_date(idx: Any) -> str | None:
+        if isinstance(idx, (int, float)) and not isinstance(idx, bool):
+            return None
+        return YFinanceAnalysisBuilder._cell_to_iso_date(idx)
 
     def _growth_context_headline(self, table: Any, period_key: str) -> str | None:
         row = self._table_row(table, period_key)
@@ -495,21 +556,33 @@ class YFinanceAnalysisBuilder:
         if df is None or not isinstance(df, pd.DataFrame) or df.empty:
             return []
 
-        try:
-            sorted_df = df.sort_index(ascending=False).head(limit)
-        except Exception:
-            sorted_df = df.head(limit)
-
-        insider_col = self._find_column(sorted_df, "Insider", "insider", "Insider Trading")
-        transaction_col = self._find_column(
-            sorted_df, "Transaction", "transaction", "Text"
+        date_col = self._find_column(
+            df, "Start Date", "startDate", "Date", "Filing Date", "startdate"
         )
-        shares_col = self._find_column(sorted_df, "Shares", "shares")
-        value_col = self._find_column(sorted_df, "Value", "value", "Value ($)")
+        working = df.copy()
+        if date_col:
+            working["_sort_date"] = pd.to_datetime(working[date_col], errors="coerce")
+            working = working.sort_values("_sort_date", ascending=False)
+        else:
+            try:
+                working = df.sort_index(ascending=False)
+            except Exception:
+                working = df
+
+        insider_col = self._find_column(working, "Insider", "insider", "Insider Trading")
+        transaction_col = self._find_column(
+            working, "Transaction", "transaction", "Text"
+        )
+        shares_col = self._find_column(working, "Shares", "shares")
+        value_col = self._find_column(working, "Value", "value", "Value ($)")
 
         rows: list[InsiderTransactionRow] = []
-        for idx, row in sorted_df.iterrows():
-            date_str = self._index_to_iso_date(idx)
+        for idx, row in working.head(limit).iterrows():
+            date_str = (
+                self._cell_to_iso_date(row[date_col])
+                if date_col and date_col in row.index
+                else self._index_to_iso_date(idx)
+            )
             if date_str is None:
                 continue
             insider = (

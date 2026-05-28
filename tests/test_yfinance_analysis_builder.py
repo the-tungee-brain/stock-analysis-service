@@ -26,6 +26,26 @@ def _sample_raw() -> dict:
                 }
             ]
         ),
+        "recommendations": pd.DataFrame(
+            [
+                {
+                    "period": "-2m",
+                    "strongBuy": 8,
+                    "buy": 12,
+                    "hold": 8,
+                    "sell": 3,
+                    "strongSell": 2,
+                },
+                {
+                    "period": "0m",
+                    "strongBuy": 12,
+                    "buy": 18,
+                    "hold": 4,
+                    "sell": 2,
+                    "strongSell": 1,
+                },
+            ]
+        ),
         "earnings_estimate": {
             "0q": {
                 "numberOfAnalysts": 20,
@@ -84,12 +104,19 @@ def _sample_raw() -> dict:
             [
                 {
                     "Insider": "Jane Doe",
+                    "Start Date": pd.Timestamp("2026-04-01"),
                     "Transaction": "Sale",
                     "Shares": 10000,
                     "Value": 250000,
-                }
-            ],
-            index=pd.to_datetime(["2026-04-01"]),
+                },
+                {
+                    "Insider": "John Smith",
+                    "Start Date": pd.Timestamp("2026-03-15"),
+                    "Transaction": "Purchase",
+                    "Shares": 5000,
+                    "Value": 125000,
+                },
+            ]
         ),
         "eps_revisions": {
             "+1q": {
@@ -151,6 +178,8 @@ def test_build_street_analysis_snapshot(mock_adapter_cls):
     assert len(snapshot.recent_rating_actions) == 2
     assert snapshot.recent_rating_actions[0].firm == "Goldman Sachs"
     assert len(snapshot.eps_estimates) == 3
+    assert snapshot.rating_trend_headline is not None
+    assert "more bullish" in snapshot.rating_trend_headline
     assert snapshot.growth_context_headline is not None
     assert "22.0%" in snapshot.growth_context_headline
     assert snapshot.ownership is not None
@@ -159,11 +188,36 @@ def test_build_street_analysis_snapshot(mock_adapter_cls):
 
 
 @patch("app.builders.yfinance_analysis_builder.YFinanceAdapter")
+def test_insider_transactions_use_start_date_not_row_index(mock_adapter_cls):
+    adapter = MagicMock()
+    raw = _sample_raw()
+    raw["insider_transactions"] = pd.DataFrame(
+        [
+            {
+                "Insider": "HUANG JEN-HSUN",
+                "Start Date": pd.Timestamp("2025-06-10"),
+                "Transaction": "Sale at price 100.00 per share.",
+                "Shares": 240_000,
+            }
+        ],
+        index=[0],
+    )
+    adapter.get_street_analysis_raw.return_value = raw
+    adapter.get_ticker_info.return_value = {"currentPrice": 100.0}
+
+    snapshot = YFinanceAnalysisBuilder(adapter).build("NVDA")
+    assert snapshot is not None
+    assert snapshot.ownership is not None
+    assert snapshot.ownership.recent_insider_transactions[0].date == "2025-06-10"
+
+
+@patch("app.builders.yfinance_analysis_builder.YFinanceAdapter")
 def test_build_returns_none_when_empty(mock_adapter_cls):
     adapter = MagicMock()
     adapter.get_street_analysis_raw.return_value = {
         "price_targets": None,
         "recommendations_summary": None,
+        "recommendations": None,
         "earnings_estimate": None,
         "revenue_estimate": None,
         "eps_revisions": None,
