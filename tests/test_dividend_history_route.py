@@ -58,6 +58,7 @@ def test_get_dividend_history_returns_context():
             project_years=None,
             dividend_cagr_pct=None,
             history_start_year=None,
+            annual_contribution_usd=0.0,
             dividend_research_service=service,
         )
     )
@@ -73,6 +74,7 @@ def test_get_dividend_history_returns_context():
         project_years=None,
         dividend_cagr_pct=None,
         history_start_year=None,
+        annual_contribution_usd=0.0,
     )
 
 
@@ -85,6 +87,7 @@ def test_get_dividend_history_raises_404_when_missing():
             get_dividend_history(
                 symbol="UNKNOWN",
                 shares=100,
+                annual_contribution_usd=0.0,
                 dividend_research_service=service,
             )
         )
@@ -100,6 +103,7 @@ def test_route_json_uses_camel_case_aliases():
         get_dividend_history(
             symbol="SCHD",
             shares=100,
+            annual_contribution_usd=0.0,
             dividend_research_service=service,
         )
     ).model_dump(mode="json", by_alias=True)
