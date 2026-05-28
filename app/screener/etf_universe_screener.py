@@ -32,12 +32,15 @@ def _quote_from_info(symbol: str, info: dict[str, Any]) -> StrategyScreenerQuote
     )
 
 
-def _passes_etf_structure(
+def _passes_etf_filters(
     info: dict[str, Any],
+    *,
     structure: dict[str, Any],
+    liquidity: dict[str, Any],
+    price_cfg: dict[str, Any],
     dividend_cfg: dict[str, Any],
 ) -> bool:
-    min_assets = structure.get("min_total_assets")
+    min_assets = structure.get("min_total_assets") or liquidity.get("min_total_assets")
     max_expense = structure.get("max_expense_ratio")
 
     total_assets = info.get("totalAssets")
@@ -48,6 +51,16 @@ def _passes_etf_structure(
     expense = info.get("annualReportExpenseRatio") or info.get("expenseRatio")
     if max_expense is not None and expense is not None:
         if float(expense) > float(max_expense):
+            return False
+
+    regular_price = info.get("regularMarketPrice")
+    if regular_price is not None:
+        price_value = float(regular_price)
+        min_price = price_cfg.get("min_price")
+        max_price = price_cfg.get("max_price")
+        if min_price is not None and price_value < float(min_price):
+            return False
+        if max_price is not None and price_value > float(max_price):
             return False
 
     raw_yield = info.get("dividendYield") or info.get("yield")
@@ -69,8 +82,10 @@ def screen_etf_preset(
     limit: int,
 ) -> tuple[list[StrategyScreenerQuote], int]:
     structure = _structure_filters(preset)
-    symbols = structure.get("examples_preferred") or []
+    liquidity = preset.post_filters.get("liquidity") or {}
+    price_cfg = preset.post_filters.get("price") or {}
     dividend_cfg = preset.post_filters.get("dividend") or {}
+    symbols = structure.get("examples_preferred") or []
 
     quotes: list[StrategyScreenerQuote] = []
     for symbol in symbols:
@@ -83,7 +98,13 @@ def screen_etf_preset(
             logger.debug("Unable to load ETF info for %s", upper)
             continue
 
-        if not _passes_etf_structure(info, structure, dividend_cfg):
+        if not _passes_etf_filters(
+            info,
+            structure=structure,
+            liquidity=liquidity,
+            price_cfg=price_cfg,
+            dividend_cfg=dividend_cfg,
+        ):
             continue
 
         quotes.append(_quote_from_info(upper, info))

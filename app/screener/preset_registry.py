@@ -18,6 +18,9 @@ STRATEGY_PRESET_IDS: dict[InvestmentStrategy, str] = {
 }
 
 STRATEGY_COMPANION_PRESET_IDS: dict[InvestmentStrategy, list[str]] = {
+    InvestmentStrategy.WHEEL: ["wheel_etf"],
+    InvestmentStrategy.CSP_INCOME: ["csp_etf"],
+    InvestmentStrategy.COVERED_CALL: ["covered_call_etf"],
     InvestmentStrategy.DIVIDEND: ["dividend_etf"],
 }
 

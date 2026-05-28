@@ -1,0 +1,41 @@
+{
+  "id": "wheel_etf",
+  "label": "Wheel ETFs (CSP + CC)",
+  "description": "Highly liquid index and sector ETFs suitable for running the full wheel — CSP, assignment, and covered calls.",
+  "fund_universe": {
+    "region": "us",
+    "asset_class": "equity"
+  },
+  "post_filters": {
+    "structure": {
+      "min_total_assets": 1000000000,
+      "examples_preferred": ["SPY", "QQQ", "IWM", "VOO", "VTI", "XLF", "XLI", "XLV", "XLP", "SCHD"]
+    },
+    "liquidity": {
+      "min_avg_daily_volume": 1000000,
+      "min_avg_options_volume": 5000,
+      "min_total_assets": 1000000000
+    },
+    "price": {
+      "min_price": 20,
+      "max_price": 300
+    },
+    "volatility": {
+      "min_iv_rank": 0.20,
+      "max_iv_rank": 0.50,
+      "exclude_earnings": true
+    },
+    "sectors_allowlist": [
+      "Broad Market Index",
+      "Large Cap Growth/Blend",
+      "Financials",
+      "Industrials",
+      "Healthcare",
+      "Consumer Staples",
+      "Energy",
+      "Utilities",
+      "Real Estate",
+      "Communication Services"
+    ]
+  }
+}

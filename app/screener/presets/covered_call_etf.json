@@ -1,0 +1,48 @@
+{
+  "id": "covered_call_etf",
+  "label": "Covered Call ETFs",
+  "description": "Stable, broad ETFs for holding shares and writing your own covered calls — not packaged buy-write funds.",
+  "fund_universe": {
+    "region": "us",
+    "asset_class": "equity"
+  },
+  "post_filters": {
+    "structure": {
+      "min_total_assets": 1000000000,
+      "examples_preferred": ["SPY", "VOO", "IVV", "VTI", "SCHB", "XLP", "XLV", "XLU", "XLF", "QQQ"]
+    },
+    "liquidity": {
+      "min_avg_daily_volume": 1000000,
+      "min_avg_options_volume": 3000,
+      "min_total_assets": 1000000000
+    },
+    "price": {
+      "min_price": 40,
+      "max_price": 400
+    },
+    "trend": {
+      "min_200dma_slope": 0.0,
+      "price_above_200dma": true
+    },
+    "options": {
+      "target_dte_range": [21, 60],
+      "target_delta_range": [0.20, 0.40],
+      "min_oi": 300,
+      "max_bid_ask_spread_pct": 0.08
+    },
+    "volatility": {
+      "min_iv_rank": 0.15,
+      "max_iv_rank": 0.45
+    },
+    "sectors_allowlist": [
+      "Broad Market Index",
+      "Dividend Equity Index",
+      "Consumer Staples",
+      "Healthcare",
+      "Utilities",
+      "Financials",
+      "Large Cap Blend/Growth",
+      "Low/Min Volatility Equity"
+    ]
+  }
+}

@@ -6,7 +6,11 @@ from app.models.strategy_models import (
     UserInvestmentProfile,
 )
 from app.screener.equity_query_compiler import compile_equity_query
-from app.screener.preset_registry import get_preset, preset_for_strategy
+from app.screener.preset_registry import (
+    STRATEGY_COMPANION_PRESET_IDS,
+    get_preset,
+    preset_for_strategy,
+)
 from app.services.strategy.strategy_stock_screener_service import (
     StrategyStockScreenerService,
 )
@@ -131,3 +135,79 @@ def test_describe_preset_includes_key_constraints():
     summary = StrategyStockScreenerService.describe_preset(preset)
     assert "market cap" in summary.lower()
     assert "P/E" in summary
+
+
+def test_etf_companion_presets_registered():
+    assert STRATEGY_COMPANION_PRESET_IDS[InvestmentStrategy.WHEEL] == ["wheel_etf"]
+    assert STRATEGY_COMPANION_PRESET_IDS[InvestmentStrategy.CSP_INCOME] == ["csp_etf"]
+    assert STRATEGY_COMPANION_PRESET_IDS[InvestmentStrategy.COVERED_CALL] == [
+        "covered_call_etf"
+    ]
+    assert STRATEGY_COMPANION_PRESET_IDS[InvestmentStrategy.DIVIDEND] == ["dividend_etf"]
+
+
+def test_etf_companion_presets_load():
+    for preset_id in (
+        "wheel_etf",
+        "csp_etf",
+        "covered_call_etf",
+        "dividend_etf",
+    ):
+        preset = get_preset(preset_id)
+        assert preset is not None
+        assert preset.equity_query is None
+        assert preset.post_filters.get("structure", {}).get("examples_preferred")
+
+
+def test_wheel_screen_includes_etf_companion_section():
+    quotes = [
+        {
+            "symbol": "AAPL",
+            "shortName": "Apple Inc.",
+            "marketCap": 3_000_000_000_000,
+            "trailingPE": 28.5,
+            "dividendYield": 0.004,
+            "regularMarketPrice": 190.0,
+        },
+    ]
+    etf_quotes = [
+        {
+            "symbol": "SPY",
+            "shortName": "SPDR S&P 500 ETF",
+            "totalAssets": 500_000_000_000,
+            "regularMarketPrice": 520.0,
+        },
+    ]
+
+    def fake_screen(*_args, **_kwargs):
+        return {"total": 1, "quotes": quotes}
+
+    def fake_etf_screen(preset, *, limit):
+        if preset.id == "wheel_etf":
+            from app.screener.etf_universe_screener import _quote_from_info
+
+            return (
+                [_quote_from_info("SPY", etf_quotes[0])],
+                len(preset.post_filters["structure"]["examples_preferred"]),
+            )
+        return [], 0
+
+    service = StrategyStockScreenerService()
+    with patch(
+        "app.services.strategy.strategy_stock_screener_service.yf.screen",
+        side_effect=fake_screen,
+    ), patch(
+        "app.services.strategy.strategy_stock_screener_service.screen_etf_preset",
+        side_effect=fake_etf_screen,
+    ):
+        result = service.screen_stocks(
+            profile=_wheel_profile(),
+            strategy=InvestmentStrategy.WHEEL,
+            page=1,
+            page_size=10,
+        )
+
+    assert result is not None
+    assert len(result.sections) == 1
+    assert result.sections[0].preset.id == "wheel_etf"
+    assert [quote.symbol for quote in result.sections[0].quotes] == ["SPY"]

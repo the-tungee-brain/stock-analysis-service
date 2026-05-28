@@ -1,0 +1,47 @@
+{
+  "id": "csp_etf",
+  "label": "Cash-Secured Put ETFs",
+  "description": "Liquid, diversified ETFs for selling cash-secured puts — index, sector, and size-factor funds with deep options markets.",
+  "fund_universe": {
+    "region": "us",
+    "asset_class": "equity"
+  },
+  "post_filters": {
+    "structure": {
+      "min_total_assets": 500000000,
+      "examples_preferred": ["SPY", "QQQ", "IWM", "DIA", "XLF", "XLV", "XLP", "XLE", "XLRE", "IJR"]
+    },
+    "liquidity": {
+      "min_avg_daily_volume": 500000,
+      "min_avg_options_volume": 2000,
+      "min_total_assets": 500000000
+    },
+    "price": {
+      "min_price": 25,
+      "max_price": 300
+    },
+    "options": {
+      "target_dte_range": [21, 60],
+      "target_delta_range": [0.15, 0.30],
+      "min_oi": 500,
+      "max_bid_ask_spread_pct": 0.10
+    },
+    "volatility": {
+      "min_iv_rank": 0.20,
+      "max_iv_rank": 0.50
+    },
+    "sectors_allowlist": [
+      "Broad Market Index",
+      "Large Cap Growth/Blend",
+      "Mid/Small Cap Index",
+      "Financials",
+      "Industrials",
+      "Healthcare",
+      "Consumer Staples",
+      "Energy",
+      "Utilities",
+      "Real Estate",
+      "Communication Services"
+    ]
+  }
+}
