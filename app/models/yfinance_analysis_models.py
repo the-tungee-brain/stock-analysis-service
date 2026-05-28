@@ -124,3 +124,4 @@ class StreetAnalysisSnapshot(BaseModel):
     recent_rating_actions: list[AnalystRatingAction] = Field(
         default_factory=list, serialization_alias="recentRatingActions"
     )
+    data_as_of: str | None = Field(default=None, serialization_alias="dataAsOf")

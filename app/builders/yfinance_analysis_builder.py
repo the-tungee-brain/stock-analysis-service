@@ -6,6 +6,7 @@ from typing import Any
 import pandas as pd
 
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
+from app.builders.yahoo_snapshot_time import yahoo_snapshot_as_of
 from app.models.yfinance_analysis_models import (
     AnalystPriceTargets,
     AnalystRatingAction,
@@ -99,6 +100,7 @@ class YFinanceAnalysisBuilder:
             rating_trend_headline=rating_trend_headline,
             recent_rating_actions=recent_actions,
             ownership=ownership,
+            data_as_of=yahoo_snapshot_as_of(),
         )
 
     @staticmethod

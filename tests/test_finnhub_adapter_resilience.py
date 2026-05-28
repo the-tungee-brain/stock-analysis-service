@@ -87,36 +87,31 @@ def test_snapshot_skips_quote_when_finnhub_profile_unavailable():
     finnhub_builder = MagicMock()
     finnhub_builder.get_company_profile.return_value = None
 
-    service = CompanyProfileService(finnhub_builder=finnhub_builder)
-
-    mock_history = MagicMock()
-    mock_history.empty = False
-    mock_history.__len__ = lambda self: 2
-    mock_history.__getitem__ = lambda self, key: {
-        "Close": MagicMock(
-            iloc=MagicMock(
-                __getitem__=lambda _, index: 200.0 if index == -1 else 195.0
-            )
-        )
-    }[key]
-
-    mock_ticker = MagicMock()
-    mock_ticker.info = {
+    yfinance_adapter = MagicMock()
+    yfinance_adapter.get_ticker_info.return_value = {
         "longName": "Robinhood Markets Inc.",
         "sector": "Financial Services",
         "country": "United States",
         "marketCap": 20_000_000_000,
         "website": "https://robinhood.com",
     }
-    mock_ticker.history.return_value = mock_history
+    import pandas as pd
 
-    with patch("app.services.company_profile_service.yf.Ticker", return_value=mock_ticker):
-        with patch.object(
-            service,
-            "get_52w_range_yf",
-            return_value=(10.0, 30.0),
-        ):
-            snapshot = service.get_snapshot("HOOD")
+    yfinance_adapter.get_history.return_value = pd.DataFrame(
+        {"Close": [195.0, 200.0]}
+    )
+
+    service = CompanyProfileService(
+        finnhub_builder=finnhub_builder,
+        yfinance_adapter=yfinance_adapter,
+    )
+
+    with patch.object(
+        service,
+        "get_52w_range_yf",
+        return_value=(10.0, 30.0),
+    ):
+        snapshot = service.get_snapshot("HOOD")
 
     assert snapshot.symbol == "HOOD"
     finnhub_builder.get_company_profile.assert_not_called()

@@ -77,13 +77,19 @@ async def get_fundamentals(
         ctx=ctx,
         metrics=metrics,
         financials=financials_package,
+        street_analysis=street_analysis,
+        etf_funds=etf_funds,
     )
     overview = await llm_service.generate_from_prompts(
         prompts=prompts,
         response_model=FundamentalsOverview,
         route=LLMRoute.FUNDAMENTALS,
         symbol=ctx.symbol,
-        context_fingerprint=CompanyResearchService.context_fingerprint(ctx),
+        context_fingerprint=prompt_enrichment_service.fundamentals_overview_fingerprint(
+            ctx,
+            street_analysis=street_analysis,
+            etf_funds=etf_funds,
+        ),
     )
     return FundamentalsBlock(
         overview=overview,

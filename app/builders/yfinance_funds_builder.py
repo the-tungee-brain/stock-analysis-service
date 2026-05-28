@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
+from app.builders.yahoo_snapshot_time import yahoo_snapshot_as_of
 from app.models.yfinance_funds_models import (
     EtfFundsSnapshot,
     FundTopHolding,
@@ -80,6 +81,7 @@ class YFinanceFundsBuilder:
             sector_weightings=sector_weightings,
             bond_ratings=bond_ratings,
             top_holdings=top_holdings,
+            data_as_of=yahoo_snapshot_as_of(),
         )
 
         if not self._has_content(snapshot):

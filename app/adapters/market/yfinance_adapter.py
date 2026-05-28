@@ -10,6 +10,10 @@ from typing import Any
 import pandas as pd
 import yfinance as yf
 
+from app.adapters.market.yfinance_bootstrap import (
+    configure_yfinance,
+    yfinance_fetch_lock,
+)
 from app.broker.fiscal_period import (
     fiscal_quarter_and_year,
     fiscal_quarter_and_year_for_earnings_report,
@@ -33,6 +37,7 @@ class YFinanceAdapter:
     )
 
     def __init__(self) -> None:
+        configure_yfinance()
         self._info_cache: dict[str, tuple[float, dict]] = {}
         self._history_cache: dict[str, tuple[float, pd.DataFrame]] = {}
         self._earnings_cache: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -54,6 +59,11 @@ class YFinanceAdapter:
         with self._lock:
             cache[key] = (time.time(), value)
 
+    def _ticker(self, symbol: str) -> yf.Ticker:
+        symbol_upper = symbol.strip().upper()
+        with yfinance_fetch_lock():
+            return yf.Ticker(symbol_upper)
+
     def get_daily_closes_1y(self, symbol: str) -> pd.Series:
         hist = self.get_history(symbol, period="1y", interval="1d")
         return hist["Close"] if "Close" in hist.columns else pd.Series(dtype=float)
@@ -64,8 +74,9 @@ class YFinanceAdapter:
         if cached is not None:
             return dict(cached)
 
-        ticker = yf.Ticker(symbol_upper)
-        info = ticker.info or {}
+        ticker = self._ticker(symbol_upper)
+        with yfinance_fetch_lock():
+            info = ticker.info or {}
         self._set_cached(self._info_cache, symbol_upper, info)
         return info
 
@@ -80,10 +91,17 @@ class YFinanceAdapter:
         if cached is not None:
             return cached.copy()
 
-        ticker = yf.Ticker(symbol_upper)
-        hist = ticker.history(period=period, interval=interval)
+        ticker = self._ticker(symbol_upper)
+        with yfinance_fetch_lock():
+            hist = ticker.history(period=period, interval=interval)
         self._set_cached(self._history_cache, cache_key, hist)
         return hist.copy()
+
+    def get_52w_range(self, symbol: str) -> tuple[float, float]:
+        hist = self.get_history(symbol, period="1y", interval="1d")
+        if hist.empty:
+            raise ValueError(f"No historical data for {symbol}")
+        return float(hist["Low"].min()), float(hist["High"].max())
 
     def get_stock_chart_payload(
         self,
@@ -183,29 +201,30 @@ class YFinanceAdapter:
 
         info = self.get_ticker_info(symbol_upper)
         fy_end_month = fiscal_year_end_month_from_info(info)
-        ticker = yf.Ticker(symbol_upper)
+        ticker = self._ticker(symbol_upper)
 
-        surprises = self._fetch_earnings_surprises(
-            ticker,
-            limit=limit,
-            fiscal_year_end_month=fy_end_month,
-        )
-        revenue_by_period = self._fetch_quarterly_revenue(ticker)
-        reported_periods = {
-            (item["quarter"], item["year"])
-            for item in surprises
-            if item.get("actual") is not None
-            and item.get("quarter") is not None
-            and item.get("year") is not None
-        }
-        latest_reported = self._latest_reported_date(surprises)
-        upcoming = self._fetch_upcoming_earnings(
-            ticker,
-            info=info,
-            fiscal_year_end_month=fy_end_month,
-            reported_periods=reported_periods,
-            latest_reported_date=latest_reported,
-        )
+        with yfinance_fetch_lock():
+            surprises = self._fetch_earnings_surprises(
+                ticker,
+                limit=limit,
+                fiscal_year_end_month=fy_end_month,
+            )
+            revenue_by_period = self._fetch_quarterly_revenue(ticker)
+            reported_periods = {
+                (item["quarter"], item["year"])
+                for item in surprises
+                if item.get("actual") is not None
+                and item.get("quarter") is not None
+                and item.get("year") is not None
+            }
+            latest_reported = self._latest_reported_date(surprises)
+            upcoming = self._fetch_upcoming_earnings(
+                ticker,
+                info=info,
+                fiscal_year_end_month=fy_end_month,
+                reported_periods=reported_periods,
+                latest_reported_date=latest_reported,
+            )
 
         bundle = {
             "surprises": surprises,
@@ -226,25 +245,34 @@ class YFinanceAdapter:
         if cached is not None:
             return dict(cached)
 
-        ticker = yf.Ticker(symbol_upper)
-        bundle: dict[str, Any] = {
-            "price_targets": self._safe_call(ticker.get_analyst_price_targets),
-            "recommendations_summary": self._safe_dataframe(
-                ticker.get_recommendations_summary
-            ),
-            "recommendations": self._safe_dataframe(ticker.get_recommendations),
-            "earnings_estimate": self._safe_table(ticker.get_earnings_estimate, as_dict=True),
-            "revenue_estimate": self._safe_table(ticker.get_revenue_estimate, as_dict=True),
-            "eps_revisions": self._safe_table(ticker.get_eps_revisions, as_dict=True),
-            "eps_trend": self._safe_table(ticker.get_eps_trend, as_dict=True),
-            "upgrades_downgrades": self._safe_dataframe(ticker.get_upgrades_downgrades),
-            "growth_estimates": self._safe_table(ticker.get_growth_estimates, as_dict=True),
-            "institutional_holders": self._safe_dataframe(
-                ticker.get_institutional_holders
-            ),
-            "insider_transactions": self._safe_dataframe(ticker.get_insider_transactions),
-            "major_holders": self._safe_dataframe(ticker.get_major_holders),
-        }
+        ticker = self._ticker(symbol_upper)
+        with yfinance_fetch_lock():
+            bundle: dict[str, Any] = {
+                "price_targets": self._safe_call(ticker.get_analyst_price_targets),
+                "recommendations_summary": self._safe_dataframe(
+                    ticker.get_recommendations_summary
+                ),
+                "recommendations": self._safe_dataframe(ticker.get_recommendations),
+                "earnings_estimate": self._safe_table(
+                    ticker.get_earnings_estimate, as_dict=True
+                ),
+                "revenue_estimate": self._safe_table(
+                    ticker.get_revenue_estimate, as_dict=True
+                ),
+                "eps_revisions": self._safe_table(ticker.get_eps_revisions, as_dict=True),
+                "eps_trend": self._safe_table(ticker.get_eps_trend, as_dict=True),
+                "upgrades_downgrades": self._safe_dataframe(ticker.get_upgrades_downgrades),
+                "growth_estimates": self._safe_table(
+                    ticker.get_growth_estimates, as_dict=True
+                ),
+                "institutional_holders": self._safe_dataframe(
+                    ticker.get_institutional_holders
+                ),
+                "insider_transactions": self._safe_dataframe(
+                    ticker.get_insider_transactions
+                ),
+                "major_holders": self._safe_dataframe(ticker.get_major_holders),
+            }
         self._set_cached(self._street_analysis_cache, symbol_upper, bundle)
         return bundle
 
@@ -259,9 +287,10 @@ class YFinanceAdapter:
         if cached is not None:
             return dict(cached)
 
-        ticker = yf.Ticker(symbol_upper)
+        ticker = self._ticker(symbol_upper)
         try:
-            funds = ticker.get_funds_data()
+            with yfinance_fetch_lock():
+                funds = ticker.get_funds_data()
         except Exception:
             logger.exception("yfinance get_funds_data failed for %s", symbol_upper)
             return None

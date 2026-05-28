@@ -49,3 +49,4 @@ class EtfFundsSnapshot(BaseModel):
     top_holdings: list[FundTopHolding] = Field(
         default_factory=list, serialization_alias="topHoldings"
     )
+    data_as_of: str | None = Field(default=None, serialization_alias="dataAsOf")

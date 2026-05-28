@@ -1,42 +1,38 @@
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
+
 from app.models.finnhub_company_profile_models import CompanyProfile
 from app.services.company_profile_service import CompanyProfileService
 
 
+def _mock_history(closes: list[float]) -> pd.DataFrame:
+    return pd.DataFrame({"Close": closes})
+
+
 def test_get_snapshot_uses_yfinance_before_finnhub():
     finnhub_builder = MagicMock()
-
-    service = CompanyProfileService(finnhub_builder=finnhub_builder)
-
-    mock_history = MagicMock()
-    mock_history.empty = False
-    mock_history.__len__ = lambda self: 2
-    mock_history.__getitem__ = lambda self, key: {
-        "Close": MagicMock(
-            iloc=MagicMock(
-                __getitem__=lambda _, index: 200.0 if index == -1 else 195.0
-            )
-        )
-    }[key]
-
-    mock_ticker = MagicMock()
-    mock_ticker.info = {
+    yfinance_adapter = MagicMock()
+    yfinance_adapter.get_ticker_info.return_value = {
         "longName": "Apple Inc.",
         "sector": "Technology",
         "country": "United States",
         "marketCap": 3_000_000_000_000,
         "website": "https://www.apple.com",
     }
-    mock_ticker.history.return_value = mock_history
+    yfinance_adapter.get_history.return_value = _mock_history([195.0, 200.0])
 
-    with patch("app.services.company_profile_service.yf.Ticker", return_value=mock_ticker):
-        with patch.object(
-            service,
-            "get_52w_range_yf",
-            return_value=(170.0, 220.0),
-        ):
-            snapshot = service.get_snapshot("AAPL")
+    service = CompanyProfileService(
+        finnhub_builder=finnhub_builder,
+        yfinance_adapter=yfinance_adapter,
+    )
+
+    with patch.object(
+        service,
+        "get_52w_range_yf",
+        return_value=(170.0, 220.0),
+    ):
+        snapshot = service.get_snapshot("AAPL")
 
     assert snapshot.symbol == "AAPL"
     assert snapshot.name == "Apple Inc."
@@ -64,19 +60,21 @@ def test_get_snapshot_falls_back_to_finnhub_when_yfinance_unavailable():
     )
     finnhub_builder.get_quote.return_value = MagicMock(c=200.0, pc=195.0)
 
-    service = CompanyProfileService(finnhub_builder=finnhub_builder)
+    yfinance_adapter = MagicMock()
+    yfinance_adapter.get_ticker_info.return_value = {}
+    yfinance_adapter.get_history.return_value = pd.DataFrame()
 
-    mock_ticker = MagicMock()
-    mock_ticker.info = {}
-    mock_ticker.history.return_value = MagicMock(empty=True)
+    service = CompanyProfileService(
+        finnhub_builder=finnhub_builder,
+        yfinance_adapter=yfinance_adapter,
+    )
 
-    with patch("app.services.company_profile_service.yf.Ticker", return_value=mock_ticker):
-        with patch.object(
-            service,
-            "get_52w_range_yf",
-            return_value=(170.0, 220.0),
-        ):
-            snapshot = service.get_snapshot("AAPL")
+    with patch.object(
+        service,
+        "get_52w_range_yf",
+        return_value=(170.0, 220.0),
+    ):
+        snapshot = service.get_snapshot("AAPL")
 
     assert snapshot.symbol == "AAPL"
     finnhub_builder.get_company_profile.assert_called_once()
@@ -127,21 +125,8 @@ def test_get_peers_returns_empty_when_all_sources_fail():
 
 def test_get_snapshot_uses_etf_labels_from_yfinance():
     finnhub_builder = MagicMock()
-    service = CompanyProfileService(finnhub_builder=finnhub_builder)
-
-    mock_history = MagicMock()
-    mock_history.empty = False
-    mock_history.__len__ = lambda self: 2
-    mock_history.__getitem__ = lambda self, key: {
-        "Close": MagicMock(
-            iloc=MagicMock(
-                __getitem__=lambda _, index: 500.0 if index == -1 else 495.0
-            )
-        )
-    }[key]
-
-    mock_ticker = MagicMock()
-    mock_ticker.info = {
+    yfinance_adapter = MagicMock()
+    yfinance_adapter.get_ticker_info.return_value = {
         "longName": "SPDR S&P 500 ETF Trust",
         "quoteType": "ETF",
         "category": "Large Blend",
@@ -150,15 +135,19 @@ def test_get_snapshot_uses_etf_labels_from_yfinance():
         "exchange": "NYQ",
         "website": "https://www.ssga.com",
     }
-    mock_ticker.history.return_value = mock_history
+    yfinance_adapter.get_history.return_value = _mock_history([495.0, 500.0])
 
-    with patch("app.services.company_profile_service.yf.Ticker", return_value=mock_ticker):
-        with patch.object(
-            service,
-            "get_52w_range_yf",
-            return_value=(400.0, 520.0),
-        ):
-            snapshot = service.get_snapshot("SPY")
+    service = CompanyProfileService(
+        finnhub_builder=finnhub_builder,
+        yfinance_adapter=yfinance_adapter,
+    )
+
+    with patch.object(
+        service,
+        "get_52w_range_yf",
+        return_value=(400.0, 520.0),
+    ):
+        snapshot = service.get_snapshot("SPY")
 
     assert snapshot.symbol == "SPY"
     assert snapshot.sector == "Large Blend"

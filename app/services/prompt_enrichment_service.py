@@ -31,7 +31,16 @@ from app.models.schwab_order_models import SchwabOrder
 from datetime import datetime, timezone
 from typing import List, Tuple, Dict, Any, Optional
 from app.models.finnhub_news_models import NewsResponse
-from app.models.company_research_models import ResearchContext, FundamentalMetric, SecRatioTrendPoint, NewsHeadline, EtfHoldingsContext
+from app.models.company_research_models import (
+    ResearchContext,
+    FundamentalMetric,
+    SecRatioTrendPoint,
+    NewsHeadline,
+    EtfHoldingsContext,
+    FinancialsPackage,
+)
+from app.models.yfinance_analysis_models import StreetAnalysisSnapshot
+from app.models.yfinance_funds_models import EtfFundsSnapshot
 from app.models.intelligence_models import (
     MarketNewsItem,
     OptionRollSuggestion,
@@ -1540,7 +1549,9 @@ class PromptEnrichmentService:
         self,
         ctx: ResearchContext,
         metrics: list[FundamentalMetric],
-        financials=None,
+        financials: FinancialsPackage | None = None,
+        street_analysis: StreetAnalysisSnapshot | None = None,
+        etf_funds: EtfFundsSnapshot | None = None,
     ) -> List[str]:
         context_block = self._format_research_context_block(ctx)
 
@@ -1552,6 +1563,8 @@ class PromptEnrichmentService:
             metrics_block = "No fundamental metrics available."
 
         financials_block = self._format_financials_block(financials)
+        street_block = self._format_street_analysis_block(street_analysis)
+        etf_funds_block = self._format_etf_funds_block(etf_funds)
         strength_block = ""
         if financials is not None:
             strength = financials.strength
@@ -1591,6 +1604,10 @@ class PromptEnrichmentService:
             - Use market-data estimates for valuation multiples (P/E, beta) SEC filings lack.
             - When yfinance statement tables are provided, use them for recent trends. Align with
               the rule-based strength rating when present.
+            - When Wall Street consensus or ownership data is provided (Yahoo Finance), use it for
+              forward expectations and who owns the stock — not as buy/sell advice.
+            - When ETF fund profile data is provided, use it for cost, composition, and sector
+              concentration alongside fund metrics.
 
             # Output shape (plain English, no markdown)
             - **atAGlance**: 2–3 sentences. The single most important takeaway — quality, growth,
@@ -1603,6 +1620,10 @@ class PromptEnrichmentService:
 
             Compare margins, growth, and leverage qualitatively to sector norms — do not invent
             peer numbers. If data is sparse, say so briefly.
+            When Wall Street data is present, weave consensus, estimate direction, and ownership
+            into valuationTake, strengths, or concerns — qualitatively, without listing every
+            figure. When ETF fund profile is present, address expense vs category and concentration
+            risk in valuationTake and concerns.
 
             Return a single JSON object with exactly these keys:
             {{
@@ -1630,7 +1651,11 @@ class PromptEnrichmentService:
 
             {financials_block}
 
-            Help the reader understand whether this company's fundamentals support a long-term
+            {street_block}
+
+            {etf_funds_block}
+
+            Help the reader understand whether this {"fund's profile" if is_etf else "company's fundamentals"} supports a long-term
             investment, and what the key numbers are really telling them.
             """
         ).strip()
@@ -1638,7 +1663,162 @@ class PromptEnrichmentService:
         return [system_msg, user_msg]
 
     @staticmethod
-    def _format_financials_block(financials: "FinancialsPackage | None") -> str:
+    def fundamentals_overview_fingerprint(
+        ctx: ResearchContext,
+        *,
+        street_analysis: StreetAnalysisSnapshot | None = None,
+        etf_funds: EtfFundsSnapshot | None = None,
+    ) -> str:
+        from app.adapters.cache.llm_output_cache import LLMOutputCache
+        from app.services.company_research_service import CompanyResearchService
+
+        parts = [CompanyResearchService.context_fingerprint(ctx)]
+        if street_analysis is not None:
+            parts.append(street_analysis.model_dump_json())
+        if etf_funds is not None:
+            parts.append(etf_funds.model_dump_json())
+        return LLMOutputCache.fingerprint_from_text("".join(parts))
+
+    @staticmethod
+    def _format_street_analysis_block(
+        street: StreetAnalysisSnapshot | None,
+    ) -> str:
+        if street is None:
+            return ""
+
+        lines = [
+            "## Wall Street consensus (Yahoo Finance — estimates only, not investment advice)"
+        ]
+
+        if street.consensus_label:
+            lines.append(f"- Consensus label: {street.consensus_label}")
+
+        targets = street.price_targets
+        if targets and targets.mean is not None:
+            parts = [f"mean ${targets.mean:.2f}"]
+            if targets.low is not None and targets.high is not None:
+                parts.append(f"range ${targets.low:.2f}–${targets.high:.2f}")
+            if targets.upside_to_mean_pct is not None:
+                parts.append(f"{targets.upside_to_mean_pct:+.1f}% vs last price to mean target")
+            lines.append(f"- Price targets: {', '.join(parts)}")
+
+        rec = street.recommendation
+        if rec:
+            lines.append(
+                "- Analyst ratings: "
+                f"Strong Buy {rec.strong_buy}, Buy {rec.buy}, Hold {rec.hold}, "
+                f"Sell {rec.sell}, Strong Sell {rec.strong_sell}"
+            )
+
+        for headline in (
+            street.rating_trend_headline,
+            street.estimate_drift_headline,
+            street.estimate_revision_headline,
+            street.growth_context_headline,
+        ):
+            if headline:
+                lines.append(f"- {headline}")
+
+        if street.next_quarter_eps and street.next_quarter_eps.avg is not None:
+            eps = street.next_quarter_eps
+            growth = (
+                f", est. YoY growth {eps.growth_pct:.1f}%"
+                if eps.growth_pct is not None
+                else ""
+            )
+            lines.append(
+                f"- Next-quarter EPS consensus: avg {eps.avg:.2f}{growth}"
+            )
+
+        if street.next_quarter_revenue and street.next_quarter_revenue.avg is not None:
+            rev = street.next_quarter_revenue
+            lines.append(f"- Next-quarter revenue consensus: avg {rev.avg:,.0f}")
+
+        if street.recent_rating_actions:
+            lines.append("- Recent analyst actions:")
+            for action in street.recent_rating_actions[:4]:
+                move = (
+                    f"{action.from_grade} → {action.to_grade}"
+                    if action.from_grade
+                    else action.to_grade
+                )
+                lines.append(f"  - {action.date}: {action.firm} — {move}")
+
+        ownership = street.ownership
+        if ownership:
+            lines.append("## Ownership & insiders (Yahoo Finance)")
+            if ownership.insiders_pct_held is not None:
+                lines.append(f"- Insiders: {ownership.insiders_pct_held:.2f}% of shares")
+            if ownership.institutions_pct_held is not None:
+                lines.append(
+                    f"- Institutions: {ownership.institutions_pct_held:.2f}% of shares"
+                )
+            if ownership.top_institutional:
+                lines.append("- Top institutional holders:")
+                for holder in ownership.top_institutional[:5]:
+                    pct = (
+                        f" ({holder.pct_held:.2f}%)"
+                        if holder.pct_held is not None
+                        else ""
+                    )
+                    lines.append(f"  - {holder.holder}{pct}")
+            if ownership.recent_insider_transactions:
+                lines.append("- Recent insider transactions:")
+                for txn in ownership.recent_insider_transactions[:4]:
+                    detail = txn.transaction or "transaction"
+                    lines.append(f"  - {txn.date}: {txn.insider} — {detail}")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_etf_funds_block(etf_funds: EtfFundsSnapshot | None) -> str:
+        if etf_funds is None:
+            return ""
+
+        lines = ["## ETF fund profile (Yahoo Finance)"]
+        if etf_funds.category:
+            lines.append(f"- Category: {etf_funds.category}")
+        if etf_funds.family:
+            lines.append(f"- Family: {etf_funds.family}")
+        if etf_funds.expense_ratio_pct is not None:
+            expense = f"{etf_funds.expense_ratio_pct:.2f}%"
+            if etf_funds.category_expense_ratio_pct is not None:
+                expense += f" (category avg {etf_funds.category_expense_ratio_pct:.2f}%)"
+            lines.append(f"- Expense ratio: {expense}")
+        if etf_funds.holdings_turnover_pct is not None:
+            lines.append(f"- Holdings turnover: {etf_funds.holdings_turnover_pct:.2f}%")
+        if etf_funds.total_net_assets is not None:
+            lines.append(f"- Net assets: ${etf_funds.total_net_assets:,.0f}")
+
+        if etf_funds.asset_classes:
+            mix = ", ".join(
+                f"{row.label} {row.weight_pct:.1f}%"
+                for row in etf_funds.asset_classes[:6]
+            )
+            lines.append(f"- Asset mix: {mix}")
+
+        if etf_funds.sector_weightings:
+            sectors = ", ".join(
+                f"{row.label} {row.weight_pct:.1f}%"
+                for row in etf_funds.sector_weightings[:8]
+            )
+            lines.append(f"- Sector weightings: {sectors}")
+
+        if etf_funds.top_holdings:
+            lines.append("- Top holdings:")
+            for holding in etf_funds.top_holdings[:8]:
+                sym = f" ({holding.symbol})" if holding.symbol else ""
+                lines.append(
+                    f"  - {holding.name}{sym}: {holding.weight_pct:.2f}%"
+                )
+
+        if etf_funds.description:
+            lines.append(f"- Summary: {etf_funds.description}")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_financials_block(financials: FinancialsPackage | None) -> str:
         if financials is None:
             return ""
 

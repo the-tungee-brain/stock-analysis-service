@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 import os
 
-import yfinance as yf
-
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.builders.finnhub_builder import FinnhubBuilder
 from app.models.company_research_models import ResearchSnapshot
@@ -101,10 +99,14 @@ class CompanyProfileService:
         )
 
     def _snapshot_from_yfinance(self, symbol: str) -> ResearchSnapshot | None:
+        if self.yfinance_adapter is None:
+            return None
+
         try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.info or {}
-            history = ticker.history(period="5d", interval="1d")
+            info = self.yfinance_adapter.get_ticker_info(symbol)
+            history = self.yfinance_adapter.get_history(
+                symbol, period="5d", interval="1d"
+            )
         except Exception:
             logger.warning("Yahoo Finance snapshot unavailable for %s", symbol, exc_info=True)
             return None
@@ -231,15 +233,9 @@ class CompanyProfileService:
         return (current / prev_close - 1.0) * 100.0
 
     def get_52w_range_yf(self, symbol: str) -> tuple[float, float]:
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="1y", interval="1d")
-
-        if hist.empty:
-            raise ValueError(f"No historical data for {symbol}")
-
-        high_52w = float(hist["High"].max())
-        low_52w = float(hist["Low"].min())
-        return low_52w, high_52w
+        if self.yfinance_adapter is None:
+            raise ValueError("Yahoo Finance adapter not configured")
+        return self.yfinance_adapter.get_52w_range(symbol)
 
     def format_52w_range(self, symbol: str) -> str:
         low, high = self.get_52w_range_yf(symbol)

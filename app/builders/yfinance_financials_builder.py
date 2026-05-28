@@ -8,6 +8,7 @@ import pandas as pd
 import yfinance as yf
 
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
+from app.adapters.market.yfinance_bootstrap import yfinance_fetch_lock
 from app.models.company_research_models import (
     FinancialLineItem,
     FinancialStatementsSnapshot,
@@ -56,9 +57,10 @@ class YFinanceFinancialsBuilder:
     def build(self, symbol: str) -> FinancialsPackage | None:
         symbol_upper = symbol.strip().upper()
         try:
-            ticker = yf.Ticker(symbol_upper)
-            quarterly = self._build_snapshot(ticker, freq="quarterly")
-            annual = self._build_snapshot(ticker, freq="yearly")
+            with yfinance_fetch_lock():
+                ticker = yf.Ticker(symbol_upper)
+                quarterly = self._build_snapshot(ticker, freq="quarterly")
+                annual = self._build_snapshot(ticker, freq="yearly")
         except Exception:
             logger.exception("yfinance financial statements failed for %s", symbol_upper)
             return None
