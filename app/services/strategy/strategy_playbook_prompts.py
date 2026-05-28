@@ -1,8 +1,66 @@
 from __future__ import annotations
 
+from textwrap import dedent
+
 from app.models.strategy_models import InvestmentStrategy, StrategyNextAction
 
 PLAYBOOK_ASKABLE_TYPES = frozenset({"research", "options", "buy", "rebalance", "monitor"})
+
+PLAYBOOK_RESEARCH_CHAT_SYSTEM_MESSAGE = dedent("""
+    # Role
+    You help an investor decide whether a stock fits their strategy playbook — assignment on a put,
+    dividend hold, or core position. They want a decision, not a lesson.
+
+    # Style (CRITICAL)
+    - Max ~160 words in the visible reply unless the user asks for more.
+    - Do NOT explain what the company does, industry basics, or investing 101.
+    - Use the research data silently; cite a number only when it supports the verdict.
+    - No "Short answer:", "(plain English)", or report-style section headers beyond the required format.
+    - Sound direct: would you be OK owning this if assigned?
+
+    # Required output format
+    **Verdict:** [Comfortable holding / Cautious / Avoid owning] — one direct sentence
+
+    **What drives this**
+    - Up to 4 bullets: the factors that matter for the hold decision (numbers when available)
+
+    **What would change my mind:** one sentence
+
+    Optional fourth block only when a cash-secured put is in scope:
+    **Put zone:** one line on strike/DTE if selling a put is reasonable
+    """).strip()
+
+
+def playbook_research_system_message() -> str:
+    from app.services.prompt_enrichment_service import (
+        BROKER_EXECUTION_BOUNDARY_RULES,
+        RESEARCH_OPTIONS_RULES,
+    )
+
+    follow_ups = dedent("""
+        # Follow-up chips (append after every reply — hidden from the user)
+        After your visible reply, append this machine-readable block on its own lines:
+
+        <<TOMCREST_FOLLOW_UPS>>
+        [{"label":"2-6 word chip","prompt":"Full standalone user message when clicked"}]
+        <<END_TOMCREST_FOLLOW_UPS>>
+
+        Rules for the block:
+        - 2-3 objects max; each prompt must work as the user's next message without extra context.
+        - Natural next steps from what you just said (thesis, risks, timing, put strike).
+        - Never suggest placing/submitting orders on the user's behalf.
+        - Use [] if no useful follow-ups.
+        - Never mention this block in your visible reply.
+        """).strip()
+
+    return "\n\n".join(
+        [
+            PLAYBOOK_RESEARCH_CHAT_SYSTEM_MESSAGE,
+            follow_ups,
+            BROKER_EXECUTION_BOUNDARY_RULES,
+            RESEARCH_OPTIONS_RULES,
+        ]
+    )
 
 
 def playbook_action_askable(action: StrategyNextAction) -> bool:
@@ -36,20 +94,12 @@ def playbook_ask_display_message(
     if action.type == "research":
         if any(k in title_lower for k in ("put", "csp", "wheel")):
             return (
-                f"I'm thinking about selling a cash-secured put on {symbol} for my strategy playbook. "
-                "Would I be comfortable owning shares if assigned? "
-                "Help me weigh fundamentals, timing, and a sensible strike range before I sell."
+                f"Would I be comfortable owning {symbol} if assigned on a put "
+                "for my strategy playbook?"
             )
         if "dividend" in title_lower:
-            return (
-                f"I'm researching {symbol} as a dividend name on my strategy playbook. "
-                "Is the payout sustainable, and does it fit my strategy? "
-                "What should I verify before buying?"
-            )
-        return (
-            f"I'm researching {symbol} for my strategy playbook. "
-            "What's the case for or against my next step — fundamentals, timing, and fit?"
-        )
+            return f"Should I hold {symbol} as a dividend name on my strategy playbook?"
+        return f"Should I hold {symbol} for my strategy playbook?"
 
     if action.type == "options":
         if "covered call" in title_lower:
@@ -59,9 +109,8 @@ def playbook_ask_display_message(
             )
         if "csp" in title_lower or "put" in title_lower:
             return (
-                f"I'm thinking about selling a cash-secured put on {symbol} for my strategy playbook. "
-                "Would I be comfortable owning shares if assigned? "
-                "Help me weigh fundamentals, timing, and a sensible strike range before I sell."
+                f"Would I be comfortable owning {symbol} if assigned on a put "
+                "for my strategy playbook?"
             )
         return (
             f"For {symbol} on my strategy playbook: {action.title.strip()}. "
@@ -80,10 +129,7 @@ def playbook_ask_display_message(
         )
 
     if action.type == "buy":
-        return (
-            f"I want to build a position in {symbol} for my strategy playbook. "
-            "What's a sensible way to size and enter without breaking my rules?"
-        )
+        return f"Should I build a position in {symbol} for my strategy playbook?"
 
     if action.type == "rebalance":
         return (
@@ -113,17 +159,11 @@ def build_playbook_ask_prompt(
                 "What strike and expiration would you suggest, and what assignment risk should I plan for?"
             )
         if "csp" in title_lower or "put" in title_lower:
-            return _build_long_term_playbook_brief(
+            return _build_playbook_hold_verdict_prompt(
                 symbol=symbol,
                 strategy=strategy,
-                scenario=(
-                    "I'm considering selling a cash-secured put and could be assigned shares, "
-                    "so I need to know if I'd genuinely want to own this business long term."
-                ),
-                follow_up=(
-                    "After the long-term analysis, suggest a conservative put strike and DTE range "
-                    "for my strategy, and whether you'd sell a put at today's levels."
-                ),
+                context="I may sell a cash-secured put and could be assigned shares.",
+                include_put_zone=True,
             )
         return f"For {symbol}: {title}. What option trade would you consider next, and why?"
 
@@ -135,46 +175,29 @@ def build_playbook_ask_prompt(
 
     if action.type == "research":
         if any(k in title_lower for k in ("put", "csp", "wheel")):
-            return _build_long_term_playbook_brief(
+            return _build_playbook_hold_verdict_prompt(
                 symbol=symbol,
                 strategy=strategy,
-                scenario=(
-                    "I'm thinking about selling a cash-secured put and could be assigned shares, "
-                    "so I need to know if I'd genuinely want to own this business long term."
-                ),
-                follow_up=(
-                    f"Close with whether you'd be comfortable holding {symbol} for years "
-                    "and a sensible strike zone if I sell a put."
-                ),
+                context="I may sell a cash-secured put and could be assigned shares.",
+                include_put_zone=True,
             )
         if "dividend" in title_lower:
-            return _build_long_term_playbook_brief(
+            return _build_playbook_hold_verdict_prompt(
                 symbol=symbol,
                 strategy=strategy,
-                scenario=(
-                    "I'm researching this as a dividend name I'd hold for years, not trade around."
-                ),
-                follow_up=(
-                    "Emphasize payout safety, dividend growth, and whether the yield is sustainable."
-                ),
+                context="I'm deciding whether to hold this as a dividend name for years.",
             )
-        return _build_long_term_playbook_brief(
+        return _build_playbook_hold_verdict_prompt(
             symbol=symbol,
             strategy=strategy,
-            scenario="I need a clear long-term picture before my next playbook step.",
+            context="I need a hold/avoid call before my next playbook step.",
         )
 
     if action.type == "buy":
-        return _build_long_term_playbook_brief(
+        return _build_playbook_hold_verdict_prompt(
             symbol=symbol,
             strategy=strategy,
-            scenario=(
-                "I'm planning to build a long-term position and want to understand the business first."
-            ),
-            follow_up=(
-                "Close with a sensible way to enter the position without breaking typical "
-                "diversification rules."
-            ),
+            context="I'm deciding whether to open or add a long-term position.",
         )
 
     if action.type == "rebalance":
@@ -200,51 +223,35 @@ def _strategy_playbook_label(strategy: InvestmentStrategy | None) -> str:
     return "my strategy playbook"
 
 
-def _strategy_fit_question(strategy: InvestmentStrategy | None) -> str:
-    if strategy in {InvestmentStrategy.WHEEL, InvestmentStrategy.CSP_INCOME}:
-        return (
-            "whether I'd be comfortable owning this stock for years if assigned on a put — "
-            "not just collecting premium"
-        )
-    if strategy is InvestmentStrategy.COVERED_CALL:
-        return "whether this is a stock I'd keep through a full covered-call cycle"
-    if strategy is InvestmentStrategy.DIVIDEND:
-        return "whether the dividend and business quality support a multi-year hold"
-    if strategy is InvestmentStrategy.ETF_CORE:
-        return "how this fits as a core long-term building block in my allocation"
-    return "whether this belongs in a long-term portfolio, not just a short-term trade"
-
-
-def _build_long_term_playbook_brief(
+def _build_playbook_hold_verdict_prompt(
     *,
     symbol: str,
     strategy: InvestmentStrategy | None,
-    scenario: str,
-    follow_up: str | None = None,
+    context: str,
+    include_put_zone: bool = False,
 ) -> str:
     playbook = _strategy_playbook_label(strategy)
-    fit = _strategy_fit_question(strategy)
-    sections = [
-        f"I'm evaluating {symbol} for {playbook}. {scenario}",
+    lines = [
+        f"I'm evaluating {symbol} for {playbook}. {context}",
         "",
-        "Use the company research data provided — business overview, recent news headlines, "
-        "and SEC financial statements — and explain clearly:",
+        "Use the company research data (news, filings, price) only to support a hold decision.",
+        "Do not explain what the company does or teach investing basics.",
         "",
-        "1. **Business model** — what the company does and how it makes money",
-        "2. **Recent news** — the most important headlines and why they matter for a long-term holder",
-        (
-            "3. **Financial health** — revenue, profitability, cash flow, and balance-sheet trends "
-            "from the filings; cite specific numbers when available and flag red flags"
-        ),
-        (
-            "4. **Long-term thesis** — competitive advantages, durable risks, and what would break "
-            "the case for holding this stock for years"
-        ),
-        f"5. **Strategy fit** — {fit}",
+        "Respond in this format (max ~160 words total):",
         "",
-        "Be specific with figures from the data. If a section lacks data, say what's missing instead of guessing.",
-        "Do not echo these section labels or write '(plain English)' in your reply.",
+        "**Verdict:** [Comfortable holding / Cautious / Avoid owning] — one direct sentence",
+        "",
+        "**What drives this**",
+        "- Up to 4 bullets with the decisive factors; include a specific number when the data supports it",
+        "",
+        "**What would change my mind:** one sentence",
     ]
-    if follow_up:
-        sections.extend(["", follow_up])
-    return "\n".join(sections)
+    if include_put_zone:
+        lines.extend(
+            [
+                "",
+                "**Put zone:** one line on strike/DTE if selling a CSP is reasonable "
+                "(only if Comfortable or Cautious)",
+            ]
+        )
+    return "\n".join(lines)

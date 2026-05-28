@@ -33,7 +33,6 @@ from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.services.portfolio_service import PortfolioService
 from app.services.schwab_auth_service import SchwabAuthService, SchwabReauthRequired
 from app.services.prompt_enrichment_service import (
-    RESEARCH_CHAT_SYSTEM_MESSAGE,
     PromptEnrichmentService,
 )
 from app.services.strategy.strategy_playbook_prompts import (
@@ -41,6 +40,7 @@ from app.services.strategy.strategy_playbook_prompts import (
     playbook_action_askable,
     playbook_ask_display_message,
     playbook_ask_prefers_research_chat,
+    playbook_research_system_message,
 )
 
 router = APIRouter()
@@ -220,7 +220,7 @@ async def _stream_research_playbook_ask(
 
         async for chunk in llm_service.analyze_option_position(
             model=model or settings.OPENAI_MODEL,
-            system_prompt=RESEARCH_CHAT_SYSTEM_MESSAGE,
+            system_prompt=playbook_research_system_message(),
             user_prompt=[*recent_messages, user_message],
         ):
             assistant_content_parts.append(chunk)
