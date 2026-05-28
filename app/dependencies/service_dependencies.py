@@ -32,6 +32,7 @@ from app.services.strategy.strategy_stock_screener_service import (
 from app.services.strategy.strategy_stock_suggestion_service import (
     StrategyStockSuggestionService,
 )
+from app.services.account_deletion_service import AccountDeletionService
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -146,3 +147,7 @@ def get_strategy_stock_screener_service(
     request: Request,
 ) -> StrategyStockScreenerService:
     return request.app.state.strategy_stock_screener_service
+
+
+def get_account_deletion_service(request: Request) -> AccountDeletionService:
+    return request.app.state.account_deletion_service

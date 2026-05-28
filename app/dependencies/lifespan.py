@@ -73,6 +73,7 @@ from app.services.portfolio_service import PortfolioService
 from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.schwab_auth_service import SchwabAuthService
 from app.services.user_service import UserService
+from app.services.account_deletion_service import AccountDeletionService
 from app.services.ticker_service import TickerService
 from app.services.transaction_service import TransactionService
 from app.adapters.sec.sec_edgar_adapter import SecEdgarAdapter
@@ -281,6 +282,20 @@ async def lifespan(app: FastAPI):
         chat_sessions_builder=chat_sessions_builder,
         chat_messages_builder=chat_messages_builder,
     )
+    account_deletion_service = AccountDeletionService(
+        schwab_auth_service=schwab_auth_service,
+        chat_sessions_builder=chat_sessions_builder,
+        chat_messages_builder=chat_messages_builder,
+        app_user_adapter=app_user_adapter,
+        user_investment_profile_adapter=user_investment_profile_adapter,
+        user_strategy_journey_adapter=user_strategy_journey_adapter,
+        alert_history_adapter=alert_history_adapter,
+        portfolio_snapshot_adapter=portfolio_snapshot_adapter,
+        morning_brief_delivery_adapter=morning_brief_delivery_adapter,
+        waitlist_adapter=waitlist_adapter,
+        recent_orders_cache=recent_orders_cache,
+        portfolio_brief_cache=portfolio_brief_cache,
+    )
     company_profile_service = CompanyProfileService(
         finnhub_builder=finnhub_builder,
         yfinance_adapter=yfinance_adapter,
@@ -367,6 +382,7 @@ async def lifespan(app: FastAPI):
     app.state.schwab_redis_token_manager = schwab_redis_token_manager
     app.state.schwab_auth_service = schwab_auth_service
     app.state.user_service = user_service
+    app.state.account_deletion_service = account_deletion_service
     app.state.portfolio_analysis_service = portfolio_analysis_service
     app.state.chat_service = chat_service
     app.state.company_profile_service = company_profile_service

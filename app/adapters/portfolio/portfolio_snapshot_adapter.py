@@ -177,3 +177,15 @@ class PortfolioSnapshotAdapter:
 
         saved = self.get_by_user_and_date(record.user_id, record.snapshot_date)
         return saved or record.model_copy(update={"id": record_id})
+
+    def delete_by_user_id(self, user_id: str) -> int:
+        sql = f"DELETE FROM {self.table_name} WHERE user_id = :user_id"
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            cur.execute(sql, {"user_id": user_id})
+            rowcount = cur.rowcount
+            con.commit()
+            return rowcount
+        finally:
+            con.close()

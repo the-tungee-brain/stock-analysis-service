@@ -136,3 +136,15 @@ class AppUserAdapter:
             return rowcount
         finally:
             con.close()
+
+    def delete_by_identity_sub(self, identity_sub: str) -> int:
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            sql = f"DELETE FROM {self.table_name} WHERE identity_sub = :identity_sub"
+            cur.execute(sql, {"identity_sub": identity_sub})
+            rowcount = cur.rowcount
+            con.commit()
+            return rowcount
+        finally:
+            con.close()

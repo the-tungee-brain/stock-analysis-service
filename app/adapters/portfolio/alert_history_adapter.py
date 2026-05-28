@@ -239,3 +239,27 @@ class AlertHistoryAdapter:
             return self._row_to_item(row)
         finally:
             con.close()
+
+    def delete_by_user_id(self, user_id: str) -> int:
+        sql = f"DELETE FROM {self.table_name} WHERE user_id = :user_id"
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            cur.execute(sql, {"user_id": user_id})
+            rowcount = cur.rowcount
+            con.commit()
+            return rowcount
+        finally:
+            con.close()
+
+    def delete_by_user_id(self, user_id: str) -> int:
+        sql = f"DELETE FROM {self.table_name} WHERE user_id = :user_id"
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            cur.execute(sql, {"user_id": user_id})
+            rowcount = cur.rowcount
+            con.commit()
+            return rowcount
+        finally:
+            con.close()

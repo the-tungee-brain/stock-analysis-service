@@ -151,3 +151,15 @@ class UserStrategyJourneyAdapter:
                 f"Failed to upsert strategy journey for {user_id}/{strategy.value}"
             )
         return journey
+
+    def delete_by_user_id(self, user_id: str) -> int:
+        sql = f"DELETE FROM {self.table_name} WHERE user_id = :user_id"
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            cur.execute(sql, {"user_id": user_id})
+            rowcount = cur.rowcount
+            con.commit()
+            return rowcount
+        finally:
+            self.client.release(con)

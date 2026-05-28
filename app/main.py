@@ -46,6 +46,7 @@ from app.api.internal_morning_brief_route import router as internal_morning_brie
 from app.api.portfolio_memory_routes import router as portfolio_memory_router
 from app.api.strategy_playbook_ask_route import router as strategy_playbook_ask_router
 from app.api.get_account_plan_route import router as get_account_plan_router
+from app.api.delete_account_route import router as delete_account_router
 
 API_PREFIX = "/api/v1"
 AUTH_SCHWAB_PREFIX = f"{API_PREFIX}/auth/schwab"
@@ -96,6 +97,7 @@ protected_api = APIRouter(
 )
 
 protected_api.include_router(get_account_plan_router)
+protected_api.include_router(delete_account_router)
 protected_api.include_router(get_account_positions_router)
 protected_api.include_router(get_portfolio_brief_router)
 protected_api.include_router(portfolio_memory_router)

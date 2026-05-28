@@ -108,3 +108,10 @@ class PortfolioBriefCache:
             self.ttl_seconds,
             brief.model_dump_json(by_alias=True),
         )
+
+    def invalidate_user(self, *, user_id: str) -> int:
+        pattern = f"{self.key_prefix}:*:{user_id}:*"
+        deleted = 0
+        for key in self.redis_client.scan_iter(match=pattern):
+            deleted += int(self.redis_client.delete(key))
+        return deleted
