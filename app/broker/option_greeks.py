@@ -196,6 +196,7 @@ def _nearest_listed_strike(
     underlying: float,
     *,
     is_put: bool,
+    min_strike: float | None = None,
 ) -> float | None:
     """Map continuous delta target to closest standard strike (puts stay below spot)."""
     step = standard_strike_increment(underlying)
@@ -207,7 +208,19 @@ def _nearest_listed_strike(
             continue
         if is_put and strike >= underlying:
             continue
+        if not is_put and min_strike is not None and strike < min_strike:
+            continue
         candidates.append(strike)
+
+    if not candidates and not is_put and min_strike is not None:
+        strike = snap_strike_to_standard_grid(min_strike, underlying)
+        if strike < min_strike:
+            strike = round(strike + step, 2)
+        hi = snap_strike_to_standard_grid(underlying * 1.45, underlying)
+        while strike <= hi + step * 0.01:
+            if strike >= min_strike:
+                candidates.append(strike)
+            strike = round(strike + step, 2)
 
     if not candidates:
         if is_put:
@@ -227,10 +240,21 @@ def find_strike_for_abs_delta(
     iv_percent: float,
     risk_free_rate: float = 0.045,
     tolerance: float = 0.01,
+    min_strike: float | None = None,
 ) -> float | None:
     """Target |delta| on the standard $2.50 / $5 grid (snap after continuous solve)."""
     if underlying <= 0 or days_to_expiration <= 0 or target_abs_delta <= 0:
         return None
+
+    if put_call.upper() == "CALL" and min_strike is not None:
+        return _best_call_strike_with_min_floor(
+            underlying=underlying,
+            days_to_expiration=days_to_expiration,
+            target_abs_delta=target_abs_delta,
+            iv_percent=iv_percent,
+            risk_free_rate=risk_free_rate,
+            min_strike=min_strike,
+        )
 
     continuous = _continuous_strike_for_abs_delta(
         underlying=underlying,
@@ -244,7 +268,60 @@ def find_strike_for_abs_delta(
         return None
 
     is_put = put_call.upper() == "PUT"
-    return _nearest_listed_strike(continuous, underlying, is_put=is_put)
+    return _nearest_listed_strike(
+        continuous,
+        underlying,
+        is_put=is_put,
+        min_strike=min_strike,
+    )
+
+
+def _best_call_strike_with_min_floor(
+    *,
+    underlying: float,
+    days_to_expiration: int,
+    target_abs_delta: float,
+    iv_percent: float,
+    risk_free_rate: float,
+    min_strike: float,
+) -> float | None:
+    """Listed call strike >= min_strike (assignment put strike) closest to target |delta|."""
+    step = standard_strike_increment(underlying)
+    lo = max(min_strike, snap_strike_to_standard_grid(underlying * 0.55, underlying))
+    hi = snap_strike_to_standard_grid(underlying * 1.45, underlying)
+    strike = snap_strike_to_standard_grid(lo, underlying)
+    if strike < min_strike:
+        strike = round(strike + step, 2)
+
+    candidates: list[float] = []
+    while strike <= hi + step * 0.01:
+        if strike >= min_strike:
+            candidates.append(strike)
+        strike = round(strike + step, 2)
+
+    if not candidates:
+        return None
+
+    target = target_abs_delta
+    best_strike: float | None = None
+    best_gap = float("inf")
+    for candidate in candidates:
+        delta = estimate_delta_black_scholes(
+            underlying=underlying,
+            strike=candidate,
+            days_to_expiration=days_to_expiration,
+            put_call="CALL",
+            iv_percent=iv_percent,
+            risk_free_rate=risk_free_rate,
+        )
+        if delta is None:
+            continue
+        gap = abs(delta - target)
+        if gap < best_gap:
+            best_gap = gap
+            best_strike = candidate
+
+    return best_strike
 
 
 @dataclass(frozen=True)

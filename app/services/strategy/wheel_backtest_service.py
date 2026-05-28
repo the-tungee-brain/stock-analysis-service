@@ -14,6 +14,7 @@ from app.models.wheel_backtest_models import (
 )
 from app.services.strategy.wheel_backtest_engine import (
     ALLOWED_LOOKBACK_YEARS,
+    CallStrikeMode,
     PriceBar,
     WheelBacktestConfig,
     run_wheel_backtest,
@@ -36,6 +37,7 @@ class WheelBacktestService:
         dte_days: int = 30,
         contracts: int = 1,
         maintain_one_lot: bool = True,
+        call_strike_mode: CallStrikeMode = "delta",
     ) -> WheelBacktestResponse:
         symbol_upper = symbol.strip().upper()
         if lookback_years not in ALLOWED_LOOKBACK_YEARS:
@@ -51,6 +53,10 @@ class WheelBacktestService:
             raise ValueError("dte_days must be between 1 and 60")
         if contracts < 1 or contracts > 20:
             raise ValueError("contracts must be between 1 and 20")
+        if call_strike_mode not in ("delta", "at_or_above_assignment"):
+            raise ValueError(
+                "call_strike_mode must be 'delta' or 'at_or_above_assignment'"
+            )
 
         target_delta = (target_delta_min + target_delta_max) / 2.0
         period = _PERIOD_BY_YEARS[lookback_years]
@@ -80,6 +86,7 @@ class WheelBacktestService:
                 dte_days=dte_days,
                 contracts=contracts,
                 maintain_one_lot=maintain_one_lot,
+                call_strike_mode=call_strike_mode,
             ),
         )
 

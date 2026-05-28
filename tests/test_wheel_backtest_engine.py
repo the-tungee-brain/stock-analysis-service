@@ -78,6 +78,48 @@ def test_standard_strike_grid_spacing():
     assert snap_strike_to_standard_grid(503.2, 500.0) == 505.0
 
 
+def test_find_call_strike_at_or_above_assignment_floor():
+    assignment_strike = 100.0
+    strike = find_strike_for_abs_delta(
+        underlying=110.0,
+        days_to_expiration=30,
+        put_call="CALL",
+        target_abs_delta=0.25,
+        iv_percent=22.0,
+        min_strike=assignment_strike,
+    )
+    assert strike is not None
+    assert strike >= assignment_strike
+
+
+def test_covered_calls_respect_assignment_strike_floor_in_backtest():
+    prices: list[float] = [100.0] * 15 + [85.0] * 8 + [110.0] * 25
+    bars = [
+        PriceBar(trading_date=date(2020, 1, 2) + timedelta(days=i), close=p)
+        for i, p in enumerate(prices)
+    ]
+    result = run_wheel_backtest(
+        bars,
+        dividends={},
+        splits={},
+        config=WheelBacktestConfig(
+            symbol="TEST",
+            lookback_years=5,
+            target_delta=0.25,
+            dte_days=5,
+            vol_lookback_days=5,
+            call_strike_mode="at_or_above_assignment",
+        ),
+    )
+    put_assign = next(t for t in result.trades if t["action"] == "put_assigned")
+    cc_trades = [t for t in result.trades if t["action"] == "sell_cc"]
+    assert put_assign["strike"] is not None
+    assert cc_trades
+    for cc in cc_trades:
+        assert cc["strike"] is not None
+        assert cc["strike"] >= put_assign["strike"]
+
+
 def test_find_strike_on_five_dollar_grid_for_high_price():
     strike = find_strike_for_abs_delta(
         underlying=500.0,

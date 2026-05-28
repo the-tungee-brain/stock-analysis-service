@@ -14,6 +14,7 @@ from app.broker.option_greeks import (
 SHARES_PER_CONTRACT = 100
 ALLOWED_LOOKBACK_YEARS = frozenset({5, 10, 15})
 DEFAULT_WHEEL_BACKTEST_DTE_DAYS = 30
+CallStrikeMode = Literal["delta", "at_or_above_assignment"]
 
 TRADE_ACTION_LABELS: dict[str, str] = {
     "sell_csp": "Sell cash-secured put",
@@ -55,6 +56,11 @@ class WheelBacktestConfig:
     """Multiply theoretical premium to approximate bid vs mid (conservative)."""
     maintain_one_lot: bool = True
     """Top up cash when strike×100 exceeds wallet so one CSP lot can keep trading."""
+    call_strike_mode: CallStrikeMode = "delta"
+    """
+    delta: target-delta calls (default).
+    at_or_above_assignment: after put assign, covered calls only at strike >= put strike.
+    """
 
 
 @dataclass
@@ -212,6 +218,7 @@ def run_wheel_backtest(
     cash = 0.0
     shares = 0
     cost_basis_per_share = 0.0
+    stock_strike_floor: float | None = None
     open_leg: OpenOptionLeg | None = None
     completed_cycles = 0
     capital_top_ups = 0.0
@@ -435,6 +442,14 @@ def run_wheel_backtest(
             floor_pct=config.iv_floor_pct,
             cap_pct=config.iv_cap_pct,
         )
+        min_call_strike: float | None = None
+        use_assignment_floor = (
+            config.call_strike_mode == "at_or_above_assignment"
+            and stock_strike_floor is not None
+        )
+        if use_assignment_floor:
+            min_call_strike = stock_strike_floor
+
         strike = find_strike_for_abs_delta(
             underlying=bar.close,
             days_to_expiration=dte,
@@ -442,6 +457,7 @@ def run_wheel_backtest(
             target_abs_delta=config.target_delta,
             iv_percent=iv,
             risk_free_rate=config.risk_free_rate,
+            min_strike=min_call_strike,
         )
         if strike is None:
             next_entry_idx = idx + 1
@@ -477,6 +493,12 @@ def run_wheel_backtest(
         )
         phase = WheelPhase.SHORT_CALL
         last_trade_date = bar.trading_date
+        cc_note = (
+            f"Sell call ${strike:.2f} · stock ${bar.close:.2f} · "
+            f"${premium_ps:.2f}/sh premium · {dte} DTE"
+        )
+        if use_assignment_floor and min_call_strike is not None:
+            cc_note += f" · call strike >= assignment ${min_call_strike:.2f}"
         record(
             bar.trading_date,
             "sell_cc",
@@ -493,16 +515,14 @@ def run_wheel_backtest(
             wheel_cycle=wheel_cycle_id,
             cycle_month=current_cycle_month,
             cash_flow_usd=round(premium_total - fees, 2),
-            note=(
-                f"Sell call ${strike:.2f} · stock ${bar.close:.2f} · "
-                f"${premium_ps:.2f}/sh premium · {dte} DTE"
-            ),
+            note=cc_note,
         )
 
     def settle_put(idx: int) -> None:
         nonlocal phase, cash, shares, cost_basis_per_share, open_leg
         nonlocal put_assignments, puts_expired_otm, next_entry_idx
         nonlocal collateral_reserved, current_cycle_month, last_trade_date
+        nonlocal stock_strike_floor
 
         leg = open_leg
         if leg is None:
@@ -515,6 +535,7 @@ def run_wheel_backtest(
             cash -= assign_cost
             shares = shares_per_lot
             cost_basis_per_share = leg.strike - leg.premium_per_share
+            stock_strike_floor = leg.strike
             put_assignments += 1
             effective_entry = leg.strike - leg.premium_per_share
             last_trade_date = bar.trading_date
@@ -563,7 +584,7 @@ def run_wheel_backtest(
     def settle_call(idx: int) -> None:
         nonlocal phase, cash, shares, cost_basis_per_share, open_leg
         nonlocal calls_assigned, calls_expired_otm, completed_cycles, next_entry_idx
-        nonlocal current_cycle_month, last_trade_date
+        nonlocal current_cycle_month, last_trade_date, stock_strike_floor
 
         leg = open_leg
         if leg is None:
@@ -576,6 +597,7 @@ def run_wheel_backtest(
             cash += proceeds
             shares = 0
             cost_basis_per_share = 0.0
+            stock_strike_floor = None
             calls_assigned += 1
             completed_cycles += 1
             last_trade_date = bar.trading_date
@@ -758,6 +780,15 @@ def run_wheel_backtest(
             "Fixed wallet only: no deposits after day one. Total P/L = ending equity "
             "minus starting wallet. New CSPs only when cash covers strike × 100."
         )
+    if config.call_strike_mode == "at_or_above_assignment":
+        assumptions.append(
+            "Covered-call pattern: after put assignment, each call uses a listed strike "
+            ">= the assignment put strike (never below your stock basis strike)."
+        )
+    else:
+        assumptions.append(
+            "Covered calls: strike from target delta only (may be below assignment put strike)."
+        )
     if skipped_cash > 0:
         assumptions.append(
             f"{skipped_cash} period(s) with insufficient cash for the next CSP "
@@ -809,6 +840,7 @@ def run_wheel_backtest(
             "feePerContractUsd": config.fee_per_contract_usd,
             "premiumHaircut": config.premium_haircut,
             "maintainOneLot": config.maintain_one_lot,
+            "callStrikeMode": config.call_strike_mode,
         },
         assumptions=assumptions,
         starting_cash_usd=round(starting_cash, 2),

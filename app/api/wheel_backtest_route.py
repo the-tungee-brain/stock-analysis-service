@@ -28,6 +28,11 @@ async def get_wheel_backtest(
         alias="maintainOneLot",
         description="Add cash when the next CSP needs more collateral than the wallet",
     ),
+    call_strike_mode: str = Query(
+        "delta",
+        alias="callStrikeMode",
+        description="delta | at_or_above_assignment (calls only at strike >= put assignment)",
+    ),
     service: WheelBacktestService = Depends(get_wheel_backtest_service),
 ) -> WheelBacktestResponse:
     if years not in (5, 10, 15):
@@ -43,6 +48,7 @@ async def get_wheel_backtest(
             dte_days=dte_days,
             contracts=contracts,
             maintain_one_lot=maintain_one_lot,
+            call_strike_mode=call_strike_mode,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
