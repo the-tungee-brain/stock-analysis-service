@@ -188,6 +188,24 @@ def test_build_street_analysis_snapshot(mock_adapter_cls):
 
 
 @patch("app.builders.yfinance_analysis_builder.YFinanceAdapter")
+def test_major_holder_pct_scales_oversized_institution_value(mock_adapter_cls):
+    adapter = MagicMock()
+    raw = _sample_raw()
+    raw["major_holders"] = pd.DataFrame(
+        {"Value": ["0.08%", 7525]},
+        index=["% of Shares Held by All Insider", "% of Shares Held by Institutions"],
+    )
+    adapter.get_street_analysis_raw.return_value = raw
+    adapter.get_ticker_info.return_value = {"currentPrice": 100.0}
+
+    snapshot = YFinanceAnalysisBuilder(adapter).build("NVDA")
+    assert snapshot is not None
+    assert snapshot.ownership is not None
+    assert snapshot.ownership.insiders_pct_held == 0.08
+    assert snapshot.ownership.institutions_pct_held == 75.25
+
+
+@patch("app.builders.yfinance_analysis_builder.YFinanceAdapter")
 def test_insider_transactions_returns_all_rows_not_capped_at_six(mock_adapter_cls):
     adapter = MagicMock()
     raw = _sample_raw()

@@ -489,7 +489,7 @@ class YFinanceAnalysisBuilder:
             if not label or label == "nan":
                 label_col = df.columns[0]
                 label = str(row[label_col]).lower() if label_col in row.index else ""
-            value = self._parse_percent_string(row[value_col])
+            value = self._parse_holder_pct_value(row[value_col])
             if value is None:
                 continue
             if "insider" in label:
@@ -497,6 +497,33 @@ class YFinanceAnalysisBuilder:
             elif "institution" in label:
                 institutions_pct = value
         return insiders_pct, institutions_pct
+
+    @staticmethod
+    def _parse_holder_pct_value(value: Any) -> float | None:
+        """Parse insider/institution % held from Yahoo major_holders."""
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
+        raw = str(value).strip()
+        had_percent_sign = "%" in raw
+        text = raw.replace("%", "")
+        try:
+            parsed = float(text)
+        except ValueError:
+            return None
+
+        if had_percent_sign:
+            return YFinanceAnalysisBuilder._scale_pct_above_100(parsed)
+
+        if 0 < parsed <= 1.5:
+            return parsed * 100
+        return YFinanceAnalysisBuilder._scale_pct_above_100(parsed)
+
+    @staticmethod
+    def _scale_pct_above_100(value: float) -> float:
+        scaled = value
+        while scaled > 100:
+            scaled /= 100
+        return scaled
 
     @staticmethod
     def _parse_percent_string(value: Any) -> float | None:
