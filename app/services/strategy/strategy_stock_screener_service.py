@@ -16,6 +16,7 @@ from app.models.screener_preset_models import (
 from app.models.screener_preset_models import ScreenerPresetSummary
 from app.models.strategy_models import (
     InvestmentStrategy,
+    StrategyScreenerFilters,
     StrategyScreenerQuote,
     StrategyStockScreenerResult,
     UserInvestmentProfile,
@@ -231,6 +232,7 @@ class StrategyStockScreenerService:
         return StrategyStockScreenerResult(
             strategy=strategy,
             preset=preset_summary(preset),
+            filters=filters_from_preset(preset),
             quotes=quotes,
             total_count=total,
             summary=summary,
@@ -291,17 +293,31 @@ def _apply_api_overrides(
 
     spec = preset.equity_query.model_copy(deep=True)
 
-    if "sectors" in overrides and overrides["sectors"] is not None:
+    if "sectors" in overrides:
+        sector_values = overrides["sectors"]
+        if sector_values:
+            spec = _upsert_clause(
+                spec,
+                EquityQueryClause(
+                    op="is-in",
+                    field="sector",
+                    values=list(sector_values),
+                ),
+            )
+        else:
+            spec = _remove_clauses(spec, {"sector"})
+
+    require_dividend = overrides.get("require_dividend")
+    if require_dividend is True:
         spec = _upsert_clause(
             spec,
             EquityQueryClause(
-                op="is-in",
-                field="sector",
-                values=list(overrides["sectors"]),
+                op="gt",
+                field="dividendYield",
+                value=0.0001,
             ),
         )
-
-    if overrides.get("require_dividend") is False:
+    elif require_dividend is False:
         spec = _remove_clauses(spec, {"dividendYield"})
 
     for override_key, (field, op) in OVERRIDE_FIELD_MAP.items():
@@ -328,3 +344,38 @@ def _upsert_clause(spec: EquityQuerySpec, clause: EquityQueryClause) -> EquityQu
 def _remove_clauses(spec: EquityQuerySpec, fields: set[str]) -> EquityQuerySpec:
     kept = [clause for clause in spec.clauses if clause.field not in fields]
     return spec.model_copy(update={"clauses": kept})
+
+
+def filters_from_preset(preset: ScreenerPreset) -> StrategyScreenerFilters | None:
+    if preset.equity_query is None:
+        return None
+
+    min_market_cap = 5_000_000_000
+    max_pe: float | None = None
+    require_dividend = False
+    min_dividend_yield: float | None = None
+    sectors: list[str] | None = None
+
+    for clause in preset.equity_query.clauses:
+        if clause.field == "marketCap" and clause.op == "gte" and clause.value is not None:
+            min_market_cap = int(clause.value)
+        elif clause.field == "trailingPE" and clause.op == "lte" and clause.value is not None:
+            max_pe = float(clause.value)
+        elif clause.field == "dividendYield":
+            if clause.op in {"gt", "gte"} and clause.value is not None:
+                require_dividend = True
+                min_dividend_yield = float(clause.value)
+            elif clause.op == "lte" and clause.value is not None:
+                pass
+        elif clause.field == "sector" and clause.op == "is-in" and clause.values:
+            sectors = [str(value) for value in clause.values]
+
+    filters = StrategyScreenerFilters(
+        min_market_cap=min_market_cap,
+        max_pe=max_pe,
+        require_dividend=require_dividend,
+        min_dividend_yield=min_dividend_yield,
+        sectors=sectors,
+        exchanges=["NMS", "NYQ"],
+    )
+    return filters

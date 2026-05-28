@@ -97,6 +97,31 @@ def test_screen_stocks_excludes_existing_symbols():
     assert result.preset.id == "wheel_stock"
 
 
+def test_apply_api_overrides_adds_dividend_clause():
+    from app.screener.preset_registry import get_preset
+    from app.services.strategy.strategy_stock_screener_service import _apply_api_overrides
+
+    preset = get_preset("wheel_stock")
+    assert preset is not None
+    updated = _apply_api_overrides(preset, {"require_dividend": True})
+    fields = [clause.field for clause in updated.equity_query.clauses]
+    assert "dividendYield" in fields
+
+
+def test_filters_from_preset_reflects_overrides():
+    from app.services.strategy.strategy_stock_screener_service import filters_from_preset
+
+    preset = StrategyStockScreenerService.resolve_preset(
+        InvestmentStrategy.WHEEL,
+        _wheel_profile(),
+        overrides={"min_market_cap": 50_000_000_000, "max_pe": 20.0},
+    )
+    filters = filters_from_preset(preset)
+    assert filters is not None
+    assert filters.min_market_cap == 50_000_000_000
+    assert filters.max_pe == 20.0
+
+
 def test_describe_preset_includes_key_constraints():
     preset = preset_for_strategy(InvestmentStrategy.WHEEL)
     summary = StrategyStockScreenerService.describe_preset(preset)

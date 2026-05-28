@@ -301,7 +301,7 @@ async def get_strategy_stock_screener(
     max_pe: float | None = Query(default=None, alias="maxPe", gt=0),
     require_dividend: bool | None = Query(default=None, alias="requireDividend"),
     min_dividend_yield: float | None = Query(default=None, alias="minDividendYield", ge=0),
-    sectors: list[str] | None = Query(default=None),
+    sectors: str | None = Query(default=None),
     user_id: str = Depends(get_current_user_id),
     strategy_journey_service: StrategyJourneyService = Depends(get_strategy_journey_service),
     strategy_stock_screener_service: StrategyStockScreenerService = Depends(
@@ -336,7 +336,11 @@ async def get_strategy_stock_screener(
     if min_dividend_yield is not None:
         filter_overrides["min_dividend_yield"] = min_dividend_yield
     if sectors is not None:
-        filter_overrides["sectors"] = sectors
+        filter_overrides["sectors"] = [
+            part.strip()
+            for part in sectors.split(",")
+            if part.strip()
+        ]
 
     screener = await asyncio.to_thread(
         strategy_stock_screener_service.screen_stocks,
