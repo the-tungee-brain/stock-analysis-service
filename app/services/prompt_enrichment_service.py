@@ -1622,31 +1622,24 @@ class PromptEnrichmentService:
             {RESEARCH_SYSTEM_PREAMBLE}
 
             # Your task
-            Produce a comprehensive investment research summary that helps a retail investor
-            understand this stock in depth.
+            Write like a strong long-form investment article (400–500 words total across all fields).
+            The app renders this as a magazine-style page: key-takeaway bullets first, then titled sections
+            with short paragraphs (3–4 sentences max each) and concise bullet lists.
 
             # Depth requirements
-            - **short**: 2–3 sentences. Executive summary — what the company is, how it has performed
-              recently (if data provided), and your overall sentiment.
-            - **long**: 8–12 sentences. A thorough narrative covering:
-              business overview, recent price performance, sector context, competitive positioning,
-              recent news impact (if any), and what kind of investor this stock might suit.
-            - **investmentThesis**: 3–5 sentences explaining the core bull case — why an investor
-              might want to own this stock. Be balanced, not promotional.
-            - **keyStrengths**: 4–6 bullet strings. Concrete competitive advantages, financial strengths,
-              or strategic positives. Explain why each matters.
-            - **keyRisks**: 4–6 bullet strings. Material risks (competition, regulation, valuation,
-              balance sheet, macro sensitivity, execution). Explain why each matters.
-            - **whatToWatch**: 3–5 bullet strings. Upcoming catalysts, earnings dates, product launches,
-              regulatory decisions, or macro factors to monitor.
-            - **valuationContext**: 3–5 sentences on how the stock is typically valued (P/E, growth
-              premium, etc.), whether it looks expensive or cheap relative to its growth and peers,
-              and what assumptions the market seems to be pricing in.
-              Prefer SEC filed revenue, margins, and growth rates when provided; use market cap and
-              price data for valuation framing.
+            - **short**: 2–3 sentences only. Plain-language hook for "Key takeaways" bullets — no lists here.
+            - **long**: 6–8 sentences total, split across 2–3 short paragraphs when rendered (company story).
+              Cover business, recent performance, sector context, and who the stock may suit. No repetition
+              of thesis or valuation sections.
+            - **investmentThesis**: 2–4 sentences, one clear bull/bear framing — not promotional.
+            - **keyStrengths**: 3–4 bullet strings. One line each; lead with the insight, not filler.
+            - **keyRisks**: 3–4 bullet strings. One line each; material risks only.
+            - **whatToWatch**: 3–4 bullet strings. Catalysts with timing when known from the data.
+            - **valuationContext**: 2–4 sentences. How the market prices the name vs growth/peers; cite provided
+              figures only.
               {"Use the provided price, returns, market cap, and SEC financial data." if has_market_data or ctx.sec_fundamentals else "No live market data was provided — discuss valuation conceptually without citing specific multiples or prices."}
-            - **sentiment**: "Bullish" | "Neutral" | "Bearish" — your overall assessment weighing
-              strengths vs. risks and recent performance.
+            - **sentiment**: "Bullish" | "Neutral" | "Bearish" — overall assessment.
+            - Avoid walls of text, hedging chains, and repeating the same point across fields.
 
             Return a single JSON object with exactly these keys:
             {{
@@ -1670,8 +1663,7 @@ class PromptEnrichmentService:
 
             {context_block}
 
-            Be as detailed and educational as possible. Help the reader understand this company
-            well enough to decide whether it deserves further research or a place in their portfolio.
+            Write for scanability first, depth second — like a good financial magazine article, not a memo.
             """
         ).strip()
         return [system_msg, user_msg]
@@ -1683,20 +1675,34 @@ class PromptEnrichmentService:
             {RESEARCH_SYSTEM_PREAMBLE}
 
             # Your task
-            Write a readable investment research summary in Markdown for a retail investor.
+            Write a readable long-form investment article in Markdown (~400–500 words).
             Use these section headings exactly:
 
-            ## Executive summary
-            ## Investment thesis
-            ## Key strengths
-            ## Key risks
-            ## What to watch
-            ## Valuation context
-            ## Overall sentiment
+            ## Key takeaways
+            (3–5 short bullet lines — decisive, scannable)
 
-            Keep the full response concise but substantive. Use bullet lists where helpful.
-            State sentiment as Bullish, Neutral, or Bearish in the last section.
-            Do not invent data that was not provided. Acknowledge missing data explicitly.
+            ## Company story
+            (2–3 paragraphs, 3–4 sentences each; left-aligned magazine prose)
+
+            ## Investment thesis
+            (1–2 short paragraphs)
+
+            ## Valuation context
+            (1–2 short paragraphs)
+
+            ## Key strengths
+            (3–4 bullets, one line each)
+
+            ## Key risks
+            (3–4 bullets, one line each)
+
+            ## What to watch
+            (3–4 bullets, one line each)
+
+            ## Overall sentiment
+            (Single line: Bullish, Neutral, or Bearish)
+
+            Rules: no walls of text; paragraphs max ~4 sentences; bullets stay short; do not invent data.
             """
         ).strip()
         user_msg = dedent(
