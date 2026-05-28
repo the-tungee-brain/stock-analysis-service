@@ -152,6 +152,13 @@ RESEARCH_CHAT_SYSTEM_MESSAGE = dedent(f"""
     """).strip()
 
 
+PLAYBOOK_RESEARCH_ANSWER_INSTRUCTION = (
+    "Reply in the playbook verdict format from your system instructions. "
+    "Use numbers from RESEARCH DATA above — especially Dividend & payout when relevant. "
+    "Never list missing fields, formulas, or offers to fetch external data."
+)
+
+
 class PromptEnrichmentService:
     @staticmethod
     def _parse_news_datetime(value: str) -> datetime | None:
@@ -190,7 +197,156 @@ class PromptEnrichmentService:
         return None
 
     @classmethod
+    def _statement_value(
+        cls,
+        snapshot,
+        *,
+        section: str,
+        label: str,
+        period: str,
+    ) -> float | None:
+        rows = getattr(snapshot, section, [])
+        for row in rows:
+            if row.label.lower() != label.lower():
+                continue
+            value = row.values.get(period)
+            if value is not None:
+                return float(value)
+        return None
+
+    @classmethod
+    def _computed_dividend_lines(cls, ctx: ResearchContext) -> list[str]:
+        fin = ctx.yfinance_financials
+        if fin is None:
+            return []
+
+        snapshot = fin.annual or fin.quarterly
+        if snapshot is None or not snapshot.periods:
+            return []
+
+        period = snapshot.periods[0]
+        net_income = cls._statement_value(
+            snapshot,
+            section="income_statement",
+            label="Net income",
+            period=period,
+        )
+        dividends_paid = cls._statement_value(
+            snapshot,
+            section="cash_flow",
+            label="Dividends paid",
+            period=period,
+        )
+        free_cash_flow = cls._statement_value(
+            snapshot,
+            section="cash_flow",
+            label="Free cash flow",
+            period=period,
+        )
+
+        lines: list[str] = []
+        if dividends_paid is not None and net_income is not None and net_income > 0:
+            payout_pct = (abs(dividends_paid) / net_income) * 100
+            lines.append(f"- Payout ratio: {payout_pct:.0f}%")
+
+        if (
+            dividends_paid is not None
+            and free_cash_flow is not None
+            and free_cash_flow > 0
+        ):
+            dividends = abs(dividends_paid)
+            if dividends > 0:
+                coverage = free_cash_flow / dividends
+                fcf_payout_pct = (dividends / free_cash_flow) * 100
+                lines.append(
+                    f"- FCF dividend coverage: {coverage:.1f}x "
+                    f"({fcf_payout_pct:.0f}% of free cash flow paid as dividends)"
+                )
+
+        return lines
+
+    @classmethod
+    def _append_fcf_line(cls, ctx: ResearchContext, lines: list[str]) -> None:
+        if any("free cash flow" in line.lower() for line in lines):
+            return
+
+        fcf = cls._fundamental_value(ctx.fundamentals, "Free cash flow")
+        if fcf:
+            lines.append(f"- Free cash flow: {fcf}")
+            return
+
+        fin = ctx.yfinance_financials
+        snapshot = fin.annual or fin.quarterly if fin else None
+        if snapshot and snapshot.periods:
+            period = snapshot.periods[0]
+            value = cls._statement_value(
+                snapshot,
+                section="cash_flow",
+                label="Free cash flow",
+                period=period,
+            )
+            if value is not None:
+                sign = "-" if value < 0 else ""
+                abs_val = abs(value)
+                if abs_val >= 1_000_000_000:
+                    formatted = f"{sign}${abs_val / 1_000_000_000:.1f}B"
+                elif abs_val >= 1_000_000:
+                    formatted = f"{sign}${abs_val / 1_000_000:.1f}M"
+                else:
+                    formatted = f"{sign}${abs_val:,.0f}"
+                lines.append(f"- Free cash flow: {formatted}")
+
+        sec_fcf = cls._fundamental_value(ctx.sec_fundamentals, "Free cash flow")
+        if sec_fcf and not any("free cash flow" in line.lower() for line in lines):
+            lines.append(f"- Free cash flow: {sec_fcf}")
+
+    @classmethod
+    def _is_non_dividend_payer(cls, ctx: ResearchContext) -> bool:
+        div_yield = cls._fundamental_value(ctx.fundamentals, "Dividend yield")
+        if div_yield:
+            try:
+                if float(div_yield.replace("%", "").strip()) > 0.01:
+                    return False
+            except ValueError:
+                return False
+
+        if cls._fundamental_value(ctx.fundamentals, "Payout ratio"):
+            return False
+
+        dps = cls._fundamental_value(ctx.fundamentals, "Annual dividend per share")
+        if dps and dps not in {"$0.00", "$0"}:
+            return False
+
+        fin = ctx.yfinance_financials
+        snapshot = fin.annual or fin.quarterly if fin else None
+        if snapshot and snapshot.periods:
+            dividends_paid = cls._statement_value(
+                snapshot,
+                section="cash_flow",
+                label="Dividends paid",
+                period=snapshot.periods[0],
+            )
+            if dividends_paid is not None and abs(dividends_paid) > 0:
+                return False
+
+        return True
+
+    @classmethod
     def _format_dividend_payout_section(cls, ctx: ResearchContext) -> str | None:
+        if ctx.asset_type == "ETF":
+            return None
+
+        header = (
+            "## Dividend & payout (required for Financials — do not claim these are missing)\n"
+        )
+
+        if cls._is_non_dividend_payer(ctx):
+            lines = [
+                "- No dividend — not a dividend payer; skip payout ratio and FCF dividend coverage.",
+            ]
+            cls._append_fcf_line(ctx, lines)
+            return header + "\n".join(lines)
+
         lines: list[str] = []
 
         payout = cls._fundamental_value(ctx.fundamentals, "Payout ratio")
@@ -211,14 +367,19 @@ class PromptEnrichmentService:
                 if "payout ratio" in lower or "covers dividends" in lower:
                     lines.append(f"- {highlight}")
 
+        existing = " ".join(lines).lower()
+        for line in cls._computed_dividend_lines(ctx):
+            key = line.split(":", 1)[0].strip().lower()
+            if key not in existing:
+                lines.append(line)
+                existing = f"{existing} {key}"
+
+        cls._append_fcf_line(ctx, lines)
+
         if not lines:
             return None
 
-        return (
-            "## Dividend & payout\n"
-            "Use these figures when discussing dividend safety and the Financials factor.\n"
-            + "\n".join(lines)
-        )
+        return header + "\n".join(lines)
 
     @staticmethod
     def _format_metric_lines(metrics: list[FundamentalMetric]) -> str:
@@ -652,7 +813,15 @@ class PromptEnrichmentService:
         holdings_block: str | None = None,
         intelligence_block: str | None = None,
         option_chain_block: str | None = None,
+        answer_instruction: str | None = None,
     ) -> dict[str, str]:
+        default_instruction = (
+            "Answer using the research data above. When holdings, precomputed "
+            "intelligence, or option data are present, tie recommendations to the "
+            "user's actual positions and option legs with specific strikes, expirations, "
+            "delta, and bid/ask when available. Acknowledge any gaps instead of guessing."
+        )
+        instruction = answer_instruction or default_instruction
         if include_context:
             context_block = self._format_research_context_block(ctx)
             sections = [
@@ -684,10 +853,7 @@ class PromptEnrichmentService:
                 [
                     "=== USER QUESTION ===",
                     user_prompt,
-                    "Answer using the research data above. When holdings, precomputed "
-                    "intelligence, or option data are present, tie recommendations to the "
-                    "user's actual positions and option legs with specific strikes, expirations, "
-                    "delta, and bid/ask when available. Acknowledge any gaps instead of guessing.",
+                    instruction,
                 ]
             )
             content = "\n\n".join(sections).strip()
@@ -703,6 +869,25 @@ class PromptEnrichmentService:
             """
         ).strip()
         return {"role": "user", "content": content}
+
+    def build_playbook_research_user_message(
+        self,
+        ctx: ResearchContext,
+        user_prompt: str,
+        *,
+        holdings_block: str | None = None,
+        intelligence_block: str | None = None,
+        option_chain_block: str | None = None,
+    ) -> dict[str, str]:
+        return self.build_research_chat_user_message(
+            ctx=ctx,
+            user_prompt=user_prompt,
+            include_context=True,
+            holdings_block=holdings_block,
+            intelligence_block=intelligence_block,
+            option_chain_block=option_chain_block,
+            answer_instruction=PLAYBOOK_RESEARCH_ANSWER_INSTRUCTION,
+        )
 
     def build_recent_transactions_markdown(
         self,

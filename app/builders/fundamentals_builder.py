@@ -94,7 +94,7 @@ class FundamentalsBuilder:
         )
         add(
             "Payout ratio",
-            self._fmt_payout_ratio(info.get("payoutRatio")),
+            self._fmt_payout_ratio(self._resolve_payout_ratio(info)),
             "Share of earnings paid out as dividends. Lower ratios leave more room for reinvestment or downturns.",
         )
         add(
@@ -123,6 +123,23 @@ class FundamentalsBuilder:
             "dividend_yield": self._fmt_dividend_yield(info.get("dividendYield")),
             "expense_ratio": self._fmt_expense_ratio(info),
         }
+
+    @staticmethod
+    def _resolve_payout_ratio(info: dict) -> float | None:
+        raw = info.get("payoutRatio")
+        if isinstance(raw, (int, float)):
+            return float(raw)
+
+        dividend_rate = info.get("trailingAnnualDividendRate") or info.get("dividendRate")
+        trailing_eps = info.get("trailingEps")
+        if (
+            isinstance(dividend_rate, (int, float))
+            and isinstance(trailing_eps, (int, float))
+            and trailing_eps > 0
+        ):
+            return float(dividend_rate) / float(trailing_eps)
+
+        return None
 
     @staticmethod
     def _fmt_payout_ratio(value: float | None) -> str | None:

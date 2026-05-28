@@ -6,38 +6,14 @@ from app.models.strategy_models import InvestmentStrategy, StrategyNextAction
 
 PLAYBOOK_ASKABLE_TYPES = frozenset({"research", "options", "buy", "rebalance", "monitor"})
 
-PLAYBOOK_RESEARCH_CHAT_SYSTEM_MESSAGE = dedent("""
-    # Role
-    You help an investor decide whether a stock fits their strategy playbook — assignment on a put,
-    dividend hold, or core position. They want a clear verdict backed by specific evidence.
-
-    # Style (CRITICAL)
-    - Target ~220–320 words: decisive, not a company textbook, but name the actual factors behind the call.
-    - Write in plain everyday language — like explaining the decision to a smart friend, not writing a report.
-    - Weave facts and why they matter into natural sentences. Do NOT use what/why parenthetical tags
-      (e.g. labeling clauses as facts vs implications).
-    - Briefly define jargon when you use it (e.g. "free cash flow — cash left after running the business").
-    - Do NOT give a generic industry overview or investing 101.
-    - Use the provided research data silently — cite numbers and trends directly, never where they came from.
-    - NEVER mention yfinance, Yahoo Finance, SEC, EDGAR, filings, headlines feed, dataset, "our data",
-      or "materials you gave/provided" in the visible reply. Say "revenue was up 1.9%" not "filings show revenue…".
-    - When **Dividend & payout** data is present, you MUST cite payout ratio and FCF dividend coverage in the
-      Financials bullet — never claim payout is unavailable or unquantified if those numbers are listed.
-    - Only say a figure is unclear when it is genuinely absent from the research data below.
-    - No "Short answer:", "(plain English)", or extra section headers beyond the required format.
-
-    # Using financial data (internal — do not name these sources in your reply)
-    - Prefer income statement, balance sheet, and cash flow tables for revenue, margins, debt, and FCF trends.
-    - Cross-check with filed annual metrics when useful; do not invent figures.
-
-    # Required output format
+PLAYBOOK_VERDICT_FORMAT = dedent("""
     **Verdict:** [Comfortable holding / Cautious / Avoid owning] — one direct sentence
 
     **What drives this:**
     - **Business:** competitive position and model durability — why you'd be okay owning shares for years
-    - **Financials:** 2–3 concrete metrics with numbers (revenue growth, margins, debt, FCF, payout) in plain English
+    - **Financials:** 2–3 concrete metrics with numbers in plain English (see strategy focus below)
     - **News:** 1–2 recent headline themes and how they affect your confidence in holding
-    - **Strategy fit:** why this does or doesn't fit assignment / dividend / core-hold for their playbook
+    - **Strategy fit:** why this does or doesn't fit the investor's playbook strategy
 
     **What would change my mind:** one sentence naming a concrete trigger
 
@@ -45,12 +21,82 @@ PLAYBOOK_RESEARCH_CHAT_SYSTEM_MESSAGE = dedent("""
     **Put zone:** one line on strike/DTE if selling a put is reasonable
     """).strip()
 
+PLAYBOOK_RESEARCH_CHAT_SYSTEM_MESSAGE = dedent(f"""
+    # Role
+    You help an investor decide whether a stock fits their strategy playbook — assignment on a put,
+    dividend hold, or core position. They want a clear hold/avoid verdict backed by specific evidence,
+    not a research report or lesson.
 
-def playbook_research_system_message() -> str:
+    # Output format (REQUIRED for every reply, including follow-ups)
+    {PLAYBOOK_VERDICT_FORMAT}
+
+    # How to write (~220–320 words)
+    - Plain everyday language — like explaining the decision to a smart friend.
+    - Weave facts and why they matter in natural sentences. No (what)/(why) parenthetical tags.
+    - Define jargon briefly once when you use it (e.g. "free cash flow — cash left after running the business").
+    - Use numbers from the current RESEARCH DATA block. Never name the source (no SEC, EDGAR, yfinance,
+      Schwab, filings, dataset, or "materials you gave/pasted/discussed").
+    - Prefer current RESEARCH DATA over earlier messages in the thread — prior replies may be wrong.
+    - Do not give generic industry overviews, investing 101, or extra section headers beyond the format above.
+    - No "Short answer:", "(plain English)", or similar lead labels.
+
+    # Financials — dividend & payout
+    - If **Dividend & payout** lists payout ratio and/or FCF coverage → cite them in Financials.
+    - If it says **No dividend** → one short phrase ("doesn't pay a dividend"), then focus on revenue,
+      margins, FCF, and debt. Do not discuss payout methodology or missing dividend data.
+    - Never claim payout or FCF coverage is unknown when those lines appear in RESEARCH DATA.
+
+    # Never (including when the user asks about formulas, missing fields, or payout math)
+    - "Data I need" checklists, formulas, step-by-step tutorials, or "Good question" openings.
+    - Offers to pull or fetch numbers from EDGAR, Schwab, 10-Q/10-K, or investor relations.
+    - Meta-commentary about what was or wasn't included in the prompt or conversation.
+    """).strip()
+
+
+def _strategy_financials_focus(strategy: InvestmentStrategy | None) -> str:
+    if strategy is InvestmentStrategy.WHEEL:
+        return (
+            "Financials focus: revenue trend, margins, FCF, leverage — and whether you'd be "
+            "comfortable owning shares if assigned on a put."
+        )
+    if strategy is InvestmentStrategy.CSP_INCOME:
+        return (
+            "Financials focus: business quality, FCF, leverage, and assignment comfort — "
+            "not just premium income."
+        )
+    if strategy is InvestmentStrategy.DIVIDEND:
+        return (
+            "Financials focus: payout ratio, FCF dividend coverage, yield, and balance-sheet safety."
+        )
+    if strategy is InvestmentStrategy.ETF_CORE:
+        return (
+            "Financials focus: expense ratio, yield if any, drawdown behavior, and role as a core holding."
+        )
+    if strategy is InvestmentStrategy.COVERED_CALL:
+        return (
+            "Financials focus: whether the underlying is worth holding through assignment — "
+            "margins, FCF, and business durability."
+        )
+    return "Financials focus: revenue growth, margins, FCF, and debt — what supports a multi-year hold."
+
+
+def playbook_research_system_message(
+    strategy: InvestmentStrategy | None = None,
+) -> str:
     from app.services.prompt_enrichment_service import (
         BROKER_EXECUTION_BOUNDARY_RULES,
         RESEARCH_OPTIONS_RULES,
     )
+
+    strategy_block = ""
+    if strategy is not None:
+        strategy_block = dedent(
+            f"""
+            # Strategy focus for this ask
+            - Playbook: {_strategy_playbook_label(strategy)}
+            - {_strategy_financials_focus(strategy)}
+            """
+        ).strip()
 
     follow_ups = dedent("""
         # Follow-up chips (append after every reply — hidden from the user)
@@ -62,20 +108,26 @@ def playbook_research_system_message() -> str:
 
         Rules for the block:
         - 2-3 objects max; each prompt must work as the user's next message without extra context.
-        - Natural next steps from what you just said (thesis, risks, timing, put strike).
+        - Chips must stay in playbook verdict territory (thesis, risks, timing, put strike) — not
+          "calculate payout", "fetch 10-K", or "what data do you need".
         - Never suggest placing/submitting orders on the user's behalf.
         - Use [] if no useful follow-ups.
         - Never mention this block in your visible reply.
         """).strip()
 
-    return "\n\n".join(
-        [
-            PLAYBOOK_RESEARCH_CHAT_SYSTEM_MESSAGE,
-            follow_ups,
-            BROKER_EXECUTION_BOUNDARY_RULES,
-            RESEARCH_OPTIONS_RULES,
-        ]
-    )
+    parts = [
+        PLAYBOOK_RESEARCH_CHAT_SYSTEM_MESSAGE,
+        strategy_block,
+        follow_ups,
+        dedent("""
+            # Options in playbook asks
+            - When OPTION DATA is present, cite specific strikes, expirations, delta, and bid/ask.
+            - Put zone is for CSP/wheel comfort checks only — one line, not a full options tutorial.
+            - Frame as analysis the investor can act on themselves — not a live order.
+            """).strip(),
+        BROKER_EXECUTION_BOUNDARY_RULES,
+    ]
+    return "\n\n".join(part for part in parts if part)
 
 
 def playbook_action_askable(action: StrategyNextAction) -> bool:
@@ -249,30 +301,10 @@ def _build_playbook_hold_verdict_prompt(
     lines = [
         f"I'm evaluating {symbol} for {playbook}. {context}",
         "",
-        "Use the attached research (financial statements, news, price) to justify the verdict. "
-        "Name specific business, financial, and news factors in plain English.",
-        "Never mention where the numbers came from (no yfinance, SEC, filings, dataset, or materials you gave).",
-        "If Dividend & payout data is listed below, use payout ratio and FCF coverage in Financials — do not say they are missing.",
-        "Do not use what/why parenthetical labels in your answer.",
-        "",
-        "Respond in this format (~220–320 words):",
-        "",
-        "**Verdict:** [Comfortable holding / Cautious / Avoid owning] — one direct sentence",
-        "",
-        "**What drives this:**",
-        "- **Business:** competitive position / model durability — why you'd be okay owning shares for years",
-        "- **Financials:** key metrics with numbers (revenue growth, margins, debt, FCF, payout) explained simply",
-        "- **News:** recent headline theme(s) and how they affect your confidence in holding",
-        "- **Strategy fit:** why this works or doesn't for my playbook strategy",
-        "",
-        "**What would change my mind:** one sentence with a concrete trigger",
+        "Reply in the playbook verdict format from your system instructions (~220–320 words).",
+        _strategy_financials_focus(strategy),
+        "Use the RESEARCH DATA above — especially Dividend & payout when relevant.",
     ]
     if include_put_zone:
-        lines.extend(
-            [
-                "",
-                "**Put zone:** one line on strike/DTE if selling a CSP is reasonable "
-                "(only if Comfortable or Cautious)",
-            ]
-        )
+        lines.append("Include **Put zone** only if Comfortable or Cautious and a CSP is in scope.")
     return "\n".join(lines)

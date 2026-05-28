@@ -209,19 +209,19 @@ async def _stream_research_playbook_ask(
             intelligence_block = None
             option_chain_block = None
 
-        user_message = prompt_enrichment_service.build_research_chat_user_message(
+        user_message = prompt_enrichment_service.build_playbook_research_user_message(
             ctx=ctx,
             user_prompt=secret_prompt,
-            include_context=is_first_chat,
             holdings_block=holdings_block,
             intelligence_block=intelligence_block,
             option_chain_block=option_chain_block,
         )
 
+        playbook_history = recent_messages[-8:]
         async for chunk in llm_service.analyze_option_position(
             model=model or settings.OPENAI_MODEL,
-            system_prompt=playbook_research_system_message(),
-            user_prompt=[*recent_messages, user_message],
+            system_prompt=playbook_research_system_message(strategy=request.strategy),
+            user_prompt=[*playbook_history, user_message],
         ):
             assistant_content_parts.append(chunk)
             yield chunk

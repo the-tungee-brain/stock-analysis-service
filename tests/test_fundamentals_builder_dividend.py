@@ -19,6 +19,20 @@ def test_build_includes_payout_and_dividend_rate():
     assert labels["Payout ratio"] == "75.0%"
 
 
+def test_build_includes_payout_from_dividend_rate_and_eps():
+    adapter = MagicMock()
+    adapter.get_ticker_info.return_value = {
+        "dividendYield": 0.031,
+        "dividendRate": 1.84,
+        "trailingEps": 2.46,
+    }
+
+    metrics = FundamentalsBuilder(market_data_adapter=adapter).build("KO")
+    labels = {metric.label: metric.value for metric in metrics}
+
+    assert labels["Payout ratio"] == "74.8%"
+
+
 def test_build_omits_payout_when_unavailable():
     adapter = MagicMock()
     adapter.get_ticker_info.return_value = {"dividendYield": 0.02}

@@ -36,24 +36,36 @@ def test_build_playbook_ask_prompt_is_concise_hold_verdict():
     )
     prompt = build_playbook_ask_prompt(action, InvestmentStrategy.WHEEL)
     assert "SBUX" in prompt
-    assert "**Verdict:**" in prompt
-    assert "**Business:**" in prompt
-    assert "**Financials:**" in prompt
-    assert "**News:**" in prompt
-    assert "220" in prompt or "320" in prompt
-    assert "what/why parenthetical" in prompt.lower()
-    assert "never mention where the numbers came from" in prompt.lower()
+    assert "wheel strategy playbook" in prompt
+    assert "verdict format" in prompt.lower()
+    assert "assignment comfort" in prompt.lower() or "assigned on a put" in prompt.lower()
     assert "dividend & payout" in prompt.lower()
-    assert "yfinance/SEC metrics" not in prompt
-    assert "Business model" not in prompt
     assert "Put zone" in prompt
     assert "Confirm ownership comfort" not in prompt
+    assert "**Verdict:**" not in prompt
 
 
-def test_playbook_research_system_message_forbids_naming_sources():
-    message = playbook_research_system_message()
-    assert "NEVER mention yfinance" in message
-    assert "never where they came from" in message.lower()
+def test_playbook_research_system_message_includes_format_and_strategy_focus():
+    message = playbook_research_system_message(strategy=InvestmentStrategy.DIVIDEND)
+    assert "**Verdict:**" in message
+    assert "data I need" in message.lower()
+    assert "dividend investing playbook" in message
+    assert "payout ratio" in message.lower()
+    assert "calculate payout" in message.lower()
+
+
+def test_playbook_research_user_message_uses_verdict_instruction():
+    from app.models.company_research_models import ResearchContext
+    from app.services.prompt_enrichment_service import PromptEnrichmentService
+
+    ctx = ResearchContext(symbol="HOOD")
+    message = PromptEnrichmentService().build_playbook_research_user_message(
+        ctx=ctx,
+        user_prompt="Should I hold HOOD?",
+    )
+
+    assert "verdict format" in message["content"].lower()
+    assert "Acknowledge any gaps instead of guessing" not in message["content"]
 
 
 def test_playbook_ask_display_message_is_user_facing_not_secret():
