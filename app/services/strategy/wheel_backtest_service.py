@@ -35,6 +35,7 @@ class WheelBacktestService:
         target_delta_max: float = 0.30,
         dte_days: int = 30,
         contracts: int = 1,
+        maintain_one_lot: bool = False,
     ) -> WheelBacktestResponse:
         symbol_upper = symbol.strip().upper()
         if lookback_years not in ALLOWED_LOOKBACK_YEARS:
@@ -78,6 +79,7 @@ class WheelBacktestService:
                 target_delta=target_delta,
                 dte_days=dte_days,
                 contracts=contracts,
+                maintain_one_lot=maintain_one_lot,
             ),
         )
 

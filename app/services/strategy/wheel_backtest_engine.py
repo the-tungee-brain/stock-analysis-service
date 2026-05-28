@@ -53,8 +53,8 @@ class WheelBacktestConfig:
     iv_cap_pct: float = 120.0
     premium_haircut: float = 0.95
     """Multiply theoretical premium to approximate bid vs mid (conservative)."""
-    maintain_one_lot: bool = True
-    """Top up cash to sell one CSP when SPY/notional rises above idle cash (disclosed)."""
+    maintain_one_lot: bool = False
+    """If True, inject cash when collateral exceeds wallet (not fixed-capital backtest)."""
 
 
 @dataclass
@@ -691,14 +691,22 @@ def run_wheel_backtest(
             f"${initial_stock_price:.2f} on first trade date) plus 5% buffer."
         ),
     ]
-    if capital_top_ups > 0:
+    if config.maintain_one_lot:
         assumptions.append(
-            f"Capital top-ups ${capital_top_ups:,.0f} when cash could not cover "
-            f"the next CSP (maintain one {config.contracts}-lot wheel as underlying rises)."
+            "Extra deposits allowed when cash cannot cover the next CSP (maintain one lot)."
+        )
+        if capital_top_ups > 0:
+            assumptions.append(
+                f"Capital top-ups ${capital_top_ups:,.0f} injected over the run."
+            )
+    else:
+        assumptions.append(
+            "Fixed capital: no deposits after day one. Total P/L = ending equity minus "
+            "starting wallet only. New CSPs only when cash covers strike × 100."
         )
     if skipped_cash > 0:
         assumptions.append(
-            f"{skipped_cash} trading days skipped — insufficient cash and top-ups disabled."
+            f"{skipped_cash} days could not open a new CSP — insufficient cash."
         )
     assumptions.extend(
         [
@@ -733,6 +741,7 @@ def run_wheel_backtest(
             "volLookbackDays": config.vol_lookback_days,
             "feePerContractUsd": config.fee_per_contract_usd,
             "premiumHaircut": config.premium_haircut,
+            "maintainOneLot": config.maintain_one_lot,
         },
         assumptions=assumptions,
         starting_cash_usd=round(starting_cash, 2),

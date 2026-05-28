@@ -156,6 +156,30 @@ def test_realized_vol_clamped():
     assert 12.0 <= vol <= 80.0
 
 
+def test_fixed_capital_default_has_no_top_ups():
+    prices = [100.0] * 30 + [150.0] * 30
+    bars = [
+        PriceBar(trading_date=date(2020, 1, 2) + timedelta(days=i), close=p)
+        for i, p in enumerate(prices)
+    ]
+    result = run_wheel_backtest(
+        bars,
+        dividends={},
+        splits={},
+        config=WheelBacktestConfig(
+            symbol="TEST",
+            lookback_years=5,
+            target_delta=0.25,
+            dte_days=5,
+            vol_lookback_days=5,
+        ),
+    )
+    assert result.capital_top_ups_usd == 0.0
+    assert result.total_pl_usd == round(
+        result.ending_equity_usd - result.starting_cash_usd, 2
+    )
+
+
 def test_maintain_one_lot_keeps_trading_when_spot_rises():
     """Flat cash can lag SPY notional; top-ups allow continued CSP selling."""
     prices = [100.0] * 30 + [150.0] * 30
