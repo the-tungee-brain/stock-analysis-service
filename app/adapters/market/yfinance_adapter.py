@@ -233,6 +233,12 @@ class YFinanceAdapter:
             "eps_revisions": self._safe_table(ticker.get_eps_revisions, as_dict=True),
             "eps_trend": self._safe_table(ticker.get_eps_trend, as_dict=True),
             "upgrades_downgrades": self._safe_dataframe(ticker.get_upgrades_downgrades),
+            "growth_estimates": self._safe_table(ticker.get_growth_estimates, as_dict=True),
+            "institutional_holders": self._safe_dataframe(
+                ticker.get_institutional_holders
+            ),
+            "insider_transactions": self._safe_dataframe(ticker.get_insider_transactions),
+            "major_holders": self._safe_dataframe(ticker.get_major_holders),
         }
         self._set_cached(self._street_analysis_cache, symbol_upper, bundle)
         return bundle

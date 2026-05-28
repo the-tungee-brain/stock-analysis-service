@@ -9,6 +9,9 @@ from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.models.yfinance_analysis_models import (
     AnalystPriceTargets,
     AnalystRatingAction,
+    InstitutionalHolder,
+    InsiderTransactionRow,
+    OwnershipSnapshot,
     PeriodEstimate,
     RecommendationBreakdown,
     StreetAnalysisSnapshot,
@@ -22,6 +25,8 @@ _PERIOD_LABELS = {
     "0y": "Current year",
     "+1y": "Next year",
 }
+
+_ESTIMATE_PERIOD_KEYS = ("0q", "+1q", "0y", "+1y")
 
 
 class YFinanceAnalysisBuilder:
@@ -44,17 +49,19 @@ class YFinanceAnalysisBuilder:
 
         price_targets = self._parse_price_targets(raw.get("price_targets"), current_price)
         recommendation = self._parse_recommendations(raw.get("recommendations_summary"))
-        next_q_eps = self._parse_period_estimate(
-            raw.get("earnings_estimate"), "+1q", year_ago_key="yearAgoEps"
+        eps_estimates = self._parse_all_period_estimates(raw.get("earnings_estimate"))
+        revenue_estimates = self._parse_all_period_estimates(
+            raw.get("revenue_estimate")
         )
-        next_q_revenue = self._parse_period_estimate(
-            raw.get("revenue_estimate"), "+1q", year_ago_key="yearAgoRevenue"
-        )
+        next_q_eps = self._estimate_for_period(eps_estimates, "+1q")
+        next_q_revenue = self._estimate_for_period(revenue_estimates, "+1q")
         revision_headline = self._revision_headline(raw.get("eps_revisions"), "+1q")
         drift_headline = self._eps_trend_headline(raw.get("eps_trend"), "+1q")
+        growth_headline = self._growth_context_headline(raw.get("growth_estimates"), "+1y")
         recent_actions = self._parse_recent_rating_actions(
             raw.get("upgrades_downgrades")
         )
+        ownership = self._parse_ownership(raw)
 
         if not any(
             [
@@ -62,9 +69,13 @@ class YFinanceAnalysisBuilder:
                 recommendation,
                 next_q_eps,
                 next_q_revenue,
+                eps_estimates,
+                revenue_estimates,
                 revision_headline,
                 drift_headline,
+                growth_headline,
                 recent_actions,
+                ownership,
             ]
         ):
             return None
@@ -79,9 +90,13 @@ class YFinanceAnalysisBuilder:
             consensus_label=consensus_label,
             next_quarter_eps=next_q_eps,
             next_quarter_revenue=next_q_revenue,
+            eps_estimates=eps_estimates,
+            revenue_estimates=revenue_estimates,
             estimate_revision_headline=revision_headline,
             estimate_drift_headline=drift_headline,
+            growth_context_headline=growth_headline,
             recent_rating_actions=recent_actions,
+            ownership=ownership,
         )
 
     @staticmethod
@@ -171,12 +186,29 @@ class YFinanceAnalysisBuilder:
             return "Hold"
         return "Mixed"
 
+    def _parse_all_period_estimates(self, table: Any) -> list[PeriodEstimate]:
+        estimates: list[PeriodEstimate] = []
+        for period_key in _ESTIMATE_PERIOD_KEYS:
+            estimate = self._parse_period_estimate(table, period_key)
+            if estimate is not None:
+                estimates.append(estimate)
+        return estimates
+
+    @staticmethod
+    def _estimate_for_period(
+        estimates: list[PeriodEstimate], period_key: str
+    ) -> PeriodEstimate | None:
+        for estimate in estimates:
+            if estimate.period_key == period_key:
+                return estimate
+        return None
+
     def _parse_period_estimate(
         self,
         table: Any,
         period_key: str,
         *,
-        year_ago_key: str,
+        year_ago_key: str = "",
     ) -> PeriodEstimate | None:
         row = self._table_row(table, period_key)
         if row is None:
@@ -324,6 +356,195 @@ class YFinanceAnalysisBuilder:
             return parsed.strftime("%Y-%m-%d")
         except Exception:
             return None
+
+    def _growth_context_headline(self, table: Any, period_key: str) -> str | None:
+        row = self._table_row(table, period_key)
+        if row is None:
+            return None
+
+        stock = self._normalize_growth_pct(row.get("stock"))
+        industry = self._normalize_growth_pct(row.get("industry"))
+        sector = self._normalize_growth_pct(row.get("sector"))
+        if stock is None:
+            return None
+
+        label = _PERIOD_LABELS.get(period_key, period_key).lower()
+        parts = [f"{label.capitalize()} growth estimate {stock:.1f}%"]
+        if industry is not None:
+            parts.append(f"vs industry {industry:.1f}%")
+        elif sector is not None:
+            parts.append(f"vs sector {sector:.1f}%")
+        return " ".join(parts) + "."
+
+    @staticmethod
+    def _normalize_growth_pct(value: Any) -> float | None:
+        parsed = YFinanceAnalysisBuilder._optional_float(value)
+        if parsed is None:
+            return None
+        if abs(parsed) <= 1.5:
+            return parsed * 100
+        return parsed
+
+    def _parse_ownership(self, raw: dict[str, Any]) -> OwnershipSnapshot | None:
+        insiders_pct, institutions_pct = self._parse_major_holder_pcts(
+            raw.get("major_holders")
+        )
+        top_institutional = self._parse_institutional_holders(
+            raw.get("institutional_holders")
+        )
+        insider_rows = self._parse_insider_transactions(raw.get("insider_transactions"))
+
+        if (
+            insiders_pct is None
+            and institutions_pct is None
+            and not top_institutional
+            and not insider_rows
+        ):
+            return None
+
+        return OwnershipSnapshot(
+            insiders_pct_held=insiders_pct,
+            institutions_pct_held=institutions_pct,
+            top_institutional=top_institutional,
+            recent_insider_transactions=insider_rows,
+        )
+
+    def _parse_major_holder_pcts(
+        self, df: Any
+    ) -> tuple[float | None, float | None]:
+        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+            return None, None
+
+        insiders_pct: float | None = None
+        institutions_pct: float | None = None
+        value_col = df.columns[0]
+
+        for idx, row in df.iterrows():
+            label = str(idx).lower()
+            if not label or label == "nan":
+                label_col = df.columns[0]
+                label = str(row[label_col]).lower() if label_col in row.index else ""
+            value = self._parse_percent_string(row[value_col])
+            if value is None:
+                continue
+            if "insider" in label:
+                insiders_pct = value
+            elif "institution" in label:
+                institutions_pct = value
+        return insiders_pct, institutions_pct
+
+    @staticmethod
+    def _parse_percent_string(value: Any) -> float | None:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
+        text = str(value).strip().replace("%", "")
+        try:
+            return float(text)
+        except ValueError:
+            return None
+
+    def _parse_institutional_holders(
+        self, df: Any, *, limit: int = 5
+    ) -> list[InstitutionalHolder]:
+        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+            return []
+
+        pct_col = self._find_column(df, "% Out", "pctHeld", "pct_held")
+        holder_col = self._find_column(df, "Holder", "holder")
+        shares_col = self._find_column(df, "Shares", "shares")
+        value_col = self._find_column(df, "Value", "value")
+
+        working = df.copy()
+        if pct_col:
+            working["_pct"] = pd.to_numeric(
+                working[pct_col].astype(str).str.replace("%", "", regex=False),
+                errors="coerce",
+            )
+            working = working.sort_values("_pct", ascending=False)
+
+        holders: list[InstitutionalHolder] = []
+        for _, row in working.head(limit).iterrows():
+            name = (
+                str(row[holder_col]).strip()
+                if holder_col and row.get(holder_col) is not None
+                else ""
+            )
+            if not name:
+                continue
+            holders.append(
+                InstitutionalHolder(
+                    holder=name,
+                    pct_held=(
+                        self._parse_percent_string(row[pct_col])
+                        if pct_col
+                        else None
+                    ),
+                    shares=(
+                        self._optional_float(row[shares_col]) if shares_col else None
+                    ),
+                    value=(
+                        self._optional_float(row[value_col]) if value_col else None
+                    ),
+                )
+            )
+        return holders
+
+    def _parse_insider_transactions(
+        self, df: Any, *, limit: int = 6
+    ) -> list[InsiderTransactionRow]:
+        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+            return []
+
+        try:
+            sorted_df = df.sort_index(ascending=False).head(limit)
+        except Exception:
+            sorted_df = df.head(limit)
+
+        insider_col = self._find_column(sorted_df, "Insider", "insider", "Insider Trading")
+        transaction_col = self._find_column(
+            sorted_df, "Transaction", "transaction", "Text"
+        )
+        shares_col = self._find_column(sorted_df, "Shares", "shares")
+        value_col = self._find_column(sorted_df, "Value", "value", "Value ($)")
+
+        rows: list[InsiderTransactionRow] = []
+        for idx, row in sorted_df.iterrows():
+            date_str = self._index_to_iso_date(idx)
+            if date_str is None:
+                continue
+            insider = (
+                str(row[insider_col]).strip()
+                if insider_col and row.get(insider_col) is not None
+                else ""
+            )
+            if not insider:
+                continue
+            rows.append(
+                InsiderTransactionRow(
+                    date=date_str,
+                    insider=insider,
+                    transaction=(
+                        self._row_str(row, "Transaction", "transaction", "Text")
+                        if transaction_col
+                        else None
+                    ),
+                    shares=(
+                        self._optional_float(row[shares_col]) if shares_col else None
+                    ),
+                    value=(
+                        self._optional_float(row[value_col]) if value_col else None
+                    ),
+                )
+            )
+        return rows
+
+    @staticmethod
+    def _find_column(df: pd.DataFrame, *candidates: str) -> str | None:
+        for name in candidates:
+            for col in df.columns:
+                if str(col).lower().replace(" ", "") == name.lower().replace(" ", ""):
+                    return col
+        return None
 
     @staticmethod
     def _row_str(row: Any, *candidates: str) -> str | None:

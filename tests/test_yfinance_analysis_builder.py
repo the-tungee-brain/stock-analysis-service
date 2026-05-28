@@ -27,6 +27,13 @@ def _sample_raw() -> dict:
             ]
         ),
         "earnings_estimate": {
+            "0q": {
+                "numberOfAnalysts": 20,
+                "avg": 1.10,
+                "low": 1.0,
+                "high": 1.2,
+                "growth": 0.15,
+            },
             "+1q": {
                 "numberOfAnalysts": 20,
                 "avg": 1.25,
@@ -34,7 +41,14 @@ def _sample_raw() -> dict:
                 "high": 1.4,
                 "yearAgoEps": 1.0,
                 "growth": 0.25,
-            }
+            },
+            "+1y": {
+                "numberOfAnalysts": 22,
+                "avg": 5.5,
+                "low": 5.0,
+                "high": 6.0,
+                "growth": 0.18,
+            },
         },
         "revenue_estimate": {
             "+1q": {
@@ -46,6 +60,37 @@ def _sample_raw() -> dict:
                 "growth": 0.11,
             }
         },
+        "growth_estimates": {
+            "+1y": {
+                "stock": 0.22,
+                "industry": 0.14,
+                "sector": 0.16,
+                "index": 0.10,
+            }
+        },
+        "major_holders": pd.DataFrame(
+            {
+                "Value": ["0.08%", "68.50%"],
+            },
+            index=["% of Shares Held by All Insider", "% of Shares Held by Institutions"],
+        ),
+        "institutional_holders": pd.DataFrame(
+            [
+                {"Holder": "Vanguard", "Shares": 1000, "% Out": "8.5", "Value": 1_000_000},
+                {"Holder": "BlackRock", "Shares": 900, "% Out": "7.2", "Value": 900_000},
+            ]
+        ),
+        "insider_transactions": pd.DataFrame(
+            [
+                {
+                    "Insider": "Jane Doe",
+                    "Transaction": "Sale",
+                    "Shares": 10000,
+                    "Value": 250000,
+                }
+            ],
+            index=pd.to_datetime(["2026-04-01"]),
+        ),
         "eps_revisions": {
             "+1q": {
                 "upLast7days": 2,
@@ -105,6 +150,12 @@ def test_build_street_analysis_snapshot(mock_adapter_cls):
     assert "down" in snapshot.estimate_drift_headline
     assert len(snapshot.recent_rating_actions) == 2
     assert snapshot.recent_rating_actions[0].firm == "Goldman Sachs"
+    assert len(snapshot.eps_estimates) == 3
+    assert snapshot.growth_context_headline is not None
+    assert "22.0%" in snapshot.growth_context_headline
+    assert snapshot.ownership is not None
+    assert snapshot.ownership.institutions_pct_held == 68.5
+    assert len(snapshot.ownership.top_institutional) == 2
 
 
 @patch("app.builders.yfinance_analysis_builder.YFinanceAdapter")
@@ -118,6 +169,10 @@ def test_build_returns_none_when_empty(mock_adapter_cls):
         "eps_revisions": None,
         "eps_trend": None,
         "upgrades_downgrades": None,
+        "growth_estimates": None,
+        "institutional_holders": None,
+        "insider_transactions": None,
+        "major_holders": None,
     }
     adapter.get_ticker_info.return_value = {}
 

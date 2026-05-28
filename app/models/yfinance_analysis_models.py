@@ -36,6 +36,44 @@ class PeriodEstimate(BaseModel):
     growth_pct: float | None = Field(default=None, serialization_alias="growthPct")
 
 
+class InstitutionalHolder(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    holder: str
+    pct_held: float | None = Field(default=None, serialization_alias="pctHeld")
+    shares: float | None = None
+    value: float | None = None
+
+
+class InsiderTransactionRow(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    date: str
+    insider: str
+    transaction: str | None = None
+    shares: float | None = None
+    value: float | None = None
+
+
+class OwnershipSnapshot(BaseModel):
+    """Top holders and recent insider activity (Yahoo Finance holdings APIs)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    insiders_pct_held: float | None = Field(
+        default=None, serialization_alias="insidersPctHeld"
+    )
+    institutions_pct_held: float | None = Field(
+        default=None, serialization_alias="institutionsPctHeld"
+    )
+    top_institutional: list[InstitutionalHolder] = Field(
+        default_factory=list, serialization_alias="topInstitutional"
+    )
+    recent_insider_transactions: list[InsiderTransactionRow] = Field(
+        default_factory=list, serialization_alias="recentInsiderTransactions"
+    )
+
+
 class AnalystRatingAction(BaseModel):
     """Single analyst upgrade/downgrade from Yahoo Finance."""
 
@@ -64,6 +102,16 @@ class StreetAnalysisSnapshot(BaseModel):
     next_quarter_revenue: PeriodEstimate | None = Field(
         default=None, serialization_alias="nextQuarterRevenue"
     )
+    eps_estimates: list[PeriodEstimate] = Field(
+        default_factory=list, serialization_alias="epsEstimates"
+    )
+    revenue_estimates: list[PeriodEstimate] = Field(
+        default_factory=list, serialization_alias="revenueEstimates"
+    )
+    growth_context_headline: str | None = Field(
+        default=None, serialization_alias="growthContextHeadline"
+    )
+    ownership: OwnershipSnapshot | None = None
     estimate_revision_headline: str | None = Field(
         default=None, serialization_alias="estimateRevisionHeadline"
     )
