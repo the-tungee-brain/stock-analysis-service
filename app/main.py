@@ -44,6 +44,7 @@ from app.api.get_symbol_intelligence_route import (
 from app.api.get_option_chain_debug_route import router as get_option_chain_debug_router
 from app.api.internal_morning_brief_route import router as internal_morning_brief_router
 from app.api.portfolio_memory_routes import router as portfolio_memory_router
+from app.api.strategy_routes import router as strategy_router
 from app.api.strategy_playbook_ask_route import router as strategy_playbook_ask_router
 from app.api.get_account_plan_route import router as get_account_plan_router
 from app.api.delete_account_route import router as delete_account_router
