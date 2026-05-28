@@ -203,6 +203,31 @@ def test_buy_and_hold_uses_starting_cash_not_price_ratio():
     assert result.buy_and_hold_return_pct > 50.0
 
 
+def test_trade_log_includes_label_dte_and_cycle():
+    prices = [100.0] * 15 + [85.0] * 8 + [110.0] * 20
+    bars = [
+        PriceBar(trading_date=date(2020, 1, 2) + timedelta(days=i), close=p)
+        for i, p in enumerate(prices)
+    ]
+    result = run_wheel_backtest(
+        bars,
+        dividends={},
+        splits={},
+        config=WheelBacktestConfig(
+            symbol="TEST",
+            lookback_years=5,
+            target_delta=0.25,
+            dte_days=30,
+            vol_lookback_days=5,
+        ),
+    )
+    sell_csp = next(t for t in result.trades if t["action"] == "sell_csp")
+    assert sell_csp["label"] == "Sell cash-secured put"
+    assert sell_csp["dteDays"] == 30
+    assert sell_csp["wheelCycle"] == 1
+    assert sell_csp["premiumPerShare"] is not None
+
+
 def test_wheel_cycles_include_entry_and_exit():
     prices = [100.0] * 15 + [85.0] * 8 + [110.0] * 20
     bars = [

@@ -12,6 +12,7 @@ class WheelBacktestTrade(BaseModel):
 
     date: str
     action: str
+    label: str
     put_call: str | None = Field(default=None, alias="putCall")
     strike: float | None = None
     premium_usd: float = Field(default=0.0, alias="premiumUsd")
@@ -22,6 +23,12 @@ class WheelBacktestTrade(BaseModel):
         default=None, alias="effectiveEntryPrice"
     )
     effective_exit_price: float | None = Field(default=None, alias="effectiveExitPrice")
+    premium_per_share: float | None = Field(default=None, alias="premiumPerShare")
+    dte_days: int | None = Field(default=None, alias="dteDays")
+    expiration_date: str | None = Field(default=None, alias="expirationDate")
+    iv_percent: float | None = Field(default=None, alias="ivPercent")
+    wheel_cycle: int | None = Field(default=None, alias="wheelCycle")
+    cash_flow_usd: float | None = Field(default=None, alias="cashFlowUsd")
     note: str | None = None
 
 

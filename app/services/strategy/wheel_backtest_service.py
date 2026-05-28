@@ -33,7 +33,7 @@ class WheelBacktestService:
         lookback_years: int,
         target_delta_min: float = 0.20,
         target_delta_max: float = 0.30,
-        dte_days: int = 7,
+        dte_days: int = 30,
         contracts: int = 1,
     ) -> WheelBacktestResponse:
         symbol_upper = symbol.strip().upper()

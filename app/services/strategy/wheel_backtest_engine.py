@@ -13,6 +13,17 @@ from app.broker.option_greeks import (
 
 SHARES_PER_CONTRACT = 100
 ALLOWED_LOOKBACK_YEARS = frozenset({5, 10, 15})
+DEFAULT_WHEEL_BACKTEST_DTE_DAYS = 30
+
+TRADE_ACTION_LABELS: dict[str, str] = {
+    "sell_csp": "Sell cash-secured put",
+    "put_expired": "Put expired (OTM)",
+    "put_assigned": "Put assigned — buy stock",
+    "sell_cc": "Sell covered call",
+    "call_expired": "Call expired (OTM)",
+    "call_assigned": "Call assigned — shares called away",
+    "capital_top_up": "Capital top-up (CSP collateral)",
+}
 
 
 class WheelPhase(str, Enum):
@@ -70,6 +81,12 @@ class WheelTradeEvent:
     stock_price_usd: float | None = None
     effective_entry_price_usd: float | None = None
     effective_exit_price_usd: float | None = None
+    premium_per_share: float | None = None
+    dte_days: int | None = None
+    expiration_date: date | None = None
+    iv_percent: float | None = None
+    wheel_cycle: int | None = None
+    cash_flow_usd: float | None = None
     note: str | None = None
 
 
@@ -187,6 +204,7 @@ def run_wheel_backtest(
     open_leg: OpenOptionLeg | None = None
     completed_cycles = 0
     capital_top_ups = 0.0
+    wheel_cycle_id = 0
 
     total_premium = 0.0
     total_fees = 0.0
@@ -238,6 +256,12 @@ def run_wheel_backtest(
         stock_price_usd: float | None = None,
         effective_entry_price_usd: float | None = None,
         effective_exit_price_usd: float | None = None,
+        premium_per_share: float | None = None,
+        dte_days: int | None = None,
+        expiration_date: date | None = None,
+        iv_percent: float | None = None,
+        wheel_cycle: int | None = None,
+        cash_flow_usd: float | None = None,
         note: str | None = None,
     ) -> None:
         trades.append(
@@ -252,13 +276,19 @@ def run_wheel_backtest(
                 stock_price_usd=stock_price_usd,
                 effective_entry_price_usd=effective_entry_price_usd,
                 effective_exit_price_usd=effective_exit_price_usd,
+                premium_per_share=premium_per_share,
+                dte_days=dte_days,
+                expiration_date=expiration_date,
+                iv_percent=iv_percent,
+                wheel_cycle=wheel_cycle,
+                cash_flow_usd=cash_flow_usd,
                 note=note,
             )
         )
 
     def open_short_put(idx: int) -> None:
         nonlocal phase, cash, open_leg, total_premium, total_fees, skipped_cash, next_entry_idx
-        nonlocal capital_top_ups
+        nonlocal capital_top_ups, wheel_cycle_id
 
         bar = bars[idx]
         exp_idx = min(idx + config.dte_days, n - 1)
@@ -287,8 +317,18 @@ def run_wheel_backtest(
             if config.maintain_one_lot:
                 target_cash = collateral * 1.05
                 if cash < target_cash:
-                    capital_top_ups += target_cash - cash
+                    top_up = target_cash - cash
+                    capital_top_ups += top_up
                     cash = target_cash
+                    record(
+                        bar.trading_date,
+                        "capital_top_up",
+                        strike=strike,
+                        close_at_event=bar.close,
+                        stock_price_usd=round(bar.close, 4),
+                        cash_flow_usd=round(top_up, 2),
+                        note=f"Added cash to secure ${strike:.2f} put (1 lot)",
+                    )
             else:
                 skipped_cash += 1
                 next_entry_idx = idx + 1
@@ -322,6 +362,7 @@ def run_wheel_backtest(
             premium_per_share=premium_ps,
             iv_percent=iv,
         )
+        wheel_cycle_id += 1
         phase = WheelPhase.SHORT_PUT
         record(
             bar.trading_date,
@@ -332,7 +373,16 @@ def run_wheel_backtest(
             fees_usd=fees,
             close_at_event=bar.close,
             stock_price_usd=round(bar.close, 4),
-            note=f"DTE={dte}, IV={iv:.1f}%",
+            premium_per_share=round(premium_ps, 4),
+            dte_days=dte,
+            expiration_date=bars[exp_idx].trading_date,
+            iv_percent=round(iv, 2),
+            wheel_cycle=wheel_cycle_id,
+            cash_flow_usd=round(premium_total - fees, 2),
+            note=(
+                f"Sell put ${strike:.2f} · stock ${bar.close:.2f} · "
+                f"${premium_ps:.2f}/sh premium · {dte} DTE"
+            ),
         )
 
     def open_short_call(idx: int) -> None:
@@ -398,7 +448,16 @@ def run_wheel_backtest(
             fees_usd=fees,
             close_at_event=bar.close,
             stock_price_usd=round(bar.close, 4),
-            note=f"DTE={dte}, IV={iv:.1f}%",
+            premium_per_share=round(premium_ps, 4),
+            dte_days=dte,
+            expiration_date=bars[exp_idx].trading_date,
+            iv_percent=round(iv, 2),
+            wheel_cycle=wheel_cycle_id,
+            cash_flow_usd=round(premium_total - fees, 2),
+            note=(
+                f"Sell call ${strike:.2f} · stock ${bar.close:.2f} · "
+                f"${premium_ps:.2f}/sh premium · {dte} DTE"
+            ),
         )
 
     def settle_put(idx: int) -> None:
@@ -411,8 +470,9 @@ def run_wheel_backtest(
         bar = bars[idx]
         close = bar.close
 
+        assign_cost = leg.strike * shares_per_lot
         if close <= leg.strike:
-            cash -= leg.strike * shares_per_lot
+            cash -= assign_cost
             shares = shares_per_lot
             cost_basis_per_share = leg.strike - leg.premium_per_share
             put_assignments += 1
@@ -425,9 +485,12 @@ def run_wheel_backtest(
                 close_at_event=close,
                 stock_price_usd=round(close, 4),
                 effective_entry_price_usd=round(effective_entry, 4),
+                expiration_date=leg.expiration_date,
+                wheel_cycle=wheel_cycle_id,
+                cash_flow_usd=round(-assign_cost, 2),
                 note=(
-                    f"Assigned at strike ${leg.strike:.2f}; "
-                    f"effective ~${effective_entry:.2f}/sh after put premium"
+                    f"Bought 100 sh at ${leg.strike:.2f} · close ${close:.2f} · "
+                    f"effective ${effective_entry:.2f}/sh"
                 ),
             )
             phase = WheelPhase.LONG_STOCK
@@ -439,7 +502,11 @@ def run_wheel_backtest(
                 put_call="PUT",
                 strike=leg.strike,
                 close_at_event=close,
-                note=f"Close {close:.2f} > strike {leg.strike:.2f}",
+                stock_price_usd=round(close, 4),
+                expiration_date=leg.expiration_date,
+                wheel_cycle=wheel_cycle_id,
+                cash_flow_usd=0.0,
+                note=f"Keep premium · close ${close:.2f} > put ${leg.strike:.2f}",
             )
             phase = WheelPhase.CASH
 
@@ -456,8 +523,9 @@ def run_wheel_backtest(
         bar = bars[idx]
         close = bar.close
 
+        proceeds = leg.strike * shares_per_lot
         if close >= leg.strike:
-            cash += leg.strike * shares_per_lot
+            cash += proceeds
             shares = 0
             cost_basis_per_share = 0.0
             calls_assigned += 1
@@ -470,9 +538,11 @@ def run_wheel_backtest(
                 close_at_event=close,
                 stock_price_usd=round(close, 4),
                 effective_exit_price_usd=round(leg.strike, 4),
+                expiration_date=leg.expiration_date,
+                wheel_cycle=wheel_cycle_id,
+                cash_flow_usd=round(proceeds, 2),
                 note=(
-                    f"Called away at ${leg.strike:.2f}/sh; "
-                    f"stock closed ${close:.2f}"
+                    f"Sold 100 sh at ${leg.strike:.2f} · close ${close:.2f}"
                 ),
             )
             phase = WheelPhase.CASH
@@ -484,7 +554,11 @@ def run_wheel_backtest(
                 put_call="CALL",
                 strike=leg.strike,
                 close_at_event=close,
-                note=f"Close {close:.2f} < strike {leg.strike:.2f}",
+                stock_price_usd=round(close, 4),
+                expiration_date=leg.expiration_date,
+                wheel_cycle=wheel_cycle_id,
+                cash_flow_usd=0.0,
+                note=f"Keep premium · close ${close:.2f} < call ${leg.strike:.2f}",
             )
             phase = WheelPhase.LONG_STOCK
 
@@ -657,6 +731,7 @@ def _trade_to_dict(event: WheelTradeEvent) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "date": event.event_date.isoformat(),
         "action": event.action,
+        "label": TRADE_ACTION_LABELS.get(event.action, event.action),
         "putCall": event.put_call,
         "strike": event.strike,
         "premiumUsd": event.premium_usd,
@@ -670,6 +745,18 @@ def _trade_to_dict(event: WheelTradeEvent) -> dict[str, Any]:
         payload["effectiveEntryPrice"] = event.effective_entry_price_usd
     if event.effective_exit_price_usd is not None:
         payload["effectiveExitPrice"] = event.effective_exit_price_usd
+    if event.premium_per_share is not None:
+        payload["premiumPerShare"] = event.premium_per_share
+    if event.dte_days is not None:
+        payload["dteDays"] = event.dte_days
+    if event.expiration_date is not None:
+        payload["expirationDate"] = event.expiration_date.isoformat()
+    if event.iv_percent is not None:
+        payload["ivPercent"] = event.iv_percent
+    if event.wheel_cycle is not None:
+        payload["wheelCycle"] = event.wheel_cycle
+    if event.cash_flow_usd is not None:
+        payload["cashFlowUsd"] = event.cash_flow_usd
     return payload
 
 

@@ -21,7 +21,7 @@ async def get_wheel_backtest(
     years: int = Query(5, ge=5, le=15, description="5, 10, or 15"),
     target_delta_min: float = Query(0.20, ge=0.05, le=0.50, alias="targetDeltaMin"),
     target_delta_max: float = Query(0.30, ge=0.05, le=0.50, alias="targetDeltaMax"),
-    dte_days: int = Query(7, ge=1, le=60, alias="dteDays"),
+    dte_days: int = Query(30, ge=5, le=60, alias="dteDays"),
     contracts: int = Query(1, ge=1, le=20),
     service: WheelBacktestService = Depends(get_wheel_backtest_service),
 ) -> WheelBacktestResponse:
