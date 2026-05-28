@@ -70,10 +70,15 @@ def _cashflow_frame() -> pd.DataFrame:
     columns = pd.to_datetime(["2026-04-30", "2026-01-31"])
     return pd.DataFrame(
         {
-            columns[0]: [20_000_000_000, -2_000_000_000, 18_000_000_000],
-            columns[1]: [18_000_000_000, -1_500_000_000, 16_500_000_000],
+            columns[0]: [20_000_000_000, -2_000_000_000, 18_000_000_000, -7_000_000_000],
+            columns[1]: [18_000_000_000, -1_500_000_000, 16_500_000_000, -6_500_000_000],
         },
-        index=["OperatingCashFlow", "CapitalExpenditure", "FreeCashFlow"],
+        index=[
+            "OperatingCashFlow",
+            "CapitalExpenditure",
+            "FreeCashFlow",
+            "CommonStockDividendPaid",
+        ],
     )
 
 
@@ -91,6 +96,7 @@ def test_build_financials_package(mock_ticker_cls):
         "debtToEquity": 25.0,
         "currentRatio": 2.1,
         "returnOnEquity": 0.35,
+        "payoutRatio": 0.12,
     }
 
     builder = YFinanceFinancialsBuilder(yfinance_adapter=yfinance_adapter)
@@ -107,3 +113,9 @@ def test_build_financials_package(mock_ticker_cls):
     assert revenue.values["2026-04-30"] == 44_000_000_000
     assert package.strength.rating in {"strong", "solid", "mixed", "weak"}
     assert package.strength.score >= 0
+    assert any("Payout ratio" in item for item in package.strength.highlights)
+    assert any("covers dividends" in item for item in package.strength.highlights)
+    dividends = next(
+        row for row in package.quarterly.cash_flow if row.label == "Dividends paid"
+    )
+    assert dividends.values["2026-04-30"] == -7_000_000_000

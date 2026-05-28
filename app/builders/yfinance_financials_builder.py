@@ -43,6 +43,15 @@ CASHFLOW_LINE_CANDIDATES: list[tuple[str, tuple[str, ...]]] = [
     ("Operating cash flow", ("OperatingCashFlow", "CashFlowFromContinuingOperatingActivities")),
     ("Capital expenditure", ("CapitalExpenditure",)),
     ("Free cash flow", ("FreeCashFlow",)),
+    (
+        "Dividends paid",
+        (
+            "CommonStockDividendPaid",
+            "CashDividendsPaid",
+            "PaymentOfDividends",
+            "CommonStockDividendsPaid",
+        ),
+    ),
     ("Investing cash flow", ("InvestingCashFlow", "CashFlowFromContinuingInvestingActivities")),
     ("Financing cash flow", ("FinancingCashFlow", "CashFlowFromContinuingFinancingActivities")),
 ]
@@ -173,6 +182,7 @@ class YFinanceFinancialsBuilder:
         revenue = self._line_values(snapshot, "Total revenue") if snapshot else {}
         net_income = self._line_values(snapshot, "Net income") if snapshot else {}
         fcf = self._line_values(snapshot, "Free cash flow") if snapshot else {}
+        dividends = self._line_values(snapshot, "Dividends paid") if snapshot else {}
         periods = snapshot.periods if snapshot else []
 
         score = 50
@@ -228,6 +238,38 @@ class YFinanceFinancialsBuilder:
             if fcf_trend is not None and fcf_trend > 10:
                 score += 5
 
+        payout_ratio = info.get("payoutRatio")
+        if isinstance(payout_ratio, (int, float)):
+            payout_pct = payout_ratio * 100 if abs(payout_ratio) <= 1.5 else payout_ratio
+            highlights.append(f"Payout ratio about {payout_pct:.0f}%.")
+            if payout_pct <= 60:
+                score += 4
+                strengths.append("Dividend payout ratio looks conservative versus earnings.")
+            elif payout_pct <= 80:
+                score += 1
+            elif payout_pct > 100:
+                score -= 6
+                risks.append("Payout ratio above 100% — dividend may depend on balance sheet or non-earnings cash.")
+
+        latest_dividends = dividends.get(latest_period) if latest_period else None
+        if latest_fcf is not None and latest_fcf > 0 and latest_dividends is not None:
+            dividends_paid = abs(latest_dividends)
+            if dividends_paid > 0:
+                coverage = latest_fcf / dividends_paid
+                fcf_payout_pct = (dividends_paid / latest_fcf) * 100
+                highlights.append(
+                    f"Free cash flow covers dividends about {coverage:.1f}x "
+                    f"({fcf_payout_pct:.0f}% of FCF paid out)."
+                )
+                if coverage >= 1.5:
+                    score += 6
+                    strengths.append("Free cash flow comfortably covers dividend payments.")
+                elif coverage >= 1.0:
+                    score += 2
+                else:
+                    score -= 8
+                    risks.append("Dividends exceed free cash flow — watch payout sustainability.")
+
         debt_equity = info.get("debtToEquity")
         if isinstance(debt_equity, (int, float)):
             highlights.append(f"Debt-to-equity (market data) about {debt_equity:.2f}.")
@@ -274,7 +316,7 @@ class YFinanceFinancialsBuilder:
             headline=headline,
             strengths=strengths[:4],
             risks=risks[:4],
-            highlights=highlights[:5],
+            highlights=highlights[:7],
         )
 
     @staticmethod

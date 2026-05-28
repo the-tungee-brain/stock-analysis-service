@@ -88,6 +88,16 @@ class FundamentalsBuilder:
             "Annual dividend as a share of the stock price. Relevant for income-focused investors.",
         )
         add(
+            "Annual dividend per share",
+            self._fmt_dollar(info.get("dividendRate")),
+            "Trailing annual dividend per share before reinvestment.",
+        )
+        add(
+            "Payout ratio",
+            self._fmt_payout_ratio(info.get("payoutRatio")),
+            "Share of earnings paid out as dividends. Lower ratios leave more room for reinvestment or downturns.",
+        )
+        add(
             "Beta",
             self._fmt_ratio(info.get("beta")),
             "Sensitivity to market moves. Beta above 1.0 means the stock tends to move more than the overall market.",
@@ -113,6 +123,13 @@ class FundamentalsBuilder:
             "dividend_yield": self._fmt_dividend_yield(info.get("dividendYield")),
             "expense_ratio": self._fmt_expense_ratio(info),
         }
+
+    @staticmethod
+    def _fmt_payout_ratio(value: float | None) -> str | None:
+        if value is None or not isinstance(value, (int, float)):
+            return None
+        pct = value * 100 if abs(value) <= 1.5 else value
+        return f"{pct:.1f}%"
 
     @staticmethod
     def _fmt_dividend_yield(value: float | None) -> str | None:
