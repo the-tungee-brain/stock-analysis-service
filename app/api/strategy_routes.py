@@ -298,7 +298,7 @@ async def get_strategy_recommendations(
 async def get_strategy_stock_screener(
     strategy: InvestmentStrategy,
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=30, ge=1, le=50, alias="pageSize"),
+    page_size: int = Query(default=10, ge=1, le=50, alias="pageSize"),
     preset_id: str | None = Query(default=None, alias="presetId"),
     min_market_cap: int | None = Query(default=None, alias="minMarketCap", ge=0),
     max_pe: float | None = Query(default=None, alias="maxPe", gt=0),
