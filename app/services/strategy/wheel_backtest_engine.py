@@ -758,6 +758,8 @@ def run_wheel_backtest(
         [
         "Premiums estimated with Black-Scholes using rolling realized volatility "
         f"({config.vol_lookback_days} trading-day window), not historical option quotes.",
+        "Strikes on standard US grids: $2.50 spacing below $200 spot, $5 at/above $200 "
+        "(e.g. 100, 102.5, 105 or 500, 505, 510).",
         f"Short options opened at {config.premium_haircut * 100:.0f}% of theoretical "
         "(conservative vs mid/bid).",
         "European-style expiration: puts assign if close <= strike; calls assign if close >= strike.",

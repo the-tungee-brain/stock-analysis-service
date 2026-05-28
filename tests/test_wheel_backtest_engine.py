@@ -6,10 +6,13 @@ from app.broker.option_greeks import (
     black_scholes_option_price,
     estimate_delta_black_scholes,
     find_strike_for_abs_delta,
+    snap_strike_to_standard_grid,
+    standard_strike_increment,
 )
 from app.services.strategy.wheel_backtest_engine import (
     PriceBar,
     WheelBacktestConfig,
+    _premium_per_share,
     realized_volatility_percent,
     run_wheel_backtest,
 )
@@ -52,6 +55,9 @@ def test_find_strike_targets_put_delta():
         iv_percent=25.0,
     )
     assert strike is not None
+    assert strike < 100.0
+    step = standard_strike_increment(100.0)
+    assert abs(strike % step) < 0.01
     delta = estimate_delta_black_scholes(
         underlying=100.0,
         strike=strike,
@@ -61,6 +67,86 @@ def test_find_strike_targets_put_delta():
     )
     assert delta is not None
     assert abs(abs(delta) - 0.25) < 0.05
+
+
+def test_standard_strike_grid_spacing():
+    assert standard_strike_increment(100.0) == 2.5
+    assert standard_strike_increment(199.0) == 2.5
+    assert standard_strike_increment(200.0) == 5.0
+    assert standard_strike_increment(500.0) == 5.0
+    assert snap_strike_to_standard_grid(171.08, 100.0) == 170.0
+    assert snap_strike_to_standard_grid(503.2, 500.0) == 505.0
+
+
+def test_find_strike_on_five_dollar_grid_for_high_price():
+    strike = find_strike_for_abs_delta(
+        underlying=500.0,
+        days_to_expiration=30,
+        put_call="PUT",
+        target_abs_delta=0.25,
+        iv_percent=22.0,
+    )
+    assert strike is not None
+    assert strike < 500.0
+    assert strike % 5.0 == 0.0
+
+
+def test_premium_matches_black_scholes_with_haircut():
+    iv = 25.0
+    strike = 95.0
+    dte = 30
+    theoretical = black_scholes_option_price(
+        underlying=100.0,
+        strike=strike,
+        days_to_expiration=dte,
+        put_call="PUT",
+        iv_percent=iv,
+        risk_free_rate=0.04,
+    )
+    assert theoretical is not None
+    modeled = _premium_per_share(
+        underlying=100.0,
+        strike=strike,
+        days=dte,
+        put_call="PUT",
+        iv_percent=iv,
+        risk_free_rate=0.04,
+        haircut=0.95,
+    )
+    assert modeled == pytest.approx(theoretical * 0.95, rel=1e-6)
+
+
+def test_assignment_and_call_cash_flows():
+    """Settlement: put assign debits strike×100; call assign credits strike×100."""
+    prices: list[float] = [100.0] * 15 + [85.0] * 8 + [110.0] * 20
+    bars = [
+        PriceBar(trading_date=date(2020, 1, 2) + timedelta(days=i), close=p)
+        for i, p in enumerate(prices)
+    ]
+    result = run_wheel_backtest(
+        bars,
+        dividends={},
+        splits={},
+        config=WheelBacktestConfig(
+            symbol="TEST",
+            lookback_years=5,
+            target_delta=0.25,
+            dte_days=5,
+            vol_lookback_days=5,
+            maintain_one_lot=False,
+        ),
+    )
+    put_assign = next(t for t in result.trades if t["action"] == "put_assigned")
+    call_assign = next(t for t in result.trades if t["action"] == "call_assigned")
+    assert put_assign["cashFlowUsd"] == pytest.approx(-put_assign["strike"] * 100, rel=0.01)
+    assert call_assign["cashFlowUsd"] == pytest.approx(call_assign["strike"] * 100, rel=0.01)
+    assert put_assign["strike"] % 2.5 == 0.0
+    assert call_assign["strike"] % 2.5 == 0.0
+    completed = [c for c in result.wheel_cycles if c.get("completed")][0]
+    assert completed["stockRoundTripPlUsd"] == pytest.approx(
+        (call_assign["strike"] - completed["effectiveEntryPrice"]) * 100,
+        rel=0.01,
+    )
 
 
 def test_put_assigns_when_close_below_strike():

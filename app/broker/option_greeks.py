@@ -108,20 +108,52 @@ def estimate_delta_black_scholes(
     return call_delta
 
 
-def find_strike_for_abs_delta(
+def standard_strike_increment(underlying: float) -> float:
+    """
+    US equity/ETF standard strike spacing (approximate OCC listing intervals).
+    Under $200: $2.50 steps (e.g. 100, 102.5, 105). $200+: $5 steps (e.g. 500, 505, 510).
+    """
+    if underlying <= 0:
+        return 2.5
+    if underlying < 200.0:
+        return 2.5
+    return 5.0
+
+
+def snap_strike_to_standard_grid(strike: float, underlying: float) -> float:
+    step = standard_strike_increment(underlying)
+    return round(round(strike / step) * step, 2)
+
+
+def standard_strikes_near_spot(
+    underlying: float,
+    *,
+    width_fraction: float = 0.45,
+) -> list[float]:
+    """Listed strikes from (1-width)*spot to (1+width)*spot on the standard grid."""
+    if underlying <= 0:
+        return []
+
+    step = standard_strike_increment(underlying)
+    lo = snap_strike_to_standard_grid(underlying * (1.0 - width_fraction), underlying)
+    hi = snap_strike_to_standard_grid(underlying * (1.0 + width_fraction), underlying)
+    strikes: list[float] = []
+    strike = lo
+    while strike <= hi + step * 0.01:
+        strikes.append(strike)
+        strike = round(strike + step, 2)
+    return strikes
+
+
+def _continuous_strike_for_abs_delta(
     *,
     underlying: float,
     days_to_expiration: int,
     put_call: str,
     target_abs_delta: float,
     iv_percent: float,
-    risk_free_rate: float = 0.045,
-    tolerance: float = 0.01,
+    risk_free_rate: float,
 ) -> float | None:
-    """Strike for OTM short option targeting |delta| (e.g. 0.25 for wheel puts)."""
-    if underlying <= 0 or days_to_expiration <= 0 or target_abs_delta <= 0:
-        return None
-
     target = -target_abs_delta if put_call.upper() == "PUT" else target_abs_delta
     lo = underlying * 0.55
     hi = underlying * 1.45
@@ -156,9 +188,63 @@ def find_strike_for_abs_delta(
         else:
             lo = mid
 
-    if best_strike is None:
+    return best_strike
+
+
+def _nearest_listed_strike(
+    continuous: float,
+    underlying: float,
+    *,
+    is_put: bool,
+) -> float | None:
+    """Map continuous delta target to closest standard strike (puts stay below spot)."""
+    step = standard_strike_increment(underlying)
+    center = snap_strike_to_standard_grid(continuous, underlying)
+    candidates: list[float] = []
+    for offset in range(-4, 5):
+        strike = round(center + offset * step, 2)
+        if strike <= 0:
+            continue
+        if is_put and strike >= underlying:
+            continue
+        candidates.append(strike)
+
+    if not candidates:
+        if is_put:
+            strike = round(snap_strike_to_standard_grid(underlying - step, underlying), 2)
+            return strike if 0 < strike < underlying else None
         return None
-    return round(best_strike, 2)
+
+    return min(candidates, key=lambda strike: abs(strike - continuous))
+
+
+def find_strike_for_abs_delta(
+    *,
+    underlying: float,
+    days_to_expiration: int,
+    put_call: str,
+    target_abs_delta: float,
+    iv_percent: float,
+    risk_free_rate: float = 0.045,
+    tolerance: float = 0.01,
+) -> float | None:
+    """Target |delta| on the standard $2.50 / $5 grid (snap after continuous solve)."""
+    if underlying <= 0 or days_to_expiration <= 0 or target_abs_delta <= 0:
+        return None
+
+    continuous = _continuous_strike_for_abs_delta(
+        underlying=underlying,
+        days_to_expiration=days_to_expiration,
+        put_call=put_call,
+        target_abs_delta=target_abs_delta,
+        iv_percent=iv_percent,
+        risk_free_rate=risk_free_rate,
+    )
+    if continuous is None:
+        return None
+
+    is_put = put_call.upper() == "PUT"
+    return _nearest_listed_strike(continuous, underlying, is_put=is_put)
 
 
 @dataclass(frozen=True)
