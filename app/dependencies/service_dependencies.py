@@ -32,6 +32,7 @@ from app.services.strategy.strategy_stock_screener_service import (
 from app.services.strategy.strategy_stock_suggestion_service import (
     StrategyStockSuggestionService,
 )
+from app.services.strategy.wheel_backtest_service import WheelBacktestService
 from app.services.account_deletion_service import AccountDeletionService
 
 
@@ -151,3 +152,7 @@ def get_strategy_stock_screener_service(
 
 def get_account_deletion_service(request: Request) -> AccountDeletionService:
     return request.app.state.account_deletion_service
+
+
+def get_wheel_backtest_service(request: Request) -> WheelBacktestService:
+    return request.app.state.wheel_backtest_service

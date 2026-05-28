@@ -99,6 +99,7 @@ from app.services.strategy.strategy_stock_screener_service import (
 from app.services.strategy.strategy_stock_suggestion_service import (
     StrategyStockSuggestionService,
 )
+from app.services.strategy.wheel_backtest_service import WheelBacktestService
 
 
 def get_redis_client() -> redis.Redis:
@@ -367,6 +368,7 @@ async def lifespan(app: FastAPI):
         llm_service=llm_service,
     )
     strategy_stock_screener_service = StrategyStockScreenerService()
+    wheel_backtest_service = WheelBacktestService(yfinance_adapter=yfinance_adapter)
 
     app.state.http_session = session
     app.state.redis_client = redis_client
@@ -401,6 +403,7 @@ async def lifespan(app: FastAPI):
     app.state.strategy_journey_service = strategy_journey_service
     app.state.strategy_stock_suggestion_service = strategy_stock_suggestion_service
     app.state.strategy_stock_screener_service = strategy_stock_screener_service
+    app.state.wheel_backtest_service = wheel_backtest_service
 
     try:
         yield

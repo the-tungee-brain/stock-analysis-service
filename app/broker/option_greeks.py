@@ -48,6 +48,38 @@ def _norm_cdf(value: float) -> float:
     return 0.5 * (1.0 + math.erf(value / math.sqrt(2.0)))
 
 
+def black_scholes_option_price(
+    *,
+    underlying: float,
+    strike: float,
+    days_to_expiration: int,
+    put_call: str,
+    iv_percent: float | None,
+    risk_free_rate: float = 0.045,
+) -> float | None:
+    """European Black-Scholes option price per share (no dividends in model)."""
+    iv = normalize_iv_percent(iv_percent)
+    if iv is None or underlying <= 0 or strike <= 0 or days_to_expiration <= 0:
+        return None
+
+    time_years = days_to_expiration / 365.0
+    sigma = iv / 100.0
+    if sigma <= 0 or time_years <= 0:
+        return None
+
+    sqrt_t = math.sqrt(time_years)
+    d1 = (
+        math.log(underlying / strike)
+        + (risk_free_rate + 0.5 * sigma**2) * time_years
+    ) / (sigma * sqrt_t)
+    d2 = d1 - sigma * sqrt_t
+
+    discount = math.exp(-risk_free_rate * time_years)
+    if put_call.upper() == "CALL":
+        return underlying * _norm_cdf(d1) - strike * discount * _norm_cdf(d2)
+    return strike * discount * _norm_cdf(-d2) - underlying * _norm_cdf(-d1)
+
+
 def estimate_delta_black_scholes(
     *,
     underlying: float,
@@ -74,6 +106,59 @@ def estimate_delta_black_scholes(
     if put_call.upper() == "PUT":
         return call_delta - 1.0
     return call_delta
+
+
+def find_strike_for_abs_delta(
+    *,
+    underlying: float,
+    days_to_expiration: int,
+    put_call: str,
+    target_abs_delta: float,
+    iv_percent: float,
+    risk_free_rate: float = 0.045,
+    tolerance: float = 0.01,
+) -> float | None:
+    """Strike for OTM short option targeting |delta| (e.g. 0.25 for wheel puts)."""
+    if underlying <= 0 or days_to_expiration <= 0 or target_abs_delta <= 0:
+        return None
+
+    target = -target_abs_delta if put_call.upper() == "PUT" else target_abs_delta
+    lo = underlying * 0.55
+    hi = underlying * 1.45
+    best_strike = None
+    best_gap = float("inf")
+
+    for _ in range(64):
+        mid = (lo + hi) / 2.0
+        delta = estimate_delta_black_scholes(
+            underlying=underlying,
+            strike=mid,
+            days_to_expiration=days_to_expiration,
+            put_call=put_call,
+            iv_percent=iv_percent,
+            risk_free_rate=risk_free_rate,
+        )
+        if delta is None:
+            break
+
+        gap = abs(delta - target)
+        if gap < best_gap:
+            best_gap = gap
+            best_strike = mid
+
+        if put_call.upper() == "PUT":
+            if delta < target:
+                hi = mid
+            else:
+                lo = mid
+        elif delta > target:
+            hi = mid
+        else:
+            lo = mid
+
+    if best_strike is None:
+        return None
+    return round(best_strike, 2)
 
 
 @dataclass(frozen=True)

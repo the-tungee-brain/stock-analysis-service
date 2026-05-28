@@ -80,9 +80,16 @@ class YFinanceAdapter:
         self._set_cached(self._info_cache, symbol_upper, info)
         return info
 
-    def get_history(self, symbol: str, *, period: str, interval: str) -> pd.DataFrame:
+    def get_history(
+        self,
+        symbol: str,
+        *,
+        period: str,
+        interval: str,
+        auto_adjust: bool = True,
+    ) -> pd.DataFrame:
         symbol_upper = symbol.strip().upper()
-        cache_key = f"{symbol_upper}|{period}|{interval}"
+        cache_key = f"{symbol_upper}|{period}|{interval}|adj={int(auto_adjust)}"
         cached = self._get_cached(
             self._history_cache,
             cache_key,
@@ -93,9 +100,36 @@ class YFinanceAdapter:
 
         ticker = self._ticker(symbol_upper)
         with yfinance_fetch_lock():
-            hist = ticker.history(period=period, interval=interval)
+            hist = ticker.history(
+                period=period,
+                interval=interval,
+                auto_adjust=auto_adjust,
+            )
         self._set_cached(self._history_cache, cache_key, hist)
         return hist.copy()
+
+    def get_dividends_and_splits(
+        self, symbol: str
+    ) -> tuple[dict[date, float], dict[date, float]]:
+        symbol_upper = symbol.strip().upper()
+        ticker = self._ticker(symbol_upper)
+        with yfinance_fetch_lock():
+            dividends = ticker.dividends
+            splits = ticker.splits
+
+        dividend_map: dict[date, float] = {}
+        if dividends is not None and not dividends.empty:
+            for ts, value in dividends.items():
+                day = ts.date() if hasattr(ts, "date") else pd.Timestamp(ts).date()
+                dividend_map[day] = float(value)
+
+        split_map: dict[date, float] = {}
+        if splits is not None and not splits.empty:
+            for ts, value in splits.items():
+                day = ts.date() if hasattr(ts, "date") else pd.Timestamp(ts).date()
+                split_map[day] = float(value)
+
+        return dividend_map, split_map
 
     def get_52w_range(self, symbol: str) -> tuple[float, float]:
         hist = self.get_history(symbol, period="1y", interval="1d")
