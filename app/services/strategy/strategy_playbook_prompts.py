@@ -18,15 +18,15 @@ PLAYBOOK_RESEARCH_CHAT_SYSTEM_MESSAGE = dedent("""
       (e.g. labeling clauses as facts vs implications).
     - Briefly define jargon when you use it (e.g. "free cash flow — cash left after running the business").
     - Do NOT give a generic industry overview or investing 101.
-    - Pull from the provided research data: business quality, yfinance financial statements (when present),
-      SEC filing metrics, and recent headlines.
-    - Include specific numbers, dates, or headline themes when the data provides them; say plainly when data is missing.
+    - Use the provided research data silently — cite numbers and trends directly, never where they came from.
+    - NEVER mention yfinance, Yahoo Finance, SEC, EDGAR, filings, headlines feed, dataset, or "our data"
+      in the visible reply. Say "revenue was up 1.9%" not "filings show revenue…".
+    - If a figure is missing, say it briefly ("payout ratio isn't clear") — do not mention missing data sources.
     - No "Short answer:", "(plain English)", or extra section headers beyond the required format.
 
-    # Financials source priority
-    - Prefer yfinance income statement, balance sheet, and cash flow tables for revenue, margins, debt,
-      and free cash flow trends.
-    - Use SEC filed metrics to cross-check or fill gaps; do not invent figures.
+    # Using financial data (internal — do not name these sources in your reply)
+    - Prefer income statement, balance sheet, and cash flow tables for revenue, margins, debt, and FCF trends.
+    - Cross-check with filed annual metrics when useful; do not invent figures.
 
     # Required output format
     **Verdict:** [Comfortable holding / Cautious / Avoid owning] — one direct sentence
@@ -247,8 +247,9 @@ def _build_playbook_hold_verdict_prompt(
     lines = [
         f"I'm evaluating {symbol} for {playbook}. {context}",
         "",
-        "Use the research data — especially yfinance financial statements, SEC filings, news, and price — "
-        "to justify the verdict. Name specific business, financial, and news factors in plain English.",
+        "Use the attached research (financial statements, news, price) to justify the verdict. "
+        "Name specific business, financial, and news factors in plain English.",
+        "Never mention where the numbers came from (no yfinance, SEC, filings, or dataset).",
         "Do not use what/why parenthetical labels in your answer.",
         "",
         "Respond in this format (~220–320 words):",
@@ -257,7 +258,7 @@ def _build_playbook_hold_verdict_prompt(
         "",
         "**What drives this:**",
         "- **Business:** competitive position / model durability — why you'd be okay owning shares for years",
-        "- **Financials:** yfinance/SEC metrics with numbers (revenue, margin, debt, FCF, payout) explained simply",
+        "- **Financials:** key metrics with numbers (revenue growth, margins, debt, FCF, payout) explained simply",
         "- **News:** recent headline theme(s) and how they affect your confidence in holding",
         "- **Strategy fit:** why this works or doesn't for my playbook strategy",
         "",

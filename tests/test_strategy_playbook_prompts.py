@@ -3,6 +3,7 @@ from app.services.strategy.strategy_playbook_prompts import (
     build_playbook_ask_prompt,
     playbook_ask_display_message,
     playbook_ask_prefers_research_chat,
+    playbook_research_system_message,
 )
 
 
@@ -40,11 +41,18 @@ def test_build_playbook_ask_prompt_is_concise_hold_verdict():
     assert "**Financials:**" in prompt
     assert "**News:**" in prompt
     assert "220" in prompt or "320" in prompt
-    assert "yfinance" in prompt.lower()
     assert "what/why parenthetical" in prompt.lower()
+    assert "never mention where the numbers came from" in prompt.lower()
+    assert "yfinance/SEC metrics" not in prompt
     assert "Business model" not in prompt
     assert "Put zone" in prompt
     assert "Confirm ownership comfort" not in prompt
+
+
+def test_playbook_research_system_message_forbids_naming_sources():
+    message = playbook_research_system_message()
+    assert "NEVER mention yfinance" in message
+    assert "never where they came from" in message.lower()
 
 
 def test_playbook_ask_display_message_is_user_facing_not_secret():
