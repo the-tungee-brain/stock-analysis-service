@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-WORKERS="${GUNICORN_WORKERS:-1}"
+WORKERS="${GUNICORN_WORKERS:-2}"
 TIMEOUT="${GUNICORN_TIMEOUT:-120}"
 
 exec gunicorn app.main:app \

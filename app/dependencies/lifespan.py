@@ -390,6 +390,9 @@ async def lifespan(app: FastAPI):
     app.state.schwab_redis_token_manager = schwab_redis_token_manager
     app.state.schwab_auth_service = schwab_auth_service
     app.state.user_service = user_service
+    from app.core import paid_access
+
+    paid_access.bind_user_service(user_service)
     app.state.account_deletion_service = account_deletion_service
     app.state.portfolio_analysis_service = portfolio_analysis_service
     app.state.chat_service = chat_service

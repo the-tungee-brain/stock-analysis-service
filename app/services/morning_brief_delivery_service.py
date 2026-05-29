@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 from app.adapters.email.email_adapter import EmailAdapter
@@ -118,6 +119,53 @@ class MorningBriefDeliveryService:
             current_alerts=portfolio_brief.alerts,
         )
 
+    def _dispatch_one_user(self, user, *, force: bool) -> str:
+        """Returns sent | skipped | failed."""
+        user_key = user.identity_sub
+
+        if not force and self.delivery_adapter.was_delivered_today(user_key):
+            return "skipped"
+
+        try:
+            brief = self.build_for_user(user_id=user_key, persist=True)
+            if brief is None:
+                return "skipped"
+
+            subject, text_body, html_body = self._render_email(
+                recipient_name=user.full_name,
+                brief=brief,
+            )
+            self.email_adapter.send_email(
+                to_email=str(user.email),
+                subject=subject,
+                html=html_body,
+                text=text_body,
+            )
+            self.delivery_adapter.record_delivery(
+                user_id=user_key,
+                email=str(user.email),
+                status="sent",
+            )
+            return "sent"
+        except SchwabReauthRequired:
+            return "skipped"
+        except Exception as exc:
+            message = f"{user.email}: {exc}"
+            logger.exception("Morning brief delivery failed for user %s", user_key)
+            try:
+                self.delivery_adapter.record_delivery(
+                    user_id=user_key,
+                    email=str(user.email),
+                    status="failed",
+                    error_message=str(exc)[:2000],
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to record morning brief delivery failure for %s",
+                    user.id,
+                )
+            raise RuntimeError(message) from exc
+
     def dispatch_all(self, *, force: bool = False) -> MorningBriefDispatchResult:
         result = MorningBriefDispatchResult()
 
@@ -126,55 +174,30 @@ class MorningBriefDeliveryService:
             return result
 
         users = self.app_user_adapter.list_users_with_schwab()
-        for user in users:
-            result.attempted += 1
-            user_key = user.identity_sub
+        if not users:
+            return result
 
-            if not force and self.delivery_adapter.was_delivered_today(user_key):
-                result.skipped += 1
-                continue
+        max_workers = max(
+            1,
+            int(os.getenv("MORNING_BRIEF_DISPATCH_WORKERS", "20")),
+        )
 
-            try:
-                brief = self.build_for_user(user_id=user_key, persist=True)
-                if brief is None:
-                    result.skipped += 1
-                    continue
-
-                subject, text_body, html_body = self._render_email(
-                    recipient_name=user.full_name,
-                    brief=brief,
-                )
-                self.email_adapter.send_email(
-                    to_email=str(user.email),
-                    subject=subject,
-                    html=html_body,
-                    text=text_body,
-                )
-                self.delivery_adapter.record_delivery(
-                    user_id=user_key,
-                    email=str(user.email),
-                    status="sent",
-                )
-                result.sent += 1
-            except SchwabReauthRequired:
-                result.skipped += 1
-            except Exception as exc:
-                result.failed += 1
-                message = f"{user.email}: {exc}"
-                result.errors.append(message)
-                logger.exception("Morning brief delivery failed for user %s", user_key)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self._dispatch_one_user, user, force=force): user
+                for user in users
+            }
+            for future in as_completed(futures):
+                result.attempted += 1
                 try:
-                    self.delivery_adapter.record_delivery(
-                        user_id=user_key,
-                        email=str(user.email),
-                        status="failed",
-                        error_message=str(exc)[:2000],
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to record morning brief delivery failure for %s",
-                        user.id,
-                    )
+                    outcome = future.result()
+                    if outcome == "sent":
+                        result.sent += 1
+                    else:
+                        result.skipped += 1
+                except Exception as exc:
+                    result.failed += 1
+                    result.errors.append(str(exc))
 
         return result
 

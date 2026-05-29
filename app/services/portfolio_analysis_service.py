@@ -876,6 +876,24 @@ class PortfolioAnalysisService:
         )
         return brief
 
+    def try_get_light_cached_portfolio_brief(
+        self,
+        *,
+        user_id: str,
+        account: SchwabAccounts,
+        positions: List[Position],
+    ) -> PortfolioIntelligence | None:
+        from app.adapters.cache.portfolio_brief_cache import PortfolioBriefCache
+
+        fingerprint = self._portfolio_brief_fingerprint(positions, account)
+        if not fingerprint:
+            return None
+        return self._get_cached_portfolio_brief(
+            user_id=user_id,
+            fingerprint=fingerprint,
+            variant=PortfolioBriefCache.VARIANT_LIGHT,
+        )
+
     def build_portfolio_brief_for_positions_load(
         self,
         *,

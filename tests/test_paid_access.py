@@ -24,9 +24,6 @@ def test_paid_by_email_allowlist(monkeypatch):
     user.email = "dev@example.com"
     user_service = MagicMock()
     user_service.get_user_by_identity_sub.return_value = user
-    monkeypatch.setattr(
-        "app.dependencies.service_dependencies.get_user_service",
-        lambda: user_service,
-    )
+    paid_access.bind_user_service(user_service)
 
     assert paid_access.is_paid_user("google-sub-xyz") is True
