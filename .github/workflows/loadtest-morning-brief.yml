@@ -1,0 +1,71 @@
+name: Load test — morning brief
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_dispatch:
+        description: "Also run dispatch (SENDS EMAIL — staging only)"
+        required: false
+        default: false
+        type: boolean
+      prewarm_max_seconds:
+        description: "Prewarm timeout / p95 threshold (seconds)"
+        required: false
+        default: "600"
+        type: string
+
+jobs:
+  prewarm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 \
+            --recv-keys C5AD17C747E3415A4302CE9E3DC8C3609B6C2B2
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | \
+            sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Pre-warm load test
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          PREWARM_MAX_SECONDS: ${{ inputs.prewarm_max_seconds }}
+        run: |
+          set -euo pipefail
+          if [ -z "${API_BASE_URL}" ] || [ -z "${CRON_SECRET}" ]; then
+            echo "Missing API_BASE_URL or CRON_SECRET repository secrets."
+            exit 1
+          fi
+          k6 run loadtests/morning_brief_prewarm.js
+
+  dispatch:
+    runs-on: ubuntu-latest
+    needs: prewarm
+    if: inputs.include_dispatch == true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 \
+            --recv-keys C5AD17C747E3415A4302CE9E3DC8C3609B6C2B2
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | \
+            sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Dispatch load test (sends email)
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ALLOW_DISPATCH: "true"
+          DISPATCH_MAX_SECONDS: "300"
+        run: |
+          set -euo pipefail
+          k6 run loadtests/morning_brief_dispatch.js

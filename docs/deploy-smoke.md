@@ -30,6 +30,13 @@ curl -sS -X POST "$API_BASE/api/v1/internal/prewarm-morning-briefs" \
 3. API logs: `research overview bundle` with `latency_ms` under a few seconds without `include_summary=true` unless explicitly refreshing AI summary.
 4. Repeat overview load within 2 minutes: second request may return **304** (`research overview bundle … not_modified` in logs) when the client sends `If-None-Match`.
 
+## Load test (optional, staging)
+
+Automated prewarm timing: [loadtests/README.md](../loadtests/README.md).
+
+- Local: `k6 run loadtests/morning_brief_prewarm.js` with `API_BASE_URL` + `CRON_SECRET`
+- CI: **Actions → Load test — morning brief** (prewarm only; dispatch opt-in sends email)
+
 ## Regression
 
 ```bash
