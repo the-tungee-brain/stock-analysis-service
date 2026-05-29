@@ -1,0 +1,37 @@
+# Post-deploy smoke checks
+
+Run after deploying **stock-analysis** (and the matching **my-pocket** build when UI changed).
+
+## Morning brief pipeline
+
+1. Confirm `CRON_SECRET` is set on the API and in GitHub Actions secrets.
+2. Trigger or wait for **Morning brief prewarm** (`morning-brief-prewarm.yml` ~13:08 UTC).
+3. Check API logs for `morning brief prewarm finished` with non-zero `warmed` when users have Schwab linked.
+4. Confirm **Morning brief dispatch** (`morning-brief.yml`) runs after prewarm (`needs: prewarm`).
+5. Dispatch logs should show `attempted` / `sent` without spikes in `failed`.
+
+Manual prewarm (production):
+
+```bash
+curl -sS -X POST "$API_BASE/api/v1/internal/prewarm-morning-briefs" \
+  -H "X-Cron-Secret: $CRON_SECRET"
+```
+
+## Portfolio positions fast path
+
+1. Sign in and open **Portfolio** (or any view that loads positions).
+2. First load may return `dataFreshness.briefStatus=pending`; brief should populate on refresh or within background warm.
+3. API logs should include `positions load` with `brief_status=cached` or `ready` on subsequent loads.
+
+## Research overview bundle
+
+1. Open `/research/{SYMBOL}/overview` for a stock (e.g. `AAPL`) and an ETF (e.g. `SPY`).
+2. Network tab: one `GET /api/v1/research/overview-bundle?symbol=...` (no duplicate snapshot/performance/intelligence calls on overview).
+3. API logs: `research overview bundle` with `latency_ms` under a few seconds without `include_summary=true` unless explicitly refreshing AI summary.
+
+## Regression
+
+```bash
+cd stock-analysis && pytest -q
+cd ../my-pocket && npm run build
+```

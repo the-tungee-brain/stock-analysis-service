@@ -257,6 +257,13 @@ class MorningBriefDeliveryService:
                     result.failed += 1
                     result.errors.append(str(exc))
 
+        logger.info(
+            "morning brief prewarm finished attempted=%s warmed=%s skipped=%s failed=%s",
+            result.attempted,
+            result.warmed,
+            result.skipped,
+            result.failed,
+        )
         return result
 
     def _render_email(

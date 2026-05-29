@@ -207,6 +207,13 @@ async def get_account_positions(
 
     portfolio_metrics = account_map["portfolioMetrics"]
 
+    logger.info(
+        "positions load user=%s refresh=%s brief_status=%s",
+        user_id,
+        refresh,
+        brief_status,
+    )
+
     return {
         "schwab_positions": _serialize_positions(account_map["positions"]),
         "account": account_map["account"],
