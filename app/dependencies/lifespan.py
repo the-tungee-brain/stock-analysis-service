@@ -92,6 +92,7 @@ from app.services.intelligence.portfolio_intelligence_service import (
 )
 from app.services.morning_brief_delivery_service import MorningBriefDeliveryService
 from app.services.portfolio_memory_service import PortfolioMemoryService
+from app.services.portfolio_news_service import PortfolioNewsService
 from app.services.strategy.strategy_journey_service import StrategyJourneyService
 from app.services.strategy.strategy_stock_screener_service import (
     StrategyStockScreenerService,
@@ -349,6 +350,7 @@ async def lifespan(app: FastAPI):
         portfolio_snapshot_adapter=portfolio_snapshot_adapter,
         alert_history_adapter=alert_history_adapter,
     )
+    portfolio_news_service = PortfolioNewsService(yfinance_adapter=yfinance_adapter)
     morning_brief_delivery_service = MorningBriefDeliveryService(
         app_user_adapter=app_user_adapter,
         delivery_adapter=morning_brief_delivery_adapter,
@@ -399,6 +401,7 @@ async def lifespan(app: FastAPI):
     app.state.transaction_service = transaction_service
     app.state.recent_orders_cache = recent_orders_cache
     app.state.portfolio_memory_service = portfolio_memory_service
+    app.state.portfolio_news_service = portfolio_news_service
     app.state.morning_brief_delivery_service = morning_brief_delivery_service
     app.state.strategy_journey_service = strategy_journey_service
     app.state.strategy_stock_suggestion_service = strategy_stock_suggestion_service

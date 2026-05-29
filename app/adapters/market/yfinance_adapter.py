@@ -677,6 +677,24 @@ class YFinanceAdapter:
                 return "amc"
         return None
 
+    def get_news(self, symbol: str, *, count: int = 20) -> list[dict[str, Any]]:
+        """Recent headlines from Yahoo Finance (Ticker.get_news)."""
+        symbol_upper = symbol.strip().upper()
+        if not symbol_upper or count <= 0:
+            return []
+
+        ticker = self._ticker(symbol_upper)
+        try:
+            with yfinance_fetch_lock():
+                raw = ticker.get_news(count=count)
+        except Exception as exc:
+            self._log_yahoo_failure("news", symbol_upper, exc)
+            return []
+
+        if not isinstance(raw, list):
+            return []
+        return [item for item in raw if isinstance(item, dict)]
+
     @staticmethod
     def _index_to_date(value: Any) -> date | None:
         if value is None:
