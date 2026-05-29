@@ -8,9 +8,11 @@ from app.services.llm_service import LLMService
 
 def _news_item(item_id: int) -> NewsItem:
     return NewsItem(
-        id=item_id,
+        category="company",
         datetime="2026-05-20T14:00:00+00:00",
         headline=f"Headline {item_id}",
+        id=item_id,
+        related="AAPL",
         source="Reuters",
         summary=f"Summary {item_id}",
         url="https://example.com/article",
