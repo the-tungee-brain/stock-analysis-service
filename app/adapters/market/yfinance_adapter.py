@@ -7,6 +7,8 @@ from datetime import date, datetime
 from threading import Lock
 from typing import Any
 
+from app.adapters.market.yfinance_news_parser import YFinanceNewsTab
+
 import pandas as pd
 import yfinance as yf
 
@@ -677,8 +679,17 @@ class YFinanceAdapter:
                 return "amc"
         return None
 
-    def get_news(self, symbol: str, *, count: int = 20) -> list[dict[str, Any]]:
-        """Recent headlines from Yahoo Finance (Ticker.get_news)."""
+    def get_news(
+        self,
+        symbol: str,
+        *,
+        count: int = 20,
+        tab: YFinanceNewsTab = "news",
+    ) -> list[dict[str, Any]]:
+        """Headlines from Yahoo Finance (Ticker.get_news).
+
+        tab: ``news``, ``all``, or ``press releases`` per yfinance API.
+        """
         symbol_upper = symbol.strip().upper()
         if not symbol_upper or count <= 0:
             return []
@@ -686,14 +697,23 @@ class YFinanceAdapter:
         ticker = self._ticker(symbol_upper)
         try:
             with yfinance_fetch_lock():
-                raw = ticker.get_news(count=count)
+                raw = ticker.get_news(count=count, tab=tab)
         except Exception as exc:
-            self._log_yahoo_failure("news", symbol_upper, exc)
+            label = "press releases" if tab == "press releases" else "news"
+            self._log_yahoo_failure(label, symbol_upper, exc)
             return []
 
         if not isinstance(raw, list):
             return []
         return [item for item in raw if isinstance(item, dict)]
+
+    def get_press_releases(
+        self,
+        symbol: str,
+        *,
+        count: int = 20,
+    ) -> list[dict[str, Any]]:
+        return self.get_news(symbol, count=count, tab="press releases")
 
     @staticmethod
     def _index_to_date(value: Any) -> date | None:

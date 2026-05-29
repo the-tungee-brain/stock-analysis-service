@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
+from app.adapters.market.yfinance_news_parser import parse_yfinance_news_item
 from app.broker.option_utils import portfolio_spending_by_symbol
 from app.models.portfolio_news_models import (
     PortfolioHoldingsNewsItem,
@@ -98,71 +99,19 @@ class PortfolioNewsService:
         symbol: str,
         raw: dict,
     ) -> _ParsedNewsRow | None:
-        content = raw.get("content") if isinstance(raw.get("content"), dict) else raw
-        if not isinstance(content, dict):
+        parsed = parse_yfinance_news_item(raw)
+        if parsed is None:
             return None
-
-        headline = (content.get("title") or "").strip()
-        if not headline:
-            return None
-
-        summary = (
-            content.get("summary")
-            or content.get("description")
-            or None
-        )
-        if isinstance(summary, str):
-            summary = summary.strip() or None
-        else:
-            summary = None
-
-        url = self._extract_url(content)
-        provider = content.get("provider")
-        publisher = None
-        if isinstance(provider, dict):
-            publisher = provider.get("displayName") or provider.get("name")
-        if isinstance(publisher, str):
-            publisher = publisher.strip() or None
-
-        published_at = self._parse_pub_date(content.get("pubDate"))
-        content_id = content.get("id")
-        dedupe_key = url or f"{symbol}:{content_id or headline}"
+        dedupe_key = parsed.url or f"{symbol}:{parsed.headline}"
         return _ParsedNewsRow(
             symbol=symbol.upper(),
-            headline=headline,
-            summary=summary,
-            url=url,
-            publisher=publisher,
-            published_at=published_at,
+            headline=parsed.headline,
+            summary=parsed.summary,
+            url=parsed.url,
+            publisher=parsed.source,
+            published_at=parsed.published_at,
             dedupe_key=dedupe_key,
         )
-
-    @staticmethod
-    def _extract_url(content: dict) -> str | None:
-        canonical = content.get("canonicalUrl")
-        if isinstance(canonical, dict):
-            url = canonical.get("url")
-            if isinstance(url, str) and url.strip():
-                return url.strip()
-        click = content.get("clickThroughUrl")
-        if isinstance(click, dict):
-            url = click.get("url")
-            if isinstance(url, str) and url.strip():
-                return url.strip()
-        link = content.get("link")
-        if isinstance(link, str) and link.strip():
-            return link.strip()
-        return None
-
-    @staticmethod
-    def _parse_pub_date(value: object) -> datetime | None:
-        if not isinstance(value, str) or not value.strip():
-            return None
-        text = value.strip().replace("Z", "+00:00")
-        try:
-            return datetime.fromisoformat(text)
-        except ValueError:
-            return None
 
     def _merge_and_limit(
         self,

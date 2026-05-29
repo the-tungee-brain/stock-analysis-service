@@ -24,7 +24,7 @@ def test_get_news_returns_parsed_dicts():
 
     assert len(items) == 1
     assert items[0]["content"]["title"] == "Earnings beat"
-    mock_ticker.get_news.assert_called_once_with(count=5)
+    mock_ticker.get_news.assert_called_once_with(count=5, tab="news")
 
 
 def test_get_news_returns_empty_on_failure():

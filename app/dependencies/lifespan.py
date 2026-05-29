@@ -252,7 +252,10 @@ async def lifespan(app: FastAPI):
         dividend_history_cache=dividend_history_cache,
     )
 
-    news_service = NewsService(finnhub_builder=finnhub_builder)
+    news_service = NewsService(
+        finnhub_builder=finnhub_builder,
+        yfinance_adapter=yfinance_adapter,
+    )
     market_service = MarketService(
         schwab_market_builder=schwab_market_builder,
         performance_builder=performance_builder,

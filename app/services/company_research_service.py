@@ -18,7 +18,7 @@ from app.services.earnings_service import EarningsService
 from app.services.etf_research_service import EtfResearchService
 from app.services.enriched_news_service import EnrichedNewsService
 from app.services.market_service import MarketService
-from app.services.news_service import NewsService, finnhub_press_releases_enabled
+from app.services.news_service import NewsService
 from app.services.sec_research_service import SecResearchService
 
 
@@ -332,14 +332,11 @@ class CompanyResearchService:
                     symbol=symbol, lookback_days=news_lookback_days
                 ),
             )
-            if finnhub_press_releases_enabled():
-                future_press = executor.submit(
-                    self._run_loader,
-                    "press_releases",
-                    lambda: self._load_press_releases(symbol=symbol),
-                )
-            else:
-                future_press = None
+            future_press = executor.submit(
+                self._run_loader,
+                "press_releases",
+                lambda: self._load_press_releases(symbol=symbol),
+            )
             future_fundamentals = executor.submit(
                 self._run_loader,
                 "fundamentals",

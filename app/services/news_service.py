@@ -1,8 +1,13 @@
 from datetime import date, datetime, timedelta, timezone
 import os
+from typing import TYPE_CHECKING
 
+from app.adapters.market.yfinance_news_parser import yfinance_raw_to_news_items
 from app.builders.finnhub_builder import FinnhubBuilder
 from app.models.finnhub_news_models import NewsResponse
+
+if TYPE_CHECKING:
+    from app.adapters.market.yfinance_adapter import YFinanceAdapter
 
 MARKET_NEWS_DISPLAY_LIMIT = int(os.getenv("MARKET_NEWS_LIMIT", "5"))
 MARKET_NEWS_PROMPT_LIMIT = int(os.getenv("MARKET_NEWS_PROMPT_LIMIT", "3"))
@@ -10,9 +15,12 @@ MARKET_NEWS_LOOKBACK_HOURS = int(os.getenv("MARKET_NEWS_LOOKBACK_HOURS", "24"))
 COMPANY_NEWS_DISPLAY_LIMIT = int(os.getenv("COMPANY_NEWS_LIMIT", "20"))
 # Headlines sent to the LLM (rest use original Finnhub text).
 COMPANY_NEWS_LLM_LIMIT = int(os.getenv("COMPANY_NEWS_LLM_LIMIT", "10"))
+PRESS_RELEASES_DISPLAY_LIMIT = int(os.getenv("PRESS_RELEASES_LIMIT", "20"))
+PRESS_RELEASES_LOOKBACK_DAYS = int(os.getenv("PRESS_RELEASES_LOOKBACK_DAYS", "90"))
 
 
 def finnhub_press_releases_enabled() -> bool:
+    """Legacy Finnhub press-release path; yfinance is used by default."""
     return os.getenv("FINNHUB_PRESS_RELEASES", "0").strip().lower() in {
         "1",
         "true",
@@ -21,8 +29,13 @@ def finnhub_press_releases_enabled() -> bool:
 
 
 class NewsService:
-    def __init__(self, finnhub_builder: FinnhubBuilder):
+    def __init__(
+        self,
+        finnhub_builder: FinnhubBuilder,
+        yfinance_adapter: "YFinanceAdapter | None" = None,
+    ):
         self.finnhub_builder = finnhub_builder
+        self.yfinance_adapter = yfinance_adapter
 
     def get_company_news(self, symbol: str, lookback_days: int = 1) -> NewsResponse:
         today = date.today()
@@ -78,12 +91,34 @@ class NewsService:
             to=today,
         )
 
-    def get_press_releases(self, symbol: str, lookback_days: int = 30) -> NewsResponse:
+    def get_press_releases(
+        self,
+        symbol: str,
+        lookback_days: int | None = None,
+    ) -> NewsResponse:
+        days = lookback_days if lookback_days is not None else PRESS_RELEASES_LOOKBACK_DAYS
+
+        if self.yfinance_adapter is not None:
+            try:
+                raw = self.yfinance_adapter.get_press_releases(
+                    symbol=symbol,
+                    count=PRESS_RELEASES_DISPLAY_LIMIT,
+                )
+            except Exception:
+                return NewsResponse(root=[])
+            items = yfinance_raw_to_news_items(
+                symbol=symbol,
+                raw_items=raw,
+                lookback_days=days,
+                category="press release",
+            )
+            return NewsResponse(root=items[:PRESS_RELEASES_DISPLAY_LIMIT])
+
         if not finnhub_press_releases_enabled():
             return NewsResponse(root=[])
 
         today = date.today()
-        start = today - timedelta(days=lookback_days)
+        start = today - timedelta(days=days)
 
         try:
             releases = self.finnhub_builder.get_press_releases(
@@ -94,5 +129,5 @@ class NewsService:
         except Exception:
             return NewsResponse(root=[])
 
-        releases.root = releases.root[:5]
+        releases.root = releases.root[:PRESS_RELEASES_DISPLAY_LIMIT]
         return releases
