@@ -264,6 +264,7 @@ async def lifespan(app: FastAPI):
     earnings_service = EarningsService(
         earnings_builder=earnings_builder,
         finnhub_builder=finnhub_builder,
+        news_service=news_service,
     )
     llm_service = LLMService(
         openai_adapter=openai_adapter,

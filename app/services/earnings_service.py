@@ -1,5 +1,7 @@
 from datetime import date, timedelta
 
+from typing import TYPE_CHECKING
+
 from app.builders.earnings_builder import EarningsBuilder
 from app.builders.finnhub_builder import FinnhubBuilder
 from app.models.earnings_models import (
@@ -7,15 +9,20 @@ from app.models.earnings_models import (
     EarningsListResponse,
 )
 
+if TYPE_CHECKING:
+    from app.services.news_service import NewsService
+
 
 class EarningsService:
     def __init__(
         self,
         earnings_builder: EarningsBuilder,
         finnhub_builder: FinnhubBuilder,
+        news_service: "NewsService | None" = None,
     ):
         self.earnings_builder = earnings_builder
         self.finnhub_builder = finnhub_builder
+        self.news_service = news_service
 
     def list_earnings(self, symbol: str, limit: int = 8) -> EarningsListResponse:
         return self.earnings_builder.build_list(symbol=symbol, limit=limit)
@@ -36,6 +43,10 @@ class EarningsService:
             return None
 
         related_news = self._news_around_earnings(
+            symbol=symbol,
+            report_date=report_date,
+        )
+        official_releases = self._press_releases_around_earnings(
             symbol=symbol,
             report_date=report_date,
         )
@@ -60,6 +71,7 @@ class EarningsService:
             symbol=symbol.upper(),
             event=event,
             relatedNews=related_news,
+            officialReleases=official_releases,
             transcriptAvailable=bool(transcript_segments),
             transcript=transcript_segments,
             analysis=None,
@@ -91,6 +103,17 @@ class EarningsService:
         except Exception:
             return []
         return self.earnings_builder.news_to_headlines(raw_news.root, limit=10)
+
+    def _press_releases_around_earnings(self, symbol: str, report_date: date):
+        if self.news_service is None:
+            return []
+        return self.news_service.get_press_releases_around_date(
+            symbol=symbol,
+            report_date=report_date,
+            days_before=7,
+            days_after=3,
+            limit=10,
+        )
 
     def build_research_context(self, symbol: str):
         from app.models.company_research_models import EarningsContext

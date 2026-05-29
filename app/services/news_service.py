@@ -4,7 +4,8 @@ from typing import TYPE_CHECKING
 
 from app.adapters.market.yfinance_news_parser import yfinance_raw_to_news_items
 from app.builders.finnhub_builder import FinnhubBuilder
-from app.models.finnhub_news_models import NewsResponse
+from app.models.company_research_models import NewsHeadline
+from app.models.finnhub_news_models import NewsItem, NewsResponse
 
 if TYPE_CHECKING:
     from app.adapters.market.yfinance_adapter import YFinanceAdapter
@@ -131,3 +132,55 @@ class NewsService:
 
         releases.root = releases.root[:PRESS_RELEASES_DISPLAY_LIMIT]
         return releases
+
+    def get_press_releases_around_date(
+        self,
+        symbol: str,
+        report_date: date,
+        *,
+        days_before: int = 7,
+        days_after: int = 3,
+        limit: int = 10,
+    ) -> list[NewsHeadline]:
+        pool_days = min(
+            max(
+                (date.today() - (report_date - timedelta(days=days_before))).days
+                + days_after
+                + 1,
+                30,
+            ),
+            365,
+        )
+        releases = self.get_press_releases(symbol=symbol, lookback_days=pool_days)
+        start = datetime.combine(
+            report_date - timedelta(days=days_before),
+            datetime.min.time(),
+            tzinfo=timezone.utc,
+        )
+        end = datetime.combine(
+            report_date + timedelta(days=days_after),
+            datetime.max.time().replace(microsecond=0),
+            tzinfo=timezone.utc,
+        )
+
+        headlines: list[NewsHeadline] = []
+        for item in releases.root:
+            published = item.datetime
+            if published.tzinfo is None:
+                published = published.replace(tzinfo=timezone.utc)
+            if published < start or published > end:
+                continue
+            headlines.append(self._news_item_to_headline(item))
+            if len(headlines) >= limit:
+                break
+        return headlines
+
+    @staticmethod
+    def _news_item_to_headline(item: NewsItem) -> NewsHeadline:
+        return NewsHeadline(
+            headline=item.headline,
+            summary=item.summary or None,
+            source=item.source or "Press release",
+            datetime=item.datetime.isoformat(),
+            url=str(item.url) if item.url else None,
+        )

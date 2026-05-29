@@ -46,6 +46,19 @@ def _format_detail_block(detail: EarningsDetailResponse) -> str:
     else:
         lines.append("\n## Related news\nNo related headlines were available.")
 
+    if detail.officialReleases:
+        lines.append("\n## Official releases (press releases)")
+        for idx, item in enumerate(detail.officialReleases, start=1):
+            summary = item.summary or "(no summary)"
+            lines.append(
+                f"{idx}. [{item.source}] {item.headline}\n   Summary: {summary}"
+            )
+    else:
+        lines.append(
+            "\n## Official releases (press releases)\n"
+            "No company press releases were available for this window."
+        )
+
     return "\n".join(lines)
 
 

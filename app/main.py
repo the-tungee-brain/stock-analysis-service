@@ -15,6 +15,7 @@ from app.dependencies.lifespan import lifespan
 from app.auth.dependencies import get_current_user
 from app.api.auth_google_callback_route import router as auth_google_callback_route
 from app.api.get_company_news_route import router as get_company_news_route
+from app.api.get_press_releases_route import router as get_press_releases_router
 from app.api.get_stock_data_route import router as get_stock_data_route
 from app.api.get_company_snapshot_route import router as get_company_snapshot_route
 from app.api.get_performance_snapshot_route import (
@@ -114,6 +115,7 @@ protected_api.include_router(get_option_chain_debug_router)
 protected_api.include_router(get_recent_orders_router)
 protected_api.include_router(analyze_positions_by_symbol_router)
 protected_api.include_router(get_company_news_route)
+protected_api.include_router(get_press_releases_router)
 protected_api.include_router(get_stock_data_route)
 protected_api.include_router(get_company_snapshot_route)
 protected_api.include_router(get_performance_snapshot_route)

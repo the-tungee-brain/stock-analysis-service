@@ -56,6 +56,7 @@ class EarningsDetailResponse(BaseModel):
     symbol: str
     event: EarningsEvent
     relatedNews: list[NewsHeadline] = Field(default_factory=list)
+    officialReleases: list[NewsHeadline] = Field(default_factory=list)
     transcriptAvailable: bool = False
     transcript: list[TranscriptSegment] = Field(default_factory=list)
     analysis: EarningsAnalysis | None = None
