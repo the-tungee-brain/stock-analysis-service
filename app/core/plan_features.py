@@ -8,6 +8,7 @@ PRO_FEATURE_WHEEL_BACKTEST = "wheel_backtest"
 PRO_FEATURE_DIVIDEND_SNOWBALL = "dividend_snowball"
 PRO_FEATURE_NEWS_AI = "news_ai"
 PRO_FEATURE_FINANCIAL_STRENGTH = "financial_strength"
+PRO_FEATURE_EARNINGS_AI = "earnings_ai"
 
 PRO_FEATURES = frozenset(
     {
@@ -15,6 +16,7 @@ PRO_FEATURES = frozenset(
         PRO_FEATURE_DIVIDEND_SNOWBALL,
         PRO_FEATURE_NEWS_AI,
         PRO_FEATURE_FINANCIAL_STRENGTH,
+        PRO_FEATURE_EARNINGS_AI,
     }
 )
 

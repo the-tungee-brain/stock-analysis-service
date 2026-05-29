@@ -2,6 +2,8 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.auth.dependencies import get_current_user_id
+from app.core.paid_access import is_paid_user
 from app.dependencies.service_dependencies import (
     get_earnings_service,
     get_llm_service,
@@ -76,6 +78,7 @@ def get_earnings_list(
 async def get_earnings_detail(
     symbol: str,
     report_date: date = Query(..., description="Earnings report date (YYYY-MM-DD)"),
+    user_id: str = Depends(get_current_user_id),
     transcript_id: str | None = Query(default=None),
     include_transcript: bool = Query(default=True),
     include_analysis: bool = Query(default=True),
@@ -98,7 +101,7 @@ async def get_earnings_detail(
             detail=f"No earnings event found for {symbol.upper()} on {report_date.isoformat()}",
         )
 
-    if not include_analysis:
+    if not include_analysis or not is_paid_user(user_id):
         return detail
 
     transcript_excerpt = earnings_service.transcript_excerpt(detail)
