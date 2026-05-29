@@ -1,6 +1,9 @@
 import asyncio
 
 from fastapi import APIRouter, Depends
+
+from app.auth.dependencies import get_current_user_id
+from app.core.paid_access import is_paid_user
 from app.builders.yfinance_analysis_builder import YFinanceAnalysisBuilder
 from app.builders.yfinance_financials_builder import YFinanceFinancialsBuilder
 from app.builders.yfinance_funds_builder import YFinanceFundsBuilder
@@ -31,6 +34,7 @@ router = APIRouter()
 )
 async def get_fundamentals(
     symbol: str,
+    user_id: str = Depends(get_current_user_id),
     company_research_service: CompanyResearchService = Depends(
         get_company_research_service
     ),
@@ -73,27 +77,34 @@ async def get_fundamentals(
             symbol=symbol,
         )
 
-    prompts = prompt_enrichment_service.build_fundamentals_prompt(
-        ctx=ctx,
-        metrics=metrics,
-        financials=financials_package,
-        street_analysis=street_analysis,
-        etf_funds=etf_funds,
-    )
-    overview = await llm_service.generate_from_prompts(
-        prompts=prompts,
-        response_model=FundamentalsOverview,
-        route=LLMRoute.FUNDAMENTALS,
-        symbol=ctx.symbol,
-        context_fingerprint=prompt_enrichment_service.fundamentals_overview_fingerprint(
-            ctx,
+    paid = is_paid_user(user_id)
+    overview: FundamentalsOverview | None = None
+    overview_note = ""
+
+    if paid:
+        prompts = prompt_enrichment_service.build_fundamentals_prompt(
+            ctx=ctx,
+            metrics=metrics,
+            financials=financials_package,
             street_analysis=street_analysis,
             etf_funds=etf_funds,
-        ),
-    )
+        )
+        overview = await llm_service.generate_from_prompts(
+            prompts=prompts,
+            response_model=FundamentalsOverview,
+            route=LLMRoute.FUNDAMENTALS,
+            symbol=ctx.symbol,
+            context_fingerprint=prompt_enrichment_service.fundamentals_overview_fingerprint(
+                ctx,
+                street_analysis=street_analysis,
+                etf_funds=etf_funds,
+            ),
+        )
+        overview_note = overview.at_a_glance
+
     return FundamentalsBlock(
         overview=overview,
-        overview_note=overview.at_a_glance,
+        overview_note=overview_note,
         metrics=metrics,
         quarterly_financials=(
             financials_package.quarterly if financials_package else None
@@ -101,7 +112,11 @@ async def get_fundamentals(
         annual_financials=(
             financials_package.annual if financials_package else None
         ),
-        strength=financials_package.strength if financials_package else None,
+        strength=(
+            financials_package.strength
+            if paid and financials_package is not None
+            else None
+        ),
         street_analysis=street_analysis,
         etf_funds=etf_funds,
     )

@@ -17,6 +17,7 @@ def test_paid_features_for_free_user(monkeypatch):
     assert features["wheel_backtest"] is False
     assert features["dividend_snowball"] is False
     assert features["news_ai"] is False
+    assert features["financial_strength"] is False
 
 
 def test_paid_features_for_pro_user(monkeypatch):
@@ -25,6 +26,7 @@ def test_paid_features_for_pro_user(monkeypatch):
     assert features["wheel_backtest"] is True
     assert features["dividend_snowball"] is True
     assert features["news_ai"] is True
+    assert features["financial_strength"] is True
 
 
 def test_wheel_backtest_requires_pro(monkeypatch):
