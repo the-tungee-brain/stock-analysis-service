@@ -58,9 +58,7 @@ class CompanyProfileService:
         try:
             peers = self.yfinance_adapter.get_recommended_peers(symbol=symbol)
         except Exception:
-            logger.warning(
-                "Yahoo Finance peers unavailable for %s", symbol, exc_info=True
-            )
+            logger.warning("Yahoo Finance peers unavailable for %s", symbol)
             return []
 
         symbol_upper = symbol.upper()
@@ -102,14 +100,10 @@ class CompanyProfileService:
         if self.yfinance_adapter is None:
             return None
 
-        try:
-            info = self.yfinance_adapter.get_ticker_info(symbol)
-            history = self.yfinance_adapter.get_history(
-                symbol, period="5d", interval="1d"
-            )
-        except Exception:
-            logger.warning("Yahoo Finance snapshot unavailable for %s", symbol, exc_info=True)
-            return None
+        info = self.yfinance_adapter.get_ticker_info(symbol)
+        history = self.yfinance_adapter.get_history(
+            symbol, period="5d", interval="1d"
+        )
 
         price = self._price_from_yfinance(info, history)
         if price is None:

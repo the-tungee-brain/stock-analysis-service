@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pandas as pd
 import pytest
@@ -85,6 +85,34 @@ def test_get_history_uses_cache():
     assert len(first) == 1
     assert len(second) == 1
     ticker_cls.assert_called_once()
+
+
+def test_get_history_returns_empty_dataframe_on_yahoo_http_error():
+    adapter = YFinanceAdapter()
+    mock_ticker = MagicMock()
+    mock_ticker.history.side_effect = Exception(
+        'HTTP Error 400: <!doctype html><html><body>Bad Request</body></html>'
+    )
+
+    with patch("app.adapters.market.yfinance_adapter.yf.Ticker", return_value=mock_ticker):
+        hist = adapter.get_history("NOK", period="5d", interval="1d")
+
+    assert hist.empty
+
+
+def test_get_ticker_info_returns_empty_dict_on_yahoo_http_error():
+    adapter = YFinanceAdapter()
+    mock_ticker = MagicMock()
+
+    def _raise_yahoo_400() -> dict:
+        raise Exception("HTTP Error 400: <!doctype html>")
+
+    type(mock_ticker).info = property(lambda _self: _raise_yahoo_400())
+
+    with patch("app.adapters.market.yfinance_adapter.yf.Ticker", return_value=mock_ticker):
+        info = adapter.get_ticker_info("NOK")
+
+    assert info == {}
 
 
 def test_get_stock_chart_payload_raises_when_empty():

@@ -12,6 +12,7 @@ import yfinance as yf
 
 from app.adapters.market.yfinance_bootstrap import (
     configure_yfinance,
+    format_yahoo_finance_error,
     yfinance_fetch_lock,
 )
 from app.broker.fiscal_period import (
@@ -64,6 +65,15 @@ class YFinanceAdapter:
         with yfinance_fetch_lock():
             return yf.Ticker(symbol_upper)
 
+    @staticmethod
+    def _log_yahoo_failure(label: str, symbol: str, exc: Exception) -> None:
+        logger.warning(
+            "Yahoo Finance %s unavailable for %s: %s",
+            label,
+            symbol.strip().upper(),
+            format_yahoo_finance_error(exc),
+        )
+
     def get_daily_closes_1y(self, symbol: str) -> pd.Series:
         hist = self.get_history(symbol, period="1y", interval="1d")
         return hist["Close"] if "Close" in hist.columns else pd.Series(dtype=float)
@@ -75,8 +85,12 @@ class YFinanceAdapter:
             return dict(cached)
 
         ticker = self._ticker(symbol_upper)
-        with yfinance_fetch_lock():
-            info = ticker.info or {}
+        try:
+            with yfinance_fetch_lock():
+                info = ticker.info or {}
+        except Exception as exc:
+            self._log_yahoo_failure("ticker.info", symbol_upper, exc)
+            return {}
         self._set_cached(self._info_cache, symbol_upper, info)
         return info
 
@@ -99,12 +113,20 @@ class YFinanceAdapter:
             return cached.copy()
 
         ticker = self._ticker(symbol_upper)
-        with yfinance_fetch_lock():
-            hist = ticker.history(
-                period=period,
-                interval=interval,
-                auto_adjust=auto_adjust,
+        try:
+            with yfinance_fetch_lock():
+                hist = ticker.history(
+                    period=period,
+                    interval=interval,
+                    auto_adjust=auto_adjust,
+                )
+        except Exception as exc:
+            self._log_yahoo_failure(
+                f"history({period},{interval})",
+                symbol_upper,
+                exc,
             )
+            return pd.DataFrame()
         self._set_cached(self._history_cache, cache_key, hist)
         return hist.copy()
 
@@ -113,9 +135,13 @@ class YFinanceAdapter:
     ) -> tuple[dict[date, float], dict[date, float]]:
         symbol_upper = symbol.strip().upper()
         ticker = self._ticker(symbol_upper)
-        with yfinance_fetch_lock():
-            dividends = ticker.dividends
-            splits = ticker.splits
+        try:
+            with yfinance_fetch_lock():
+                dividends = ticker.dividends
+                splits = ticker.splits
+        except Exception as exc:
+            self._log_yahoo_failure("dividends/splits", symbol_upper, exc)
+            return {}, {}
 
         dividend_map: dict[date, float] = {}
         if dividends is not None and not dividends.empty:
@@ -489,8 +515,9 @@ class YFinanceAdapter:
     ) -> list[dict[str, Any]]:
         try:
             history = ticker.get_earnings_history()
-        except Exception:
-            logger.exception("yfinance earnings_history failed")
+        except Exception as exc:
+            symbol = getattr(ticker, "ticker", None) or "?"
+            self._log_yahoo_failure("earnings_history", str(symbol), exc)
             return []
         if history is None or history.empty:
             return []

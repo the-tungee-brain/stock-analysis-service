@@ -2,7 +2,24 @@ from unittest.mock import MagicMock, patch
 
 from peewee import IntegrityError
 
-from app.adapters.market.yfinance_bootstrap import configure_yfinance
+from app.adapters.market.yfinance_bootstrap import (
+    configure_yfinance,
+    format_yahoo_finance_error,
+)
+
+
+def test_format_yahoo_finance_error_strips_html_body():
+    exc = Exception(
+        'HTTP Error 400: <!doctype html><html><head><title>Yahoo!</title></head></html>'
+    )
+    assert format_yahoo_finance_error(exc) == "Yahoo Finance HTTP 400"
+
+
+def test_format_yahoo_finance_error_truncates_long_plain_message():
+    exc = Exception("x" * 300)
+    formatted = format_yahoo_finance_error(exc)
+    assert len(formatted) <= 201
+    assert formatted.endswith("…")
 
 
 def test_configure_yfinance_tolerates_cookie_cache_integrity_error():

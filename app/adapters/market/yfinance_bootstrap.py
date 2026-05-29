@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 from pathlib import Path
+
+_YAHOO_HTTP_ERROR_RE = re.compile(r"^HTTP Error (\d+):\s*", re.IGNORECASE)
 
 _configured = False
 _config_lock = threading.Lock()
@@ -15,6 +18,26 @@ _yfinance_fetch_lock = threading.Lock()
 
 def yfinance_fetch_lock() -> threading.Lock:
     return _yfinance_fetch_lock
+
+
+def format_yahoo_finance_error(exc: BaseException) -> str:
+    """Short, log-safe summary (Yahoo often embeds HTML error pages in exceptions)."""
+    raw = str(exc).strip()
+    if not raw:
+        return type(exc).__name__
+
+    match = _YAHOO_HTTP_ERROR_RE.match(raw)
+    if match:
+        return f"Yahoo Finance HTTP {match.group(1)}"
+
+    head = raw[:500].lower()
+    if head.startswith("<!doctype") or "<html" in head:
+        return "Yahoo Finance request rejected"
+
+    first_line = raw.splitlines()[0].strip()
+    if len(first_line) > 200:
+        return f"{first_line[:200]}…"
+    return first_line
 
 
 def configure_yfinance() -> None:
