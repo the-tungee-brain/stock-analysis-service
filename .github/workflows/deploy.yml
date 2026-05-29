@@ -93,6 +93,8 @@ jobs:
               -e RESEARCH_CONTEXT_CACHE_TTL_SECONDS=3600 \
               -e ENRICHED_NEWS_CACHE_TTL_SECONDS=1800 \
               -e PORTFOLIO_BRIEF_CACHE_TTL_SECONDS=1800 \
+              -e MORNING_BRIEF_PREWARM_WORKERS=20 \
+              -e MORNING_BRIEF_DISPATCH_WORKERS=20 \
               -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
               -e SCHWAB_CLIENT_ID="${{ secrets.SCHWAB_CLIENT_ID }}" \
               -e SCHWAB_CLIENT_SECRET="${{ secrets.SCHWAB_CLIENT_SECRET }}" \

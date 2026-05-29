@@ -208,6 +208,14 @@ class MorningBriefDeliveryService:
                     result.failed += 1
                     result.errors.append(str(exc))
 
+        logger.info(
+            "morning brief dispatch finished attempted=%s sent=%s skipped=%s failed=%s force=%s",
+            result.attempted,
+            result.sent,
+            result.skipped,
+            result.failed,
+            force,
+        )
         return result
 
     def _prewarm_one_user(self, user) -> str:
@@ -238,7 +246,7 @@ class MorningBriefDeliveryService:
 
         max_workers = max(
             1,
-            int(os.getenv("MORNING_BRIEF_DISPATCH_WORKERS", "20")),
+            int(os.getenv("MORNING_BRIEF_PREWARM_WORKERS", os.getenv("MORNING_BRIEF_DISPATCH_WORKERS", "20"))),
         )
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
