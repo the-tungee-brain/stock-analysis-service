@@ -21,7 +21,7 @@ from app.utils.dividend_snowball import (
 from app.utils.stock_price_cagr import fetch_price_cagr_pct
 
 DEFAULT_SCENARIO_SHARES = 100.0
-DEFAULT_RECENT_PAYMENTS = 8
+DEFAULT_RECENT_PAYMENTS = 16
 
 
 def _parse_payment_items(
