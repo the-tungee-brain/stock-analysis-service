@@ -52,6 +52,43 @@ class LLMService:
             yield chunk
 
     @staticmethod
+    def build_headlines_only_view(symbol: str, news: NewsResponse) -> StockNewsView:
+        """Headlines without LLM synthesis (free tier)."""
+        if not news.root:
+            return StockNewsView(
+                symbol=symbol,
+                overall_sentiment="neutral",
+                summary="No recent market headlines for this symbol.",
+                insights=[],
+                risks=[],
+                dominant_driver="No recent headlines.",
+                market_impact_horizon="medium_term",
+                actionability_score=1,
+                investorTakeaway="",
+                deepAnalysis="",
+                items=[],
+                aiEnrichment=False,
+            )
+
+        return StockNewsView(
+            symbol=symbol,
+            overall_sentiment="neutral",
+            summary=(
+                "Headlines are available below. Upgrade to Pro for an AI news brief, "
+                "per-story sentiment, and actionable context."
+            ),
+            insights=[],
+            risks=[],
+            dominant_driver="",
+            market_impact_horizon="medium_term",
+            actionability_score=1,
+            investorTakeaway="",
+            deepAnalysis="",
+            items=[LLMService._passthrough_enriched_item(src) for src in news.root],
+            aiEnrichment=False,
+        )
+
+    @staticmethod
     def _passthrough_enriched_item(src: NewsItem) -> EnrichedNewsItem:
         summary = (src.summary or "").strip() or src.headline
         return EnrichedNewsItem(
@@ -90,6 +127,7 @@ class LLMService:
                 investorTakeaway="No recent news to analyze. Check back later or review the company's business profile.",
                 deepAnalysis="No recent news articles were found for this symbol in the past day. Without news flow, focus on fundamentals, business model, and price performance for your research.",
                 items=[],
+                aiEnrichment=True,
             )
 
         fingerprint = ",".join(str(item.id) for item in news.root[:COMPANY_NEWS_LLM_LIMIT])
@@ -142,6 +180,7 @@ class LLMService:
             investorTakeaway=combined.investorTakeaway,
             deepAnalysis=combined.deepAnalysis,
             items=enriched_items,
+            aiEnrichment=True,
         )
 
     async def generate_stream_from_prompts(

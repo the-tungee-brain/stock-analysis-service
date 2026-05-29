@@ -1,8 +1,11 @@
 from unittest.mock import AsyncMock, MagicMock
 
-from app.api.get_company_news_route import get_company_news
 import asyncio
-from app.models.finnhub_news_models import NewsResponse
+from datetime import datetime, timezone
+
+from app.api.get_company_news_route import get_company_news
+from app.core.llm_config import settings
+from app.models.finnhub_news_models import NewsItem, NewsResponse
 from app.models.news_analytics_models import StockNewsView
 
 
@@ -22,7 +25,8 @@ def _sample_news_view(*, summary: str, overall_sentiment: str = "neutral") -> St
     )
 
 
-def test_get_company_news_returns_cached_view_without_refresh():
+def test_get_company_news_returns_cached_view_without_refresh(monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset({"paid-user"}))
     cached = _sample_news_view(summary="Cached")
 
     enriched_news_service = MagicMock()
@@ -33,7 +37,7 @@ def test_get_company_news_returns_cached_view_without_refresh():
         get_company_news(
             symbol="AAPL",
             refresh=False,
-            user_id="free-user",
+            user_id="paid-user",
             news_service=news_service,
             prompt_enrichment_service=MagicMock(),
             llm_service=MagicMock(),
@@ -46,7 +50,50 @@ def test_get_company_news_returns_cached_view_without_refresh():
     news_service.get_company_news.assert_not_called()
 
 
-def test_get_company_news_refresh_bypasses_cache():
+def test_get_company_news_free_user_skips_enriched_cache(monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset())
+    news_item = NewsItem(
+        category="company news",
+        datetime=datetime(2026, 5, 20, tzinfo=timezone.utc),
+        headline="Test headline",
+        id=1,
+        related="AAPL",
+        source="Reuters",
+        summary="Raw summary",
+        url="https://example.com/story",
+    )
+    news = NewsResponse(root=[news_item])
+
+    enriched_news_service = MagicMock()
+    enriched_news_service.get_cached_view.return_value = _sample_news_view(
+        summary="Pro cache"
+    )
+    news_service = MagicMock()
+    news_service.get_company_news.return_value = news
+    llm_service = MagicMock()
+
+    result = asyncio.run(
+        get_company_news(
+            symbol="AAPL",
+            refresh=False,
+            user_id="free-user",
+            news_service=news_service,
+            prompt_enrichment_service=MagicMock(),
+            llm_service=llm_service,
+            enriched_news_service=enriched_news_service,
+        )
+    )
+
+    enriched_news_service.get_cached_view.assert_not_called()
+    llm_service.analyze_news.assert_not_called()
+    enriched_news_service.store_view.assert_not_called()
+    assert result.aiEnrichment is False
+    assert len(result.items) == 1
+    assert result.items[0].summary == "Raw summary"
+
+
+def test_get_company_news_refresh_bypasses_cache(monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset({"paid-user"}))
     news = NewsResponse(root=[])
     fresh = _sample_news_view(summary="Fresh", overall_sentiment="bullish")
     fresh = fresh.model_copy(update={"insights": ["Insight"]})

@@ -26,6 +26,7 @@ def test_free_user_plan(monkeypatch):
     assert result["freeModel"] == "gpt-4.1-mini"
     assert result["features"]["wheel_backtest"] is False
     assert result["features"]["dividend_snowball"] is False
+    assert result["features"]["news_ai"] is False
 
 
 def test_paid_user_plan(monkeypatch):
@@ -39,3 +40,4 @@ def test_paid_user_plan(monkeypatch):
     assert result["isPaid"] is True
     assert result["features"]["wheel_backtest"] is True
     assert result["features"]["dividend_snowball"] is True
+    assert result["features"]["news_ai"] is True

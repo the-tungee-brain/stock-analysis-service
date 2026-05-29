@@ -6,11 +6,13 @@ from app.core.llm_model_policy import is_paid_user
 
 PRO_FEATURE_WHEEL_BACKTEST = "wheel_backtest"
 PRO_FEATURE_DIVIDEND_SNOWBALL = "dividend_snowball"
+PRO_FEATURE_NEWS_AI = "news_ai"
 
 PRO_FEATURES = frozenset(
     {
         PRO_FEATURE_WHEEL_BACKTEST,
         PRO_FEATURE_DIVIDEND_SNOWBALL,
+        PRO_FEATURE_NEWS_AI,
     }
 )
 

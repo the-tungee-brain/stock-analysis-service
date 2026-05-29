@@ -2,6 +2,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends, Query
 from app.auth.dependencies import get_current_user_id
+from app.core.paid_access import is_paid_user
 from app.services.news_service import NewsService, COMPANY_NEWS_LLM_LIMIT
 from app.dependencies.service_dependencies import (
     get_news_service,
@@ -33,12 +34,15 @@ async def get_company_news(
     llm_service: LLMService = Depends(get_llm_service),
     enriched_news_service: EnrichedNewsService = Depends(get_enriched_news_service),
 ) -> StockNewsView:
+    paid = is_paid_user(user_id)
+
     if refresh:
-        enriched_news_service.invalidate(symbol=symbol)
+        if paid:
+            enriched_news_service.invalidate(symbol=symbol)
         news_service.invalidate_company_news_cache(symbol=symbol, lookback_days=7)
-    else:
+    elif paid:
         cached_view = enriched_news_service.get_cached_view(symbol=symbol)
-        if cached_view is not None:
+        if cached_view is not None and cached_view.aiEnrichment:
             return cached_view
 
     try:
@@ -49,6 +53,9 @@ async def get_company_news(
         )
     except Exception:
         news = NewsResponse(root=[])
+
+    if not paid:
+        return LLMService.build_headlines_only_view(symbol=symbol, news=news)
 
     llm_news = NewsResponse(root=news.root[:COMPANY_NEWS_LLM_LIMIT])
     prompts = prompt_enrichment_service.enrich_news_prompt(

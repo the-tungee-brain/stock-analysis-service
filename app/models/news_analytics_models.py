@@ -60,3 +60,4 @@ class StockNewsView(BaseModel):
     investorTakeaway: str
     deepAnalysis: str
     items: List[EnrichedNewsItem]
+    aiEnrichment: bool = True

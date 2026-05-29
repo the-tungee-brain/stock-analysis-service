@@ -4,6 +4,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from app.adapters.cache.enriched_news_cache import EnrichedNewsCache
+from app.core.paid_access import is_paid_user
 from app.models.company_research_models import EnrichedNewsSummary
 from app.models.finnhub_news_models import NewsResponse
 from app.models.news_analytics_models import StockNewsView
@@ -35,14 +36,16 @@ class EnrichedNewsService:
         except Exception:
             return None
 
-    def get_cached_summary(self, symbol: str) -> EnrichedNewsSummary | None:
+    def get_cached_summary(self, symbol: str, *, user_id: str | None = None) -> EnrichedNewsSummary | None:
         if self.enriched_news_cache is None:
+            return None
+        if user_id is not None and not is_paid_user(user_id):
             return None
         try:
             view = self.enriched_news_cache.get(symbol=symbol)
         except Exception:
             return None
-        if view is None:
+        if view is None or not view.aiEnrichment:
             return None
         return self._to_summary(view)
 
@@ -69,7 +72,10 @@ class EnrichedNewsService:
         news: NewsResponse | None = None,
         user_id: str | None = None,
     ) -> EnrichedNewsSummary | None:
-        cached = self.get_cached_summary(symbol=symbol)
+        if user_id is not None and not is_paid_user(user_id):
+            return None
+
+        cached = self.get_cached_summary(symbol=symbol, user_id=user_id)
         if cached is not None:
             return cached
 
