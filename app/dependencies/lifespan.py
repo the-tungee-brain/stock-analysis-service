@@ -10,6 +10,7 @@ from openai import OpenAI
 from app.adapters.cache.dividend_history_cache import DividendHistoryCache
 from app.adapters.cache.enriched_news_cache import EnrichedNewsCache
 from app.adapters.cache.finnhub_response_cache import FinnhubResponseCache
+from app.adapters.cache.app_user_cache import AppUserCache
 from app.adapters.cache.portfolio_brief_cache import PortfolioBriefCache
 from app.adapters.cache.research_context_cache import ResearchContextCache
 
@@ -93,6 +94,7 @@ from app.services.intelligence.portfolio_intelligence_service import (
 from app.services.morning_brief_delivery_service import MorningBriefDeliveryService
 from app.services.portfolio_memory_service import PortfolioMemoryService
 from app.services.portfolio_news_service import PortfolioNewsService
+from app.services.research_overview_service import ResearchOverviewService
 from app.services.strategy.strategy_journey_service import StrategyJourneyService
 from app.services.strategy.strategy_stock_screener_service import (
     StrategyStockScreenerService,
@@ -179,6 +181,7 @@ async def lifespan(app: FastAPI):
     research_context_cache = ResearchContextCache(redis_client=redis_client)
     dividend_history_cache = DividendHistoryCache(redis_client=redis_client)
     portfolio_brief_cache = PortfolioBriefCache(redis_client=redis_client)
+    app_user_cache = AppUserCache(redis_client=redis_client)
     enriched_news_cache = EnrichedNewsCache(redis_client=redis_client)
     recent_orders_cache = RecentOrdersCache(redis_client=redis_client)
     llm_output_cache = LLMOutputCache(redis_client=redis_client)
@@ -204,7 +207,10 @@ async def lifespan(app: FastAPI):
         schwab_redis_token_manager=schwab_redis_token_manager,
     )
     schwab_trader_builder = get_schwab_trader_builder(session)
-    app_user_builder = AppUserBuilder(app_user_adapter=app_user_adapter)
+    app_user_builder = AppUserBuilder(
+        app_user_adapter=app_user_adapter,
+        app_user_cache=app_user_cache,
+    )
     waitlist_builder = WaitlistBuilder(waitlist_adapter=waitlist_adapter)
     news_analytics_builder = NewsAnalyticsBuilder(openai_adapter=openai_adapter)
     prompt_builder = PromptBuilder(openai_adapter=openai_adapter)
@@ -350,6 +356,18 @@ async def lifespan(app: FastAPI):
         portfolio_brief_cache=portfolio_brief_cache,
     )
     ticker_service = TickerService(ticker_symbol_builder=ticker_symbol_builder)
+    research_overview_service = ResearchOverviewService(
+        company_research_service=company_research_service,
+        company_profile_service=company_profile_service,
+        market_service=market_service,
+        ticker_service=ticker_service,
+        portfolio_service=portfolio_service,
+        schwab_auth_service=schwab_auth_service,
+        portfolio_analysis_service=portfolio_analysis_service,
+        yfinance_analysis_builder=yfinance_analysis_builder,
+        yfinance_funds_builder=yfinance_funds_builder,
+        etf_research_service=etf_research_service,
+    )
     portfolio_memory_service = PortfolioMemoryService(
         portfolio_snapshot_adapter=portfolio_snapshot_adapter,
         alert_history_adapter=alert_history_adapter,
@@ -405,6 +423,7 @@ async def lifespan(app: FastAPI):
     app.state.etf_research_service = etf_research_service
     app.state.dividend_research_service = dividend_research_service
     app.state.ticker_service = ticker_service
+    app.state.research_overview_service = research_overview_service
     app.state.transaction_service = transaction_service
     app.state.recent_orders_cache = recent_orders_cache
     app.state.portfolio_memory_service = portfolio_memory_service

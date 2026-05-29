@@ -43,6 +43,9 @@ from app.api.get_symbol_analysis_precomputed_route import (
 from app.api.get_symbol_intelligence_route import (
     router as get_symbol_intelligence_router,
 )
+from app.api.get_research_overview_bundle_route import (
+    router as get_research_overview_bundle_router,
+)
 from app.api.get_option_chain_debug_route import router as get_option_chain_debug_router
 from app.api.internal_morning_brief_route import router as internal_morning_brief_router
 from app.api.portfolio_memory_routes import router as portfolio_memory_router
@@ -110,6 +113,7 @@ protected_api.include_router(strategy_router)
 protected_api.include_router(strategy_playbook_ask_router)
 protected_api.include_router(wheel_backtest_router)
 protected_api.include_router(get_symbol_intelligence_router)
+protected_api.include_router(get_research_overview_bundle_router)
 protected_api.include_router(get_symbol_analysis_precomputed_router)
 protected_api.include_router(get_option_chain_debug_router)
 protected_api.include_router(get_recent_orders_router)

@@ -54,6 +54,29 @@ def _sample_brief() -> MorningBrief:
     )
 
 
+def test_prewarm_all_warms_users_without_email():
+    user = MagicMock()
+    user.identity_sub = "user-1"
+    user.email = "a@example.com"
+
+    service = _service()
+    service.app_user_adapter.list_users_with_schwab.return_value = [user]
+    service.build_for_user = MagicMock(return_value=_sample_brief())
+
+    result = service.prewarm_all()
+
+    assert result.attempted == 1
+    assert result.warmed == 1
+    assert result.skipped == 0
+    assert result.failed == 0
+    service.build_for_user.assert_called_once_with(
+        user_id="user-1",
+        refresh=True,
+        persist=False,
+    )
+    service.email_adapter.send_email.assert_not_called()
+
+
 def test_render_email_includes_macro_and_changes():
     service = _service()
 

@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from app.api.get_symbol_intelligence_route import _fetch_symbol_intelligence
+from app.services.symbol_intelligence_service import fetch_symbol_intelligence
 from app.models.intelligence_models import SymbolIntelligence
 from app.services.schwab_auth_service import SchwabReauthRequired
 
@@ -19,7 +19,7 @@ def test_fetch_symbol_intelligence_marks_reauth_and_partial():
         SymbolIntelligence(symbol="AAPL", signals=[])
     )
 
-    result = _fetch_symbol_intelligence(
+    result = fetch_symbol_intelligence(
         user_id="user-1",
         symbol_upper="AAPL",
         include_options=True,

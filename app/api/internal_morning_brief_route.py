@@ -35,3 +35,20 @@ def dispatch_morning_briefs(
         "failed": result.failed,
         "errors": result.errors,
     }
+
+
+@router.post("/internal/prewarm-morning-briefs")
+def prewarm_morning_briefs(
+    _: None = Depends(_verify_cron_secret),
+    delivery_service: MorningBriefDeliveryService = Depends(
+        get_morning_brief_delivery_service
+    ),
+):
+    result = delivery_service.prewarm_all()
+    return {
+        "attempted": result.attempted,
+        "warmed": result.warmed,
+        "skipped": result.skipped,
+        "failed": result.failed,
+        "errors": result.errors,
+    }

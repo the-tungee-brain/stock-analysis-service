@@ -35,6 +35,7 @@ from app.services.strategy.strategy_stock_suggestion_service import (
 )
 from app.services.strategy.wheel_backtest_service import WheelBacktestService
 from app.services.account_deletion_service import AccountDeletionService
+from app.services.research_overview_service import ResearchOverviewService
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -161,3 +162,7 @@ def get_account_deletion_service(request: Request) -> AccountDeletionService:
 
 def get_wheel_backtest_service(request: Request) -> WheelBacktestService:
     return request.app.state.wheel_backtest_service
+
+
+def get_research_overview_service(request: Request) -> ResearchOverviewService:
+    return request.app.state.research_overview_service

@@ -30,6 +30,15 @@ class MorningBriefDispatchResult:
     errors: list[str] = field(default_factory=list)
 
 
+@dataclass
+class MorningBriefPrewarmResult:
+    attempted: int = 0
+    warmed: int = 0
+    skipped: int = 0
+    failed: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
 class MorningBriefDeliveryService:
     def __init__(
         self,
@@ -193,6 +202,55 @@ class MorningBriefDeliveryService:
                     outcome = future.result()
                     if outcome == "sent":
                         result.sent += 1
+                    else:
+                        result.skipped += 1
+                except Exception as exc:
+                    result.failed += 1
+                    result.errors.append(str(exc))
+
+        return result
+
+    def _prewarm_one_user(self, user) -> str:
+        """Returns warmed | skipped | failed."""
+        user_key = user.identity_sub
+        try:
+            brief = self.build_for_user(
+                user_id=user_key,
+                refresh=True,
+                persist=False,
+            )
+            if brief is None:
+                return "skipped"
+            return "warmed"
+        except SchwabReauthRequired:
+            return "skipped"
+        except Exception as exc:
+            message = f"{user.email}: {exc}"
+            logger.exception("Morning brief pre-warm failed for user %s", user_key)
+            raise RuntimeError(message) from exc
+
+    def prewarm_all(self) -> MorningBriefPrewarmResult:
+        """Warm portfolio brief Redis cache before email dispatch (no snapshots or email)."""
+        result = MorningBriefPrewarmResult()
+        users = self.app_user_adapter.list_users_with_schwab()
+        if not users:
+            return result
+
+        max_workers = max(
+            1,
+            int(os.getenv("MORNING_BRIEF_DISPATCH_WORKERS", "20")),
+        )
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self._prewarm_one_user, user): user for user in users
+            }
+            for future in as_completed(futures):
+                result.attempted += 1
+                try:
+                    outcome = future.result()
+                    if outcome == "warmed":
+                        result.warmed += 1
                     else:
                         result.skipped += 1
                 except Exception as exc:
