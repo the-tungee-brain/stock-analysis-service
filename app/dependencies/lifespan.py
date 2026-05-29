@@ -367,6 +367,8 @@ async def lifespan(app: FastAPI):
         yfinance_analysis_builder=yfinance_analysis_builder,
         yfinance_funds_builder=yfinance_funds_builder,
         etf_research_service=etf_research_service,
+        prompt_enrichment_service=prompt_enrichment_service,
+        llm_service=llm_service,
     )
     portfolio_memory_service = PortfolioMemoryService(
         portfolio_snapshot_adapter=portfolio_snapshot_adapter,

@@ -9,7 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.services.symbol_intelligence_service import fetch_symbol_intelligence
 from app.builders.yfinance_analysis_builder import YFinanceAnalysisBuilder
 from app.builders.yfinance_funds_builder import YFinanceFundsBuilder
+from app.core.llm_routes import LLMRoute
 from app.models.company_research_models import (
+    AISummary,
     AssetType,
     EtfHoldingsContext,
     PerformanceSnapshot,
@@ -21,6 +23,8 @@ from app.models.yfinance_analysis_models import StreetAnalysisSnapshot
 from app.models.yfinance_funds_models import EtfFundsSnapshot
 from app.services.company_profile_service import CompanyProfileService
 from app.services.company_research_service import CompanyResearchService
+from app.services.llm_service import LLMService
+from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.etf_research_service import EtfResearchService
 from app.services.market_service import MarketService
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
@@ -47,6 +51,7 @@ class ResearchOverviewBundle(BaseModel):
     etf_holdings: EtfHoldingsContext | None = Field(
         default=None, serialization_alias="etfHoldings"
     )
+    summary: AISummary | None = None
 
 
 class ResearchOverviewService:
@@ -63,6 +68,8 @@ class ResearchOverviewService:
         yfinance_analysis_builder: YFinanceAnalysisBuilder,
         yfinance_funds_builder: YFinanceFundsBuilder,
         etf_research_service: EtfResearchService,
+        prompt_enrichment_service: PromptEnrichmentService | None = None,
+        llm_service: LLMService | None = None,
     ):
         self.company_research_service = company_research_service
         self.company_profile_service = company_profile_service
@@ -74,6 +81,8 @@ class ResearchOverviewService:
         self.yfinance_analysis_builder = yfinance_analysis_builder
         self.yfinance_funds_builder = yfinance_funds_builder
         self.etf_research_service = etf_research_service
+        self.prompt_enrichment_service = prompt_enrichment_service
+        self.llm_service = llm_service
 
     def build_bundle(
         self,
@@ -81,6 +90,7 @@ class ResearchOverviewService:
         user_id: str,
         symbol: str,
         holdings_limit: int = 8,
+        include_summary: bool = False,
     ) -> ResearchOverviewBundle:
         symbol_upper = symbol.strip().upper()
         ctx = self.company_research_service.build_context(symbol=symbol_upper)
@@ -140,6 +150,27 @@ class ResearchOverviewService:
             if etf_holdings_future is not None:
                 etf_holdings = etf_holdings_future.result()
 
+        summary: AISummary | None = None
+        if (
+            include_summary
+            and self.prompt_enrichment_service is not None
+            and self.llm_service is not None
+        ):
+            prompts = self.prompt_enrichment_service.build_stock_summary_prompt(
+                ctx=ctx
+            )
+            summary = asyncio.run(
+                self.llm_service.generate_from_prompts(
+                    prompts=prompts,
+                    response_model=AISummary,
+                    route=LLMRoute.SUMMARY,
+                    symbol=ctx.symbol,
+                    context_fingerprint=CompanyResearchService.context_fingerprint(
+                        ctx
+                    ),
+                )
+            )
+
         return ResearchOverviewBundle(
             symbol=symbol_upper,
             asset_type=asset_type,
@@ -150,6 +181,7 @@ class ResearchOverviewService:
             street_analysis=street_analysis,
             etf_funds=etf_funds,
             etf_holdings=etf_holdings,
+            summary=summary,
         )
 
     def _lookup_ticker(self, symbol_upper: str) -> TickerSymbolItem | None:
@@ -164,11 +196,13 @@ class ResearchOverviewService:
         user_id: str,
         symbol: str,
         holdings_limit: int = 8,
+        include_summary: bool = False,
     ) -> ResearchOverviewBundle:
         return await asyncio.to_thread(
             lambda: self.build_bundle(
                 user_id=user_id,
                 symbol=symbol,
                 holdings_limit=holdings_limit,
+                include_summary=include_summary,
             )
         )

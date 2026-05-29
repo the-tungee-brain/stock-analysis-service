@@ -18,6 +18,10 @@ router = APIRouter()
 async def get_research_overview_bundle(
     symbol: str = Query(..., min_length=1, max_length=12),
     holdings_limit: int = Query(default=8, ge=1, le=25),
+    include_summary: bool = Query(
+        default=False,
+        description="Include full AI summary (slower; use for explicit refresh)",
+    ),
     user_id: str = Depends(get_current_user_id),
     overview_service: ResearchOverviewService = Depends(get_research_overview_service),
 ) -> ResearchOverviewBundle:
@@ -25,4 +29,5 @@ async def get_research_overview_bundle(
         user_id=user_id,
         symbol=symbol,
         holdings_limit=holdings_limit,
+        include_summary=include_summary,
     )
