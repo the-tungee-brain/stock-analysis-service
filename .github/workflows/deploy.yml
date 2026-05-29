@@ -115,6 +115,8 @@ jobs:
               -e CRON_SECRET="${{ secrets.CRON_SECRET }}" \
               -e RESEND_API_KEY="${{ secrets.RESEND_API_KEY }}" \
               -e MORNING_BRIEF_FROM_EMAIL="${{ secrets.MORNING_BRIEF_FROM_EMAIL }}" \
+              -e PAID_USER_EMAILS="${{ secrets.PAID_USER_EMAILS }}" \
+              -e PAID_USER_IDS="${{ secrets.PAID_USER_IDS }}" \
               --restart always \
               tungxd96/sas-server:latest
 

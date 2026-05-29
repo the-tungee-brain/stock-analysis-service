@@ -8,6 +8,8 @@ MARKET_NEWS_DISPLAY_LIMIT = int(os.getenv("MARKET_NEWS_LIMIT", "5"))
 MARKET_NEWS_PROMPT_LIMIT = int(os.getenv("MARKET_NEWS_PROMPT_LIMIT", "3"))
 MARKET_NEWS_LOOKBACK_HOURS = int(os.getenv("MARKET_NEWS_LOOKBACK_HOURS", "24"))
 COMPANY_NEWS_DISPLAY_LIMIT = int(os.getenv("COMPANY_NEWS_LIMIT", "20"))
+# Headlines sent to the LLM (rest use original Finnhub text).
+COMPANY_NEWS_LLM_LIMIT = int(os.getenv("COMPANY_NEWS_LLM_LIMIT", "10"))
 
 
 def finnhub_press_releases_enabled() -> bool:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.core.llm_config import settings
+from app.core.paid_access import is_paid_user as _is_paid_user
 
 # Simple (fast) + Standard (balanced) — available on Free and Pro.
 FREE_ALLOWED_MODELS = frozenset(
@@ -25,7 +26,7 @@ PAID_ALLOWED_MODELS = FREE_ALLOWED_MODELS | frozenset(
 
 
 def is_paid_user(user_id: str) -> bool:
-    return user_id in settings.PAID_USER_IDS
+    return _is_paid_user(user_id)
 
 
 def resolve_llm_model(requested: str | None, user_id: str) -> str:

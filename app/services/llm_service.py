@@ -13,8 +13,13 @@ from app.core.llm_config import settings
 from app.core.llm_model_policy import resolve_llm_model
 from app.core.llm_json import validate_llm_model
 from app.core.llm_routes import LLMRoute
-from app.models.finnhub_news_models import NewsResponse
-from app.models.news_analytics_models import StockNewsView
+from app.models.finnhub_news_models import NewsItem, NewsResponse
+from app.models.news_analytics_models import (
+    CombinedNewsLLMOutput,
+    EnrichedNewsItem,
+    StockNewsView,
+)
+from app.services.news_service import COMPANY_NEWS_LLM_LIMIT
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -46,6 +51,23 @@ class LLMService:
         ):
             yield chunk
 
+    @staticmethod
+    def _passthrough_enriched_item(src: NewsItem) -> EnrichedNewsItem:
+        summary = (src.summary or "").strip() or src.headline
+        return EnrichedNewsItem(
+            id=src.id,
+            datetime=src.datetime.isoformat(),
+            headline=src.headline,
+            source=src.source,
+            original_summary=src.summary or "",
+            sentiment="neutral",
+            confidence=0.35,
+            summary=summary,
+            topics=[],
+            url=src.url,
+            image=src.image,
+        )
+
     async def analyze_news(
         self,
         symbol: str,
@@ -69,13 +91,57 @@ class LLMService:
                 deepAnalysis="No recent news articles were found for this symbol in the past day. Without news flow, focus on fundamentals, business model, and price performance for your research.",
                 items=[],
             )
-        enriched_news = await self.news_analytics_builder.get_enriched_news_items(
-            model=resolved_model, prompts=prompts, news=news.root
-        )
-        return await self.prompt_builder.get_enriched_news_sentiment(
-            model=resolved_model,
+
+        fingerprint = ",".join(str(item.id) for item in news.root[:COMPANY_NEWS_LLM_LIMIT])
+        combined = await self.generate_from_prompts(
+            prompts,
+            CombinedNewsLLMOutput,
+            route=LLMRoute.NEWS,
             symbol=symbol,
-            enriched_news=enriched_news,
+            context_fingerprint=f"combined:{fingerprint}",
+            model=resolved_model,
+        )
+
+        llm_by_id = {item.id: item for item in combined.items}
+        enriched_items: list[EnrichedNewsItem] = []
+        for src in news.root:
+            obj = llm_by_id.get(src.id)
+            if obj is None:
+                enriched_items.append(self._passthrough_enriched_item(src))
+                continue
+            enriched_items.append(
+                EnrichedNewsItem(
+                    id=src.id,
+                    datetime=src.datetime.isoformat(),
+                    headline=src.headline,
+                    source=src.source,
+                    original_summary=src.summary or "",
+                    sentiment=obj.sentiment,
+                    confidence=float(obj.confidence),
+                    summary=obj.summary,
+                    topics=list(obj.topics),
+                    url=src.url,
+                    image=src.image,
+                )
+            )
+
+        horizon = combined.market_impact_horizon
+        if horizon not in {"immediate", "medium_term", "long_term"}:
+            horizon = "medium_term"
+
+        return StockNewsView(
+            symbol=symbol,
+            overall_sentiment=combined.overall_sentiment,
+            summary=combined.summary,
+            insights=list(combined.insights),
+            risks=list(combined.risks),
+            dominant_driver=combined.dominant_driver
+            or "No dominant news driver identified.",
+            market_impact_horizon=horizon,
+            actionability_score=max(1, min(5, int(combined.actionability_score))),
+            investorTakeaway=combined.investorTakeaway,
+            deepAnalysis=combined.deepAnalysis,
+            items=enriched_items,
         )
 
     async def generate_stream_from_prompts(

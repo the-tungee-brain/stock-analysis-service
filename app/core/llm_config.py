@@ -17,6 +17,11 @@ class Settings:
         for user_id in os.getenv("PAID_USER_IDS", "").split(",")
         if user_id.strip()
     )
+    PAID_USER_EMAILS: frozenset[str] = frozenset(
+        email.strip().lower()
+        for email in os.getenv("PAID_USER_EMAILS", "").split(",")
+        if email.strip()
+    )
     MAX_OUTPUT_TOKENS: int = int(os.getenv("MAX_OUTPUT_TOKENS", "2500"))
     MAX_OUTPUT_TOKENS_SUMMARY: int = int(os.getenv("MAX_OUTPUT_TOKENS_SUMMARY", "2000"))
     MAX_OUTPUT_TOKENS_BUSINESS: int = int(os.getenv("MAX_OUTPUT_TOKENS_BUSINESS", "2500"))
@@ -24,6 +29,7 @@ class Settings:
         os.getenv("MAX_OUTPUT_TOKENS_FUNDAMENTALS", "1500")
     )
     MAX_OUTPUT_TOKENS_STREAM: int = int(os.getenv("MAX_OUTPUT_TOKENS_STREAM", "1800"))
+    MAX_OUTPUT_TOKENS_NEWS: int = int(os.getenv("MAX_OUTPUT_TOKENS_NEWS", "2400"))
     MAX_OUTPUT_TOKENS_REASONING_STREAM: int = int(
         os.getenv("MAX_OUTPUT_TOKENS_REASONING_STREAM", "4096")
     )
@@ -44,7 +50,7 @@ class Settings:
                 LLMRoute.BUSINESS: self.MAX_OUTPUT_TOKENS_BUSINESS,
                 LLMRoute.FUNDAMENTALS: self.MAX_OUTPUT_TOKENS_FUNDAMENTALS,
                 LLMRoute.EARNINGS: self.MAX_OUTPUT_TOKENS_SUMMARY,
-                LLMRoute.NEWS: self.MAX_OUTPUT_TOKENS_STREAM,
+                LLMRoute.NEWS: self.MAX_OUTPUT_TOKENS_NEWS,
                 LLMRoute.STRATEGY_STOCKS: self.MAX_OUTPUT_TOKENS_STRATEGY_STOCKS,
             }
         return self._ROUTE_TOKEN_LIMITS.get(route, self.MAX_OUTPUT_TOKENS)

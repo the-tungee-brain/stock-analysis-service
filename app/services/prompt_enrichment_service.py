@@ -1545,53 +1545,59 @@ class PromptEnrichmentService:
 
     def enrich_news_prompt(self, symbol: str, news: NewsResponse) -> List[str]:
         news_block = self._format_news_block(news)
+        item_count = len(news.root)
 
         system_msg = dedent(
             """
             # Role
-            You are a professional equity research assistant helping retail investors understand
-            how individual news items may affect a stock.
+            You are an equity research assistant helping retail investors understand recent news.
 
-            # Sentiment definitions
-            - "bullish" — likely to push the stock price UP (positive earnings, upgrades, product wins, etc.).
-            - "bearish" — likely to push the stock price DOWN (misses, downgrades, lawsuits, etc.).
-            - "neutral" — informational, mixed, or unlikely to move the price meaningfully.
-
-            # Confidence calibration
-            - 0.9–1.0: clear, direct impact (e.g., earnings beat with raised guidance).
-            - 0.6–0.8: likely impact but some ambiguity (analyst opinion, sector trend).
-            - 0.3–0.5: indirect or speculative connection.
-            - Below 0.3: very weak link; use sparingly.
+            # Sentiment (per headline)
+            - "bullish" — likely to push the stock UP.
+            - "bearish" — likely to push the stock DOWN.
+            - "neutral" — informational or unlikely to move price much.
 
             # Rules
-            - Analyze each item based on its headline and summary only.
-            - Write summaries that teach the investor WHY the news matters, not just what happened.
-            - Do not invent details absent from the headline or summary.
-            - Return ONLY valid JSON — no markdown, commentary, or extra keys.
+            - Use only the provided headlines and summaries.
+            - Teach WHY each item matters; do not invent facts.
+            - This is research, not trading advice.
+            - Return ONLY valid JSON matching the schema — no markdown.
             """
         ).strip()
 
         user_msg = dedent(
             f"""
-            Stock ticker: {symbol}
-
-            News items (in order):
+            Stock: {symbol}
+            Headlines to analyze ({item_count} items, most recent first):
             {news_block}
 
-            # Your task
-            For EACH news item, return one JSON object:
+            Return ONE JSON object with:
 
-            - **id** (number) — must match the item's id exactly.
-            - **sentiment** — "bullish" | "bearish" | "neutral"
-            - **confidence** (number) — 0.0 to 1.0.
-            - **summary** (string) — 1–2 sentences explaining what happened AND why it matters
-              to an investor in {symbol}. Be educational, not just descriptive.
-            - **horizon** — "immediate" | "medium_term" | "long_term"
-            - **topics** (string array) — tags from:
-              ["earnings", "guidance", "product", "macro", "regulation", "management",
-               "competition", "crypto", "trading_activity", "valuation", "flows", "buybacks"]
+            **items** — array with one entry per input headline (same order), each with:
+            - id (number, exact match)
+            - sentiment ("bullish" | "bearish" | "neutral")
+            - confidence (0.0–1.0)
+            - summary (1–2 sentences, investor-focused)
+            - topics (string array from: earnings, guidance, product, macro, regulation,
+              management, competition, crypto, trading_activity, valuation, flows, buybacks)
 
-            Return ONLY a JSON array, one object per item, in the same order as the input.
+            **overall_sentiment** — "strongly_bullish" | "bullish" | "neutral" | "bearish" | "strongly_bearish"
+
+            **summary** — 4–6 sentences on the news landscape for {symbol}.
+
+            **deepAnalysis** — 4–6 sentences of deeper context (no buy/sell).
+
+            **investorTakeaway** — 2–3 sentences, the main lesson from this news flow.
+
+            **insights** — 4–6 one-sentence strings.
+
+            **risks** — 2–5 one-sentence strings (empty array if none).
+
+            **dominant_driver** — single most important theme.
+
+            **market_impact_horizon** — "immediate" | "medium_term" | "long_term"
+
+            **actionability_score** — integer 1–5 (1 = noise, 5 = highly relevant now).
             """
         ).strip()
 

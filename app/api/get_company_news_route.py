@@ -1,6 +1,8 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, Query
 from app.auth.dependencies import get_current_user_id
-from app.services.news_service import NewsService
+from app.services.news_service import NewsService, COMPANY_NEWS_LLM_LIMIT
 from app.dependencies.service_dependencies import (
     get_news_service,
     get_prompt_enrichment_service,
@@ -40,10 +42,19 @@ async def get_company_news(
             return cached_view
 
     try:
-        news = news_service.get_company_news(symbol=symbol, lookback_days=7)
+        news = await asyncio.to_thread(
+            news_service.get_company_news,
+            symbol=symbol,
+            lookback_days=7,
+        )
     except Exception:
         news = NewsResponse(root=[])
-    prompts = prompt_enrichment_service.enrich_news_prompt(symbol=symbol, news=news)
+
+    llm_news = NewsResponse(root=news.root[:COMPANY_NEWS_LLM_LIMIT])
+    prompts = prompt_enrichment_service.enrich_news_prompt(
+        symbol=symbol,
+        news=llm_news,
+    )
     stock_news_view = await llm_service.analyze_news(
         symbol=symbol,
         prompts=prompts,

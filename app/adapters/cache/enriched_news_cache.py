@@ -7,7 +7,7 @@ from app.models.news_analytics_models import StockNewsView
 
 
 class EnrichedNewsCache:
-    DEFAULT_TTL_SECONDS = 900
+    DEFAULT_TTL_SECONDS = 3600
 
     def __init__(
         self,
