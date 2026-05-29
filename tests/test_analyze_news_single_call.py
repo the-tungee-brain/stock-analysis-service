@@ -1,6 +1,5 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
-
-import pytest
 
 from app.models.finnhub_news_models import NewsItem, NewsResponse
 from app.models.news_analytics_models import CombinedNewsLLMOutput, NewsLLMItem
@@ -19,8 +18,7 @@ def _news_item(item_id: int) -> NewsItem:
     )
 
 
-@pytest.mark.asyncio
-async def test_analyze_news_uses_single_llm_call_and_passthrough_extra_headlines():
+def test_analyze_news_uses_single_llm_call_and_passthrough_extra_headlines():
     news = NewsResponse(root=[_news_item(1), _news_item(2)])
 
     combined = CombinedNewsLLMOutput(
@@ -51,11 +49,13 @@ async def test_analyze_news_uses_single_llm_call_and_passthrough_extra_headlines
     )
     llm_service.generate_from_prompts = AsyncMock(return_value=combined)
 
-    view = await llm_service.analyze_news(
-        symbol="AAPL",
-        prompts=["system", "user"],
-        news=news,
-        user_id="user-1",
+    view = asyncio.run(
+        llm_service.analyze_news(
+            symbol="AAPL",
+            prompts=["system", "user"],
+            news=news,
+            user_id="user-1",
+        )
     )
 
     llm_service.generate_from_prompts.assert_awaited_once()
