@@ -55,7 +55,7 @@ def parse_yfinance_news_item(raw: dict[str, Any]) -> ParsedYFinanceNews | None:
         headline=headline,
         summary=summary,
         url=url,
-        source=source or "Yahoo Finance",
+        source=source or "Press release",
         published_at=published_at,
         content_type=content_type,
     )

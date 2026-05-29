@@ -686,7 +686,7 @@ class YFinanceAdapter:
         count: int = 20,
         tab: YFinanceNewsTab = "news",
     ) -> list[dict[str, Any]]:
-        """Headlines from Yahoo Finance (Ticker.get_news).
+        """Headlines from yfinance Ticker.get_news.
 
         tab: ``news``, ``all``, or ``press releases`` per yfinance API.
         """
