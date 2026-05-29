@@ -42,12 +42,7 @@ class YFinanceFundsBuilder:
         if not symbol_upper:
             return None
 
-        try:
-            raw = self.yfinance_adapter.get_funds_data_raw(symbol_upper)
-        except Exception:
-            logger.exception("yfinance funds data failed for %s", symbol_upper)
-            return None
-
+        raw = self.yfinance_adapter.get_funds_data_raw(symbol_upper)
         if not raw:
             return None
 

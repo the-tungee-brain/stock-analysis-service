@@ -64,20 +64,59 @@ def test_finnhub_adapter_does_not_open_circuit_on_429():
         adapter.get_quote("HOOD")
 
 
+def _finnhub_api_error(status_code: int) -> FinnhubAPIException:
+    response = MagicMock()
+    response.status_code = status_code
+    response.json.return_value = {"error": f"HTTP {status_code}"}
+    return FinnhubAPIException(response)
+
+
+def test_finnhub_adapter_retries_transient_502_then_succeeds():
+    adapter = FinnhubAdapter(api_key="test-key")
+    adapter.finnhub_client = MagicMock()
+    error_502 = _finnhub_api_error(502)
+    adapter.finnhub_client.quote.side_effect = [
+        error_502,
+        error_502,
+        {"c": 12.5, "pc": 12.0},
+    ]
+
+    with patch.object(adapter, "_sleep_before_finnhub_retry"):
+        result = adapter.get_quote("NOK")
+
+    assert result == {"c": 12.5, "pc": 12.0}
+    assert adapter.finnhub_client.quote.call_count == 3
+
+
+def test_finnhub_adapter_does_not_open_circuit_on_502():
+    adapter = FinnhubAdapter(
+        api_key="test-key",
+        circuit_cooldown_seconds=60,
+    )
+    adapter.finnhub_client = MagicMock()
+    adapter.finnhub_client.quote.side_effect = _finnhub_api_error(502)
+
+    with patch.object(adapter, "_sleep_before_finnhub_retry"):
+        for _ in range(6):
+            with pytest.raises(FinnhubAPIException):
+                adapter.get_quote("NOK")
+
+    with pytest.raises(FinnhubAPIException):
+        adapter.get_quote("NOK")
+
+
 def test_finnhub_adapter_opens_circuit_after_non_rate_limit_api_error():
     adapter = FinnhubAdapter(
         api_key="test-key",
         circuit_cooldown_seconds=60,
     )
     adapter.finnhub_client = MagicMock()
-    response = MagicMock()
-    response.status_code = 500
-    response.json.return_value = {"error": "Internal error"}
-    adapter.finnhub_client.quote.side_effect = FinnhubAPIException(response)
+    adapter.finnhub_client.quote.side_effect = _finnhub_api_error(500)
 
-    for _ in range(3):
-        with pytest.raises(FinnhubAPIException):
-            adapter.get_quote("HOOD")
+    with patch.object(adapter, "_sleep_before_finnhub_retry"):
+        for _ in range(3):
+            with pytest.raises(FinnhubAPIException):
+                adapter.get_quote("HOOD")
 
     with pytest.raises(FinnhubUnavailableError):
         adapter.get_quote("HOOD")

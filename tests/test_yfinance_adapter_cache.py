@@ -29,6 +29,40 @@ def test_get_ticker_info_uses_cache():
     ticker_cls.assert_called_once()
 
 
+def test_get_funds_data_raw_falls_back_to_ticker_info_when_fund_attrs_fail():
+    adapter = YFinanceAdapter()
+    adapter.FUNDS_DATA_TTL_SECONDS = 60
+
+    class BrokenFunds:
+        _symbol = "SPYM"
+
+        @property
+        def description(self):
+            raise KeyError("summaryProfile")
+
+    mock_ticker = MagicMock()
+    mock_ticker.get_funds_data.return_value = BrokenFunds()
+    mock_ticker.info = {
+        "longBusinessSummary": "Tracks mid-cap US stocks.",
+        "category": "Mid-Cap Blend",
+        "fundFamily": "State Street",
+        "legalType": "Exchange Traded Fund",
+        "annualReportExpenseRatio": 0.0003,
+        "totalAssets": 12_000_000_000,
+    }
+
+    with patch(
+        "app.adapters.market.yfinance_adapter.yf.Ticker",
+        return_value=mock_ticker,
+    ):
+        raw = adapter.get_funds_data_raw("SPYM")
+
+    assert raw is not None
+    assert raw["description"] == "Tracks mid-cap US stocks."
+    assert raw["fund_overview"]["categoryName"] == "Mid-Cap Blend"
+    assert raw["fund_operations"].loc["Annual Report Expense Ratio", "SPYM"] == 0.0003
+
+
 def test_get_history_uses_cache():
     adapter = YFinanceAdapter()
     adapter.HISTORY_TTL_SECONDS = 60

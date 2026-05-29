@@ -5,6 +5,7 @@ from datetime import date
 from operator import attrgetter
 
 import requests
+from finnhub.exceptions import FinnhubAPIException
 
 from app.adapters.finnhub.finnhub_adapter import FinnhubAdapter
 from app.adapters.finnhub.finnhub_circuit import FinnhubUnavailableError
@@ -27,7 +28,11 @@ class FinnhubBuilder:
                 symbol=symbol, _from=_from_str, to=to_str
             )
             news_response = NewsResponse.model_validate(raw_news_response)
-        except (FinnhubUnavailableError, requests.exceptions.RequestException) as exc:
+        except (
+            FinnhubUnavailableError,
+            FinnhubAPIException,
+            requests.exceptions.RequestException,
+        ) as exc:
             logger.warning(
                 "Finnhub company news unavailable for %s: %s",
                 symbol,
@@ -64,7 +69,11 @@ class FinnhubBuilder:
                 min_id=min_id,
             )
             news_response = NewsResponse.model_validate(raw or [])
-        except (FinnhubUnavailableError, requests.exceptions.RequestException) as exc:
+        except (
+            FinnhubUnavailableError,
+            FinnhubAPIException,
+            requests.exceptions.RequestException,
+        ) as exc:
             logger.warning("Finnhub market news unavailable: %s", exc)
             return NewsResponse(root=[])
         except Exception:

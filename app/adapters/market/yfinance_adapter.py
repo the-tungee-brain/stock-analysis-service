@@ -322,27 +322,136 @@ class YFinanceAdapter:
             return dict(cached)
 
         ticker = self._ticker(symbol_upper)
+        funds = None
         try:
             with yfinance_fetch_lock():
                 funds = ticker.get_funds_data()
         except Exception:
-            logger.exception("yfinance get_funds_data failed for %s", symbol_upper)
+            logger.debug("yfinance get_funds_data failed for %s", symbol_upper)
+
+        bundle: dict[str, Any] = {}
+        if funds is not None:
+            bundle = {
+                "description": self._safe_funds_attr(funds, "description"),
+                "fund_overview": self._safe_funds_attr(funds, "fund_overview"),
+                "fund_operations": self._safe_funds_attr(funds, "fund_operations"),
+                "asset_classes": self._safe_funds_attr(funds, "asset_classes"),
+                "sector_weightings": self._safe_funds_attr(funds, "sector_weightings"),
+                "bond_ratings": self._safe_funds_attr(funds, "bond_ratings"),
+                "top_holdings": self._safe_funds_attr(funds, "top_holdings"),
+            }
+
+        if not self._funds_bundle_has_content(bundle):
+            bundle = self._merge_funds_bundles(
+                bundle,
+                self._funds_fallback_from_info(symbol_upper),
+            )
+
+        if not self._funds_bundle_has_content(bundle):
+            logger.debug("No Yahoo fund profile for %s", symbol_upper)
             return None
 
-        if funds is None:
-            return None
-
-        bundle: dict[str, Any] = {
-            "description": getattr(funds, "description", None),
-            "fund_overview": getattr(funds, "fund_overview", None),
-            "fund_operations": getattr(funds, "fund_operations", None),
-            "asset_classes": getattr(funds, "asset_classes", None),
-            "sector_weightings": getattr(funds, "sector_weightings", None),
-            "bond_ratings": getattr(funds, "bond_ratings", None),
-            "top_holdings": getattr(funds, "top_holdings", None),
-        }
         self._set_cached(self._funds_data_cache, symbol_upper, bundle)
         return bundle
+
+    def _funds_fallback_from_info(self, symbol: str) -> dict[str, Any]:
+        """Ticker.info fields when yfinance fund scraper has no profile (e.g. SPYM)."""
+        info = self.get_ticker_info(symbol)
+        if not info:
+            return {}
+
+        symbol_upper = symbol.strip().upper()
+        overview: dict[str, Any] = {}
+        if info.get("category"):
+            overview["categoryName"] = info.get("category")
+        if info.get("fundFamily"):
+            overview["family"] = info.get("fundFamily")
+        if info.get("legalType"):
+            overview["legalType"] = info.get("legalType")
+
+        fund_operations = None
+        expense = info.get("annualReportExpenseRatio")
+        turnover = info.get("annualHoldingsTurnover")
+        net_assets = info.get("totalAssets")
+        op_index: list[str] = []
+        op_values: list[Any] = []
+        if expense is not None:
+            op_index.append("Annual Report Expense Ratio")
+            op_values.append(expense)
+        if turnover is not None:
+            op_index.append("Annual Holdings Turnover")
+            op_values.append(turnover)
+        if net_assets is not None:
+            op_index.append("Total Net Assets")
+            op_values.append(net_assets)
+        if op_index:
+            fund_operations = pd.DataFrame(
+                {symbol_upper: op_values},
+                index=op_index,
+            )
+
+        description = info.get("longBusinessSummary") or info.get("description")
+
+        return {
+            "description": description,
+            "fund_overview": overview or None,
+            "fund_operations": fund_operations,
+            "asset_classes": None,
+            "sector_weightings": None,
+            "bond_ratings": None,
+            "top_holdings": None,
+        }
+
+    @staticmethod
+    def _safe_funds_attr(funds: Any, attr: str) -> Any:
+        try:
+            return getattr(funds, attr)
+        except Exception as exc:
+            symbol = getattr(funds, "_symbol", None)
+            logger.debug(
+                "yfinance funds.%s unavailable for %s: %s",
+                attr,
+                symbol or "?",
+                exc,
+            )
+            return None
+
+    @staticmethod
+    def _funds_bundle_has_content(bundle: dict[str, Any]) -> bool:
+        for value in bundle.values():
+            if value is None:
+                continue
+            if isinstance(value, dict) and not value:
+                continue
+            if isinstance(value, pd.DataFrame) and value.empty:
+                continue
+            return True
+        return False
+
+    @staticmethod
+    def _merge_funds_bundles(
+        primary: dict[str, Any],
+        fallback: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged = dict(primary)
+        for key, value in fallback.items():
+            if value is None:
+                continue
+            current = merged.get(key)
+            if current is None:
+                merged[key] = value
+                continue
+            if isinstance(current, dict) and not current and isinstance(value, dict):
+                merged[key] = value
+                continue
+            if (
+                isinstance(current, pd.DataFrame)
+                and current.empty
+                and isinstance(value, pd.DataFrame)
+                and not value.empty
+            ):
+                merged[key] = value
+        return merged
 
     @staticmethod
     def _safe_call(method) -> Any:

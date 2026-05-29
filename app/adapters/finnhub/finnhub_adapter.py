@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 import types
 from collections.abc import Callable
 from typing import TypeVar
@@ -23,6 +24,13 @@ T = TypeVar("T")
 
 DEFAULT_TIMEOUT_SECONDS = 15.0
 DEFAULT_API_URL = "https://finnhub.io/api/v1"
+_TRANSIENT_FINNHUB_STATUSES = frozenset({429, 500, 502, 503, 504})
+_FINNHUB_RETRY_ATTEMPTS = max(
+    1, int(os.getenv("FINNHUB_RETRY_ATTEMPTS", "3"))
+)
+_FINNHUB_RETRY_BACKOFF_SECONDS = float(
+    os.getenv("FINNHUB_RETRY_BACKOFF_SECONDS", "0.35")
+)
 
 
 def _normalized_request(self, method: str, path: str, **kwargs):
@@ -95,23 +103,64 @@ class FinnhubAdapter:
         if not self._circuit.allow_request():
             raise FinnhubUnavailableError("Finnhub circuit open")
 
-        try:
-            result = fn()
-        except FinnhubAPIException as exc:
-            if exc.status_code != 429:
+        last_api_error: FinnhubAPIException | None = None
+        for attempt in range(_FINNHUB_RETRY_ATTEMPTS):
+            try:
+                result = fn()
+            except FinnhubAPIException as exc:
+                last_api_error = exc
+                if self._should_retry_finnhub_api_error(exc, attempt):
+                    self._sleep_before_finnhub_retry(attempt)
+                    continue
+                if self._should_record_finnhub_circuit_failure(exc):
+                    self._circuit.record_failure()
+                logger.warning("Finnhub %s unavailable: %s", label, exc)
+                raise
+            except (
+                requests.exceptions.Timeout,
+                requests.exceptions.ConnectionError,
+            ) as exc:
+                if attempt < _FINNHUB_RETRY_ATTEMPTS - 1:
+                    self._sleep_before_finnhub_retry(attempt)
+                    continue
                 self._circuit.record_failure()
-            logger.warning("Finnhub %s unavailable: %s", label, exc)
-            raise
-        except (
-            requests.exceptions.Timeout,
-            requests.exceptions.ConnectionError,
-        ) as exc:
-            self._circuit.record_failure()
-            logger.warning("Finnhub %s unavailable: %s", label, exc)
-            raise
-        else:
-            self._circuit.record_success()
-            return result
+                logger.warning("Finnhub %s unavailable: %s", label, exc)
+                raise
+            else:
+                self._circuit.record_success()
+                return result
+
+        if last_api_error is not None:
+            raise last_api_error
+        raise FinnhubUnavailableError("Finnhub circuit open")
+
+    @staticmethod
+    def _finnhub_status_code(exc: FinnhubAPIException) -> int | None:
+        code = getattr(exc, "status_code", None)
+        return code if isinstance(code, int) else None
+
+    def _should_retry_finnhub_api_error(
+        self,
+        exc: FinnhubAPIException,
+        attempt: int,
+    ) -> bool:
+        code = self._finnhub_status_code(exc)
+        return (
+            code in _TRANSIENT_FINNHUB_STATUSES
+            and attempt < _FINNHUB_RETRY_ATTEMPTS - 1
+        )
+
+    def _should_record_finnhub_circuit_failure(self, exc: FinnhubAPIException) -> bool:
+        code = self._finnhub_status_code(exc)
+        if code == 429:
+            return False
+        if code in {502, 503, 504}:
+            return False
+        return True
+
+    @staticmethod
+    def _sleep_before_finnhub_retry(attempt: int) -> None:
+        time.sleep(_FINNHUB_RETRY_BACKOFF_SECONDS * (attempt + 1))
 
     def get_company_news(self, symbol: str, _from: str, to: str):
         cache_key = self._cache_key(symbol, _from, to)
