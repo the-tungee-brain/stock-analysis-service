@@ -47,7 +47,7 @@ k6 run loadtests/morning_brief_dispatch.js
 
 ## CI
 
-`.github/workflows/loadtest-morning-brief.yml` — manual run, **prewarm only** by default. Enable dispatch via workflow input only on non-production targets.
+`.github/workflows/loadtest-morning-brief.yml` — **Actions → Load test — morning brief → Run workflow**. Uses [grafana/setup-k6-action](https://github.com/grafana/setup-k6-action) (no apt/gpg). Prewarm only by default; enable dispatch via workflow input only on non-production targets.
 
 ## Production
 
