@@ -294,6 +294,8 @@ class PortfolioIntelligenceService:
             summary = AISummary.model_validate_json(cached)
             return CachedResearchSnippet(
                 sentiment=summary.sentiment,
+                short=summary.short,
+                long=summary.long,
                 investment_thesis=summary.investmentThesis,
                 key_strengths=list(summary.keyStrengths),
                 key_risks=list(summary.keyRisks),

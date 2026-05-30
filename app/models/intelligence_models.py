@@ -212,6 +212,8 @@ class CachedResearchSnippet(BaseModel):
     model_config = _INTELLIGENCE_MODEL_CONFIG
 
     sentiment: str | None = None
+    short: str | None = None
+    long: str | None = None
     investment_thesis: str | None = Field(
         default=None, serialization_alias="investmentThesis"
     )
