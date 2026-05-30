@@ -238,6 +238,35 @@ def test_simulate_forward_projection_with_annual_contributions():
     )
 
 
+def test_build_historical_backtest_uses_start_price_share_count():
+    result = build_historical_backtest(
+        dividends=SCHD_DIVIDENDS,
+        annual_totals=SCHD_ANNUAL_TOTALS,
+        shares=100,
+        start_year=2015,
+        share_price=80,
+        investment_usd=10_000,
+        price_cagr_pct=8,
+        reinvest_dividends=True,
+        symbol="SCHD",
+    )
+
+    assert result is not None
+    price_at_start = derive_share_price_at_start(
+        current_share_price=80,
+        price_cagr_pct=8,
+        years_elapsed=result["end_year"] - result["start_year"],
+    )
+    expected_shares = 10_000 / price_at_start
+    assert result["initial_shares"] == pytest.approx(expected_shares, rel=1e-4)
+    assert result["drip"] is not None
+    assert result["drip"]["initial_shares"] == pytest.approx(result["initial_shares"])
+    assert result["cash_collected"] == pytest.approx(
+        result["drip"]["total_dividends_collected"]
+    )
+    assert result["cash_collected_annual"] == pytest.approx(result["cash_collected"])
+
+
 def test_build_historical_backtest_includes_cash_and_drip():
     result = build_historical_backtest(
         dividends=SCHD_DIVIDENDS,

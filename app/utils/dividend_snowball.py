@@ -354,14 +354,31 @@ def build_historical_backtest(
     resolved_start = start_year if start_year is not None else default_start
     resolved_start = max(first_year, min(resolved_start, end_year))
 
+    share_price_at_start: float | None = None
+    backtest_shares = shares
+    resolved_price_cagr = price_cagr_pct
+    if share_price is not None and share_price > 0:
+        if resolved_price_cagr is None:
+            from app.utils.stock_price_cagr import fetch_price_cagr_pct
+
+            resolved_price_cagr = fetch_price_cagr_pct(symbol, lookback_years=5) or 0.0
+        years_elapsed = end_year - resolved_start
+        share_price_at_start = derive_share_price_at_start(
+            current_share_price=share_price,
+            price_cagr_pct=resolved_price_cagr,
+            years_elapsed=years_elapsed,
+        )
+        if investment_usd is not None and investment_usd > 0 and share_price_at_start > 0:
+            backtest_shares = investment_usd / share_price_at_start
+
     cash_collected = cash_collected_since_year(
         dividends,
-        shares=shares,
+        shares=backtest_shares,
         start_year=resolved_start,
     )
     cash_collected_annual = round(
         sum(
-            annual_totals.get(year, 0.0) * shares
+            annual_totals.get(year, 0.0) * backtest_shares
             for year in range(resolved_start, end_year + 1)
         ),
         2,
@@ -373,24 +390,12 @@ def build_historical_backtest(
         and share_price is not None
         and share_price > 0
         and resolved_start < end_year
+        and share_price_at_start is not None
     ):
-        from app.utils.stock_price_cagr import fetch_price_cagr_pct
-
         resolved_investment = (
             investment_usd
             if investment_usd is not None and investment_usd > 0
-            else shares * share_price
-        )
-        resolved_price_cagr = (
-            price_cagr_pct
-            if price_cagr_pct is not None
-            else fetch_price_cagr_pct(symbol, lookback_years=5) or 0.0
-        )
-        years_elapsed = end_year - resolved_start
-        share_price_at_start = derive_share_price_at_start(
-            current_share_price=share_price,
-            price_cagr_pct=resolved_price_cagr,
-            years_elapsed=years_elapsed,
+            else backtest_shares * share_price
         )
         drip = simulate_drip_backtest(
             annual_totals=annual_totals,
@@ -398,14 +403,17 @@ def build_historical_backtest(
             end_year=end_year,
             initial_investment_usd=resolved_investment,
             share_price_at_start=share_price_at_start,
-            price_cagr_pct=resolved_price_cagr,
+            price_cagr_pct=resolved_price_cagr or 0.0,
             current_share_price=share_price,
             annual_contribution_usd=annual_contribution_usd,
         )
+        cash_collected = float(drip["total_dividends_collected"])
+        cash_collected_annual = cash_collected
 
     return {
         "start_year": resolved_start,
         "end_year": end_year,
+        "initial_shares": round(backtest_shares, 2),
         "cash_collected": cash_collected,
         "cash_collected_annual": cash_collected_annual,
         "drip": drip,
@@ -454,6 +462,7 @@ def simulate_drip_backtest(
             "annual_income_latest_drip": 0.0,
             "portfolio_value_latest": 0.0,
             "total_dividends_reinvested": 0.0,
+            "total_dividends_collected": 0.0,
             "total_annual_contributions_usd": 0.0,
         }
 
@@ -462,6 +471,7 @@ def simulate_drip_backtest(
     price = share_price_at_start
     rate = price_cagr_pct / 100.0
     total_reinvested = 0.0
+    total_dividends_collected = 0.0
     contribution = max(float(annual_contribution_usd), 0.0)
     total_contributions = 0.0
 
@@ -473,6 +483,7 @@ def simulate_drip_backtest(
         dps = annual_totals.get(year, 0.0)
         if dps > 0:
             dividend_cash = dps * shares
+            total_dividends_collected += dividend_cash
             if year < end_year and price > 0:
                 shares += dividend_cash / price
                 total_reinvested += dividend_cash
@@ -493,5 +504,6 @@ def simulate_drip_backtest(
         "annual_income_latest_drip": round(latest_dps * shares, 2),
         "portfolio_value_latest": round(portfolio_value, 2),
         "total_dividends_reinvested": round(total_reinvested, 2),
+        "total_dividends_collected": round(total_dividends_collected, 2),
         "total_annual_contributions_usd": round(total_contributions, 2),
     }

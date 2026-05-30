@@ -128,6 +128,7 @@ class DividendResearchService:
 
         scenario_model: DividendSnowballScenario | None = None
         historical_backtest: DividendHistoricalBacktest | None = None
+        historical_data: dict[str, Any] | None = None
         if include_snowball:
             scenario_data = build_scenario(
                 dividends=dividend_rows,
@@ -182,6 +183,12 @@ class DividendResearchService:
             symbol=str(data.get("ticker") or symbol).upper(),
         )
 
+        income_shares = resolved_shares
+        if historical_data is not None and history_start_year is not None:
+            initial_shares = historical_data.get("initial_shares")
+            if isinstance(initial_shares, (int, float)) and initial_shares > 0:
+                income_shares = float(initial_shares)
+
         context = DividendHistoryContext(
             ticker=str(data.get("ticker") or symbol).upper(),
             total_dividends=total_dividends,
@@ -195,7 +202,7 @@ class DividendResearchService:
                 AnnualDividendIncome.model_validate(row)
                 for row in annual_income_on_shares(
                     annual_totals,
-                    shares=resolved_shares,
+                    shares=income_shares,
                 )
             ],
             recent_payments=recent_payments,

@@ -34,6 +34,7 @@ class DividendAdvancedSnowballScenario(BaseModel):
 class DividendHistoricalBacktest(BaseModel):
     start_year: int = Field(serialization_alias="startYear")
     end_year: int = Field(serialization_alias="endYear")
+    initial_shares: float | None = Field(default=None, serialization_alias="initialShares")
     cash_collected: float = Field(serialization_alias="cashCollected")
     cash_collected_annual: float = Field(serialization_alias="cashCollectedAnnual")
     drip: DividendAdvancedSnowballScenario | None = None
