@@ -262,6 +262,33 @@ def test_simulate_drip_backtest_with_annual_contributions():
     assert with_contrib["final_shares"] > baseline["final_shares"]
     assert with_contrib["portfolio_value_latest"] > baseline["portfolio_value_latest"]
     assert with_contrib["total_annual_contributions_usd"] == pytest.approx(315_000)
+    assert len(with_contrib["yearly_breakdown"]) == 10
+    first_row = with_contrib["yearly_breakdown"][0]
+    assert first_row["year"] == 2015
+    assert first_row["shares"] == pytest.approx(500, rel=1e-3)
+    assert first_row["dividend_income"] > 0
+    assert first_row["dividend_yield_pct"] > 0
+    last_row = with_contrib["yearly_breakdown"][-1]
+    assert last_row["shares"] > first_row["shares"]
+    assert last_row["dividend_income"] > first_row["dividend_income"]
+
+
+def test_build_historical_backtest_includes_yearly_breakdown_without_drip():
+    result = build_historical_backtest(
+        dividends=SCHD_DIVIDENDS,
+        annual_totals=SCHD_ANNUAL_TOTALS,
+        shares=100,
+        start_year=2015,
+        share_price=80,
+        investment_usd=10_000,
+        price_cagr_pct=8,
+        reinvest_dividends=False,
+        symbol="SCHD",
+    )
+
+    assert result is not None
+    assert len(result["yearly_breakdown"]) > 0
+    assert all(row["shares"] == result["initial_shares"] for row in result["yearly_breakdown"])
 
 
 def test_build_historical_backtest_uses_start_price_share_count():

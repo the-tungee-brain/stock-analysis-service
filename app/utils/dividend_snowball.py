@@ -385,6 +385,7 @@ def build_historical_backtest(
     )
 
     drip: dict[str, Any] | None = None
+    yearly_breakdown: list[dict[str, Any]] = []
     if (
         reinvest_dividends
         and share_price is not None
@@ -409,6 +410,17 @@ def build_historical_backtest(
         )
         cash_collected = float(drip["total_dividends_collected"])
         cash_collected_annual = cash_collected
+        yearly_breakdown = list(drip.get("yearly_breakdown") or [])
+    else:
+        yearly_breakdown = build_backtest_yearly_rows(
+            annual_totals=annual_totals,
+            start_year=resolved_start,
+            end_year=end_year,
+            shares=backtest_shares,
+            share_price_at_start=share_price_at_start,
+            price_cagr_pct=resolved_price_cagr or 0.0,
+            current_share_price=share_price,
+        )
 
     return {
         "start_year": resolved_start,
@@ -416,6 +428,7 @@ def build_historical_backtest(
         "initial_shares": round(backtest_shares, 2),
         "cash_collected": cash_collected,
         "cash_collected_annual": cash_collected_annual,
+        "yearly_breakdown": yearly_breakdown,
         "drip": drip,
     }
 
@@ -434,6 +447,62 @@ def derive_share_price_at_start(
     if denominator <= 0:
         return current_share_price
     return current_share_price / denominator
+
+
+def modeled_share_price_for_year(
+    *,
+    share_price_at_start: float,
+    price_cagr_pct: float,
+    start_year: int,
+    year: int,
+) -> float:
+    if share_price_at_start <= 0:
+        return share_price_at_start
+    years_from_start = max(0, year - start_year)
+    rate = price_cagr_pct / 100.0
+    return share_price_at_start * ((1.0 + rate) ** years_from_start)
+
+
+def build_backtest_yearly_rows(
+    *,
+    annual_totals: dict[int, float],
+    start_year: int,
+    end_year: int,
+    shares: float,
+    share_price_at_start: float | None,
+    price_cagr_pct: float,
+    current_share_price: float | None,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    resolved_start_price = share_price_at_start
+    if resolved_start_price is None or resolved_start_price <= 0:
+        resolved_start_price = current_share_price or 0.0
+
+    for year in range(start_year, end_year + 1):
+        dps = annual_totals.get(year, 0.0)
+        year_price = (
+            modeled_share_price_for_year(
+                share_price_at_start=resolved_start_price,
+                price_cagr_pct=price_cagr_pct,
+                start_year=start_year,
+                year=year,
+            )
+            if resolved_start_price > 0
+            else 0.0
+        )
+        dividend_income = dps * shares
+        yield_pct = (dps / year_price * 100.0) if year_price > 0 and dps > 0 else 0.0
+        rows.append(
+            {
+                "year": year,
+                "dps": round(dps, 4),
+                "shares": round(shares, 2),
+                "dividend_income": round(dividend_income, 2),
+                "share_price": round(year_price, 2),
+                "dividend_yield_pct": round(yield_pct, 2),
+            }
+        )
+    return rows
 
 
 def simulate_drip_backtest(
@@ -464,6 +533,7 @@ def simulate_drip_backtest(
             "total_dividends_reinvested": 0.0,
             "total_dividends_collected": 0.0,
             "total_annual_contributions_usd": 0.0,
+            "yearly_breakdown": [],
         }
 
     shares = initial_investment_usd / share_price_at_start
@@ -474,6 +544,7 @@ def simulate_drip_backtest(
     total_dividends_collected = 0.0
     contribution = max(float(annual_contribution_usd), 0.0)
     total_contributions = 0.0
+    yearly_breakdown: list[dict[str, Any]] = []
 
     for year in range(start_year, end_year + 1):
         if year > start_year and contribution > 0 and price > 0:
@@ -481,12 +552,24 @@ def simulate_drip_backtest(
             total_contributions += contribution
 
         dps = annual_totals.get(year, 0.0)
+        dividend_income = dps * shares if dps > 0 else 0.0
+        yield_pct = (dps / price * 100.0) if price > 0 and dps > 0 else 0.0
+        yearly_breakdown.append(
+            {
+                "year": year,
+                "dps": round(dps, 4),
+                "shares": round(shares, 2),
+                "dividend_income": round(dividend_income, 2),
+                "share_price": round(price, 2),
+                "dividend_yield_pct": round(yield_pct, 2),
+            }
+        )
+
         if dps > 0:
-            dividend_cash = dps * shares
-            total_dividends_collected += dividend_cash
+            total_dividends_collected += dividend_income
             if year < end_year and price > 0:
-                shares += dividend_cash / price
-                total_reinvested += dividend_cash
+                shares += dividend_income / price
+                total_reinvested += dividend_income
 
         if year < end_year:
             price *= 1.0 + rate
@@ -506,4 +589,5 @@ def simulate_drip_backtest(
         "total_dividends_reinvested": round(total_reinvested, 2),
         "total_dividends_collected": round(total_dividends_collected, 2),
         "total_annual_contributions_usd": round(total_contributions, 2),
+        "yearly_breakdown": yearly_breakdown,
     }
