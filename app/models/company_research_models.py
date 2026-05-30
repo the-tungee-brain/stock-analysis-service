@@ -27,7 +27,7 @@ class ResearchSnapshot(BaseModel):
     marketCap: str
     range52w: str | None = None
     weburl: HttpUrl
-    logo: HttpUrl
+    logo: HttpUrl | None = None
     dividendYieldPct: float | None = None
     peRatio: float | None = None
     volume: int | None = None

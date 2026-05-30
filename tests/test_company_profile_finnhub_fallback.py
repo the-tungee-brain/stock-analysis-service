@@ -169,3 +169,77 @@ def test_get_snapshot_uses_etf_labels_from_yfinance():
     assert snapshot.dividendYieldPct == 1.2
     assert snapshot.expenseRatioPct == 0.09
     assert snapshot.peRatio is None
+
+
+def test_get_snapshot_uses_ticker_symbols_logo_url_for_stocks():
+    finnhub_builder = MagicMock()
+    yfinance_adapter = MagicMock()
+    yfinance_adapter.get_ticker_info.return_value = {
+        "longName": "Apple Inc.",
+        "sector": "Technology",
+        "country": "United States",
+        "marketCap": 3_000_000_000_000,
+        "website": "https://www.apple.com",
+        "volume": 52_000_000,
+        "averageVolume": 48_000_000,
+    }
+    yfinance_adapter.get_history.return_value = _mock_history([195.0, 200.0])
+
+    ticker_builder = MagicMock()
+    ticker_builder.get_by_symbol.return_value = MagicMock(
+        logo_url="https://cdn.example.com/logos/aapl.png",
+        asset_type="STOCK",
+    )
+
+    service = CompanyProfileService(
+        finnhub_builder=finnhub_builder,
+        yfinance_adapter=yfinance_adapter,
+        ticker_symbol_builder=ticker_builder,
+    )
+
+    with patch.object(
+        service,
+        "get_52w_range_yf",
+        return_value=(170.0, 220.0),
+    ):
+        snapshot = service.get_snapshot("AAPL")
+
+    assert str(snapshot.logo) == "https://cdn.example.com/logos/aapl.png"
+    ticker_builder.get_by_symbol.assert_called_once_with(symbol="AAPL")
+
+
+def test_get_snapshot_skips_ticker_logo_for_etfs():
+    finnhub_builder = MagicMock()
+    yfinance_adapter = MagicMock()
+    yfinance_adapter.get_ticker_info.return_value = {
+        "longName": "SPDR S&P 500 ETF Trust",
+        "quoteType": "ETF",
+        "category": "Large Blend",
+        "totalAssets": 640_000_000_000,
+        "exchange": "NYQ",
+        "website": "https://www.ssga.com",
+        "volume": 45_000_000,
+        "averageVolume": 50_000_000,
+    }
+    yfinance_adapter.get_history.return_value = _mock_history([495.0, 500.0])
+
+    ticker_builder = MagicMock()
+    ticker_builder.get_by_symbol.return_value = MagicMock(
+        logo_url="https://cdn.example.com/logos/spy.png",
+        asset_type="ETF",
+    )
+
+    service = CompanyProfileService(
+        finnhub_builder=finnhub_builder,
+        yfinance_adapter=yfinance_adapter,
+        ticker_symbol_builder=ticker_builder,
+    )
+
+    with patch.object(
+        service,
+        "get_52w_range_yf",
+        return_value=(400.0, 520.0),
+    ):
+        snapshot = service.get_snapshot("SPY")
+
+    assert snapshot.logo is None

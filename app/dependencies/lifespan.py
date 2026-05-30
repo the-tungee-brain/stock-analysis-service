@@ -311,6 +311,7 @@ async def lifespan(app: FastAPI):
     company_profile_service = CompanyProfileService(
         finnhub_builder=finnhub_builder,
         yfinance_adapter=yfinance_adapter,
+        ticker_symbol_builder=ticker_symbol_builder,
     )
     enriched_news_service = EnrichedNewsService(
         enriched_news_cache=enriched_news_cache,

@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import TYPE_CHECKING
 
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.builders.finnhub_builder import FinnhubBuilder
 from app.models.company_research_models import ResearchSnapshot
+
+if TYPE_CHECKING:
+    from app.builders.ticker_symbol_builder import TickerSymbolBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -19,22 +23,23 @@ class CompanyProfileService:
         self,
         finnhub_builder: FinnhubBuilder,
         yfinance_adapter: YFinanceAdapter | None = None,
+        ticker_symbol_builder: TickerSymbolBuilder | None = None,
     ):
         self.finnhub_builder = finnhub_builder
         self.yfinance_adapter = yfinance_adapter
+        self.ticker_symbol_builder = ticker_symbol_builder
 
     def get_snapshot(self, symbol: str) -> ResearchSnapshot:
         symbol_upper = symbol.strip().upper()
 
         snapshot = self._snapshot_from_yfinance(symbol_upper)
-        if snapshot is not None:
-            return snapshot
+        if snapshot is None:
+            snapshot = self._snapshot_from_finnhub(symbol_upper)
 
-        snapshot = self._snapshot_from_finnhub(symbol_upper)
-        if snapshot is not None:
-            return snapshot
+        if snapshot is None:
+            raise ValueError(f"Unable to load company snapshot for {symbol_upper}")
 
-        raise ValueError(f"Unable to load company snapshot for {symbol_upper}")
+        return self._apply_ticker_logo(snapshot)
 
     def get_peers(self, symbol: str) -> list[str]:
         symbol_upper = symbol.strip().upper()
@@ -92,7 +97,7 @@ class CompanyProfileService:
             changePct=change_pct,
             marketCap=self._format_market_cap_millions(profile.marketCapitalization),
             range52w=range_52w,
-            logo=self._normalize_logo_url(symbol, str(profile.logo)),
+            logo=None,
             weburl=profile.weburl,
             dividendYieldPct=None,
             peRatio=None,
@@ -117,7 +122,6 @@ class CompanyProfileService:
         prev_close = self._previous_close_from_yfinance(info, history, price)
         change_pct = self._compute_change_pct(current=price, prev_close=prev_close)
         website = info.get("website") or f"https://finance.yahoo.com/quote/{symbol}"
-        logo = self._normalize_logo_url(symbol, info.get("logo_url"))
         is_etf = self._is_etf_info(info)
 
         if is_etf:
@@ -147,9 +151,37 @@ class CompanyProfileService:
             marketCap=market_cap,
             range52w=self._format_52w_range(symbol),
             weburl=website,
-            logo=logo,
+            logo=None,
             **key_stats,
         )
+
+    def _apply_ticker_logo(self, snapshot: ResearchSnapshot) -> ResearchSnapshot:
+        logo = self._resolve_stock_logo(snapshot.symbol)
+        if logo == snapshot.logo:
+            return snapshot
+        return snapshot.model_copy(update={"logo": logo})
+
+    def _resolve_stock_logo(self, symbol: str) -> str | None:
+        item = None
+        if self.ticker_symbol_builder is not None:
+            try:
+                item = self.ticker_symbol_builder.get_by_symbol(symbol=symbol)
+            except Exception:
+                logger.warning(
+                    "Ticker logo lookup failed for %s", symbol, exc_info=True
+                )
+
+        if item is not None and item.asset_type == "ETF":
+            return None
+
+        if item is not None and item.logo_url:
+            return item.logo_url.strip()
+
+        return self._finnhub_stock_logo_url(symbol)
+
+    @staticmethod
+    def _finnhub_stock_logo_url(symbol: str) -> str:
+        return FINNHUB_STOCK_LOGO_URL.format(symbol=symbol.strip().upper())
 
     @staticmethod
     def _key_stats_from_yfinance(info: dict, *, is_etf: bool) -> dict:
@@ -317,28 +349,6 @@ class CompanyProfileService:
     def format_52w_range(self, symbol: str) -> str:
         low, high = self.get_52w_range_yf(symbol)
         return f"${low:.2f} – ${high:.2f}"
-
-    @staticmethod
-    def _stock_logo_url(symbol: str) -> str:
-        return FINNHUB_STOCK_LOGO_URL.format(symbol=symbol.strip().upper())
-
-    @staticmethod
-    def _normalize_logo_url(symbol: str, candidate: str | None) -> str:
-        if candidate:
-            value = candidate.strip()
-            lower = value.lower()
-            if lower.startswith(("http://", "https://")) and (
-                ".png" in lower
-                or ".jpg" in lower
-                or ".jpeg" in lower
-                or ".svg" in lower
-                or ".webp" in lower
-                or ".gif" in lower
-                or "finnhubimage" in lower
-                or "/logo" in lower
-            ):
-                return value
-        return CompanyProfileService._stock_logo_url(symbol)
 
     @staticmethod
     def _format_market_cap_millions(mc: float) -> str:

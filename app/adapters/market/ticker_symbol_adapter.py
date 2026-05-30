@@ -12,10 +12,16 @@ class TickerSymbolAdapter:
     def dict_to_item(self, row: dict) -> TickerSymbolItem:
         title = row.get("TITLE")
         asset_type = row.get("ASSET_TYPE")
+        logo_url = row.get("LOGO_URL")
         return TickerSymbolItem(
             symbol=row["SYMBOL"],
             title=title.strip() if isinstance(title, str) and title.strip() else None,
             asset_type=asset_type if isinstance(asset_type, str) and asset_type else None,
+            logo_url=(
+                logo_url.strip()
+                if isinstance(logo_url, str) and logo_url.strip()
+                else None
+            ),
         )
 
     def get_by_keyword(self, keyword: str, limit: int = 10) -> List[TickerSymbolItem]:
@@ -30,7 +36,7 @@ class TickerSymbolAdapter:
             cur = con.cursor()
 
             sql = f"""
-                SELECT SYMBOL, TITLE, ASSET_TYPE
+                SELECT SYMBOL, TITLE, ASSET_TYPE, LOGO_URL
                 FROM {self.table_name}
                 WHERE UPPER(SYMBOL) LIKE :pattern || '%'
                    OR UPPER(TITLE) LIKE '%' || :pattern || '%'
@@ -68,7 +74,7 @@ class TickerSymbolAdapter:
         try:
             cur = con.cursor()
             sql = f"""
-                SELECT SYMBOL, TITLE, ASSET_TYPE
+                SELECT SYMBOL, TITLE, ASSET_TYPE, LOGO_URL
                 FROM {self.table_name}
                 WHERE UPPER(SYMBOL) = :symbol
                 FETCH FIRST 1 ROW ONLY

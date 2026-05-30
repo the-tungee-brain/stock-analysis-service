@@ -10,9 +10,32 @@ def _mock_adapter_rows(rows: list[tuple[str, str | None, str | None]]) -> Ticker
     mock_cur = MagicMock()
     adapter.client.acquire.return_value = mock_con
     mock_con.cursor.return_value = mock_cur
-    mock_cur.description = [("SYMBOL",), ("TITLE",), ("ASSET_TYPE",)]
-    mock_cur.fetchall.return_value = rows
+    mock_cur.description = [
+        ("SYMBOL",),
+        ("TITLE",),
+        ("ASSET_TYPE",),
+        ("LOGO_URL",),
+    ]
+    mock_cur.fetchall.return_value = [
+        (*row, None) if len(row) == 3 else row for row in rows
+    ]
     return adapter
+
+
+def test_dict_to_item_maps_title_asset_type_and_logo_url():
+    adapter = TickerSymbolAdapter(client=MagicMock())
+    item = adapter.dict_to_item(
+        {
+            "SYMBOL": "AAPL",
+            "TITLE": "Apple Inc.",
+            "ASSET_TYPE": "STOCK",
+            "LOGO_URL": "https://example.com/aapl.png",
+        }
+    )
+    assert item.symbol == "AAPL"
+    assert item.title == "Apple Inc."
+    assert item.asset_type == "STOCK"
+    assert item.logo_url == "https://example.com/aapl.png"
 
 
 def test_dict_to_item_maps_title_and_asset_type():
@@ -23,6 +46,7 @@ def test_dict_to_item_maps_title_and_asset_type():
     assert item.symbol == "SPY"
     assert item.title == "SPDR S&P 500"
     assert item.asset_type == "ETF"
+    assert item.logo_url is None
 
 
 def test_get_by_keyword_empty_query_returns_empty_list():
