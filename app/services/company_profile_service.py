@@ -94,6 +94,11 @@ class CompanyProfileService:
             range52w=range_52w,
             logo=self._normalize_logo_url(symbol, str(profile.logo)),
             weburl=profile.weburl,
+            dividendYieldPct=None,
+            peRatio=None,
+            volume=None,
+            avgVolume=None,
+            expenseRatioPct=None,
         )
 
     def _snapshot_from_yfinance(self, symbol: str) -> ResearchSnapshot | None:
@@ -126,6 +131,8 @@ class CompanyProfileService:
             country = info.get("country") or "Unknown"
             market_cap = self._format_market_cap_absolute(info.get("marketCap"))
 
+        key_stats = self._key_stats_from_yfinance(info, is_etf=is_etf)
+
         return ResearchSnapshot(
             symbol=symbol,
             name=(
@@ -141,7 +148,83 @@ class CompanyProfileService:
             range52w=self._format_52w_range(symbol),
             weburl=website,
             logo=logo,
+            **key_stats,
         )
+
+    @staticmethod
+    def _key_stats_from_yfinance(info: dict, *, is_etf: bool) -> dict:
+        return {
+            "dividendYieldPct": CompanyProfileService._normalize_dividend_yield_pct(
+                info.get("dividendYield")
+            ),
+            "peRatio": CompanyProfileService._optional_float(info.get("trailingPE")),
+            "volume": CompanyProfileService._optional_int(
+                info.get("volume") or info.get("regularMarketVolume")
+            ),
+            "avgVolume": CompanyProfileService._optional_int(
+                info.get("averageVolume")
+                or info.get("averageDailyVolume10Day")
+            ),
+            "expenseRatioPct": (
+                CompanyProfileService._normalize_expense_ratio_pct(info)
+                if is_etf
+                else None
+            ),
+        }
+
+    @staticmethod
+    def _optional_float(value) -> float | None:
+        if value is None:
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed != parsed:  # NaN
+            return None
+        return round(parsed, 2)
+
+    @staticmethod
+    def _optional_int(value) -> int | None:
+        if value is None:
+            return None
+        try:
+            parsed = int(float(value))
+        except (TypeError, ValueError):
+            return None
+        if parsed < 0:
+            return None
+        return parsed
+
+    @staticmethod
+    def _normalize_dividend_yield_pct(value) -> float | None:
+        if value is None:
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed != parsed or parsed <= 0:
+            return None
+        if abs(parsed) < 1:
+            return round(parsed * 100, 2)
+        return round(parsed, 2)
+
+    @staticmethod
+    def _normalize_expense_ratio_pct(info: dict) -> float | None:
+        annual = info.get("annualReportExpenseRatio")
+        if isinstance(annual, (int, float)) and annual > 0:
+            return round(abs(annual) * 100, 2)
+
+        for key in ("netExpenseRatio", "expenseRatio"):
+            value = info.get(key)
+            if value is None or not isinstance(value, (int, float)) or value <= 0:
+                continue
+            abs_value = abs(float(value))
+            if abs_value < 0.01:
+                return round(abs_value * 100, 2)
+            return round(abs_value, 2)
+        return None
 
     @staticmethod
     def _is_etf_info(info: dict) -> bool:

@@ -28,6 +28,11 @@ class ResearchSnapshot(BaseModel):
     range52w: str | None = None
     weburl: HttpUrl
     logo: HttpUrl
+    dividendYieldPct: float | None = None
+    peRatio: float | None = None
+    volume: int | None = None
+    avgVolume: int | None = None
+    expenseRatioPct: float | None = None
 
 
 class PerformanceSnapshot(BaseModel):

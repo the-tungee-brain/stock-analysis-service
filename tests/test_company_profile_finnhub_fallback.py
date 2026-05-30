@@ -19,6 +19,10 @@ def test_get_snapshot_uses_yfinance_before_finnhub():
         "country": "United States",
         "marketCap": 3_000_000_000_000,
         "website": "https://www.apple.com",
+        "dividendYield": 0.0044,
+        "trailingPE": 28.5,
+        "volume": 52_000_000,
+        "averageVolume": 48_000_000,
     }
     yfinance_adapter.get_history.return_value = _mock_history([195.0, 200.0])
 
@@ -38,6 +42,11 @@ def test_get_snapshot_uses_yfinance_before_finnhub():
     assert snapshot.name == "Apple Inc."
     assert snapshot.price == 200.0
     assert snapshot.sector == "Technology"
+    assert snapshot.dividendYieldPct == 0.44
+    assert snapshot.peRatio == 28.5
+    assert snapshot.volume == 52_000_000
+    assert snapshot.avgVolume == 48_000_000
+    assert snapshot.expenseRatioPct is None
     assert "finnhubimage/stock_logo/AAPL.png" in str(snapshot.logo)
     finnhub_builder.get_company_profile.assert_not_called()
     finnhub_builder.get_quote.assert_not_called()
@@ -134,6 +143,10 @@ def test_get_snapshot_uses_etf_labels_from_yfinance():
         "totalAssets": 640_000_000_000,
         "exchange": "NYQ",
         "website": "https://www.ssga.com",
+        "dividendYield": 0.012,
+        "annualReportExpenseRatio": 0.000945,
+        "volume": 45_000_000,
+        "averageVolume": 50_000_000,
     }
     yfinance_adapter.get_history.return_value = _mock_history([495.0, 500.0])
 
@@ -153,3 +166,6 @@ def test_get_snapshot_uses_etf_labels_from_yfinance():
     assert snapshot.sector == "Large Blend"
     assert snapshot.country == "United States"
     assert snapshot.marketCap == "640.0B"
+    assert snapshot.dividendYieldPct == 1.2
+    assert snapshot.expenseRatioPct == 0.09
+    assert snapshot.peRatio is None
