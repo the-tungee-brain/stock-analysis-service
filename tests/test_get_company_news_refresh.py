@@ -3,7 +3,10 @@ from unittest.mock import AsyncMock, MagicMock
 import asyncio
 from datetime import datetime, timezone
 
-from app.api.get_company_news_route import get_company_news
+import pytest
+from fastapi import HTTPException
+
+from app.api.get_company_news_route import analyze_company_news, get_company_news
 from app.core.llm_config import settings
 from app.models.finnhub_news_models import NewsItem, NewsResponse
 from app.models.news_analytics_models import StockNewsView
@@ -22,6 +25,7 @@ def _sample_news_view(*, summary: str, overall_sentiment: str = "neutral") -> St
         investorTakeaway="Hold steady.",
         deepAnalysis="Analysis.",
         items=[],
+        aiEnrichment=True,
     )
 
 
@@ -39,8 +43,6 @@ def test_get_company_news_returns_cached_view_without_refresh(monkeypatch):
             refresh=False,
             user_id="paid-user",
             news_service=news_service,
-            prompt_enrichment_service=MagicMock(),
-            llm_service=MagicMock(),
             enriched_news_service=enriched_news_service,
         )
     )
@@ -70,7 +72,6 @@ def test_get_company_news_free_user_skips_enriched_cache(monkeypatch):
     )
     news_service = MagicMock()
     news_service.get_company_news.return_value = news
-    llm_service = MagicMock()
 
     result = asyncio.run(
         get_company_news(
@@ -78,44 +79,107 @@ def test_get_company_news_free_user_skips_enriched_cache(monkeypatch):
             refresh=False,
             user_id="free-user",
             news_service=news_service,
-            prompt_enrichment_service=MagicMock(),
-            llm_service=llm_service,
             enriched_news_service=enriched_news_service,
         )
     )
 
     enriched_news_service.get_cached_view.assert_not_called()
-    llm_service.analyze_news.assert_not_called()
     enriched_news_service.store_view.assert_not_called()
     assert result.aiEnrichment is False
     assert len(result.items) == 1
     assert result.items[0].summary == "Raw summary"
 
 
-def test_get_company_news_refresh_bypasses_cache(monkeypatch):
+def test_get_company_news_paid_without_cache_returns_headlines_only(monkeypatch):
     monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset({"paid-user"}))
-    news = NewsResponse(root=[])
-    fresh = _sample_news_view(summary="Fresh", overall_sentiment="bullish")
-    fresh = fresh.model_copy(update={"insights": ["Insight"]})
-
-    enriched_news_service = MagicMock()
-    enriched_news_service.get_cached_view.return_value = _sample_news_view(
-        summary="Stale"
+    news = NewsResponse(
+        root=[
+            NewsItem(
+                category="company news",
+                datetime=datetime(2026, 5, 20, tzinfo=timezone.utc),
+                headline="Test headline",
+                id=1,
+                related="AAPL",
+                source="Reuters",
+                summary="Raw summary",
+                url="https://example.com/story",
+            )
+        ]
     )
 
+    enriched_news_service = MagicMock()
+    enriched_news_service.get_cached_view.return_value = None
     news_service = MagicMock()
     news_service.get_company_news.return_value = news
-
-    prompt_enrichment_service = MagicMock()
-    prompt_enrichment_service.enrich_news_prompt.return_value = ["system", "user"]
-
-    llm_service = MagicMock()
-    llm_service.analyze_news = AsyncMock(return_value=fresh)
 
     result = asyncio.run(
         get_company_news(
             symbol="AAPL",
-            refresh=True,
+            refresh=False,
+            user_id="paid-user",
+            news_service=news_service,
+            enriched_news_service=enriched_news_service,
+        )
+    )
+
+    assert result.aiEnrichment is False
+    assert "Analyze news" in result.summary
+    news_service.get_company_news.assert_called_once()
+
+
+def test_get_company_news_refresh_returns_headlines_without_llm(monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset({"paid-user"}))
+    news = NewsResponse(root=[])
+    fresh_headlines = _sample_news_view(summary="Headlines only").model_copy(
+        update={"aiEnrichment": False}
+    )
+
+    enriched_news_service = MagicMock()
+    news_service = MagicMock()
+    news_service.get_company_news.return_value = news
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            "app.api.get_company_news_route.LLMService.build_headlines_only_view",
+            MagicMock(return_value=fresh_headlines),
+        )
+        result = asyncio.run(
+            get_company_news(
+                symbol="AAPL",
+                refresh=True,
+                user_id="paid-user",
+                news_service=news_service,
+                enriched_news_service=enriched_news_service,
+            )
+        )
+
+    enriched_news_service.invalidate.assert_called_once_with(symbol="AAPL")
+    news_service.invalidate_company_news_cache.assert_called_once_with(
+        symbol="AAPL",
+        lookback_days=7,
+    )
+    news_service.get_company_news.assert_called_once()
+    assert result.aiEnrichment is False
+
+
+def test_analyze_company_news_runs_llm_for_paid_user(monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset({"paid-user"}))
+    news = NewsResponse(root=[])
+    fresh = _sample_news_view(summary="Fresh", overall_sentiment="bullish")
+
+    enriched_news_service = MagicMock()
+    enriched_news_service.get_cached_view.return_value = None
+    news_service = MagicMock()
+    news_service.get_company_news.return_value = news
+    prompt_enrichment_service = MagicMock()
+    prompt_enrichment_service.enrich_news_prompt.return_value = ["system", "user"]
+    llm_service = MagicMock()
+    llm_service.analyze_news = AsyncMock(return_value=fresh)
+
+    result = asyncio.run(
+        analyze_company_news(
+            symbol="AAPL",
+            refresh=False,
             user_id="paid-user",
             news_service=news_service,
             prompt_enrichment_service=prompt_enrichment_service,
@@ -124,13 +188,6 @@ def test_get_company_news_refresh_bypasses_cache(monkeypatch):
         )
     )
 
-    enriched_news_service.invalidate.assert_called_once_with(symbol="AAPL")
-    news_service.invalidate_company_news_cache.assert_called_once_with(
-        symbol="AAPL",
-        lookback_days=7,
-    )
-    enriched_news_service.get_cached_view.assert_not_called()
-    news_service.get_company_news.assert_called_once()
     llm_service.analyze_news.assert_awaited_once_with(
         symbol="AAPL",
         prompts=["system", "user"],
@@ -139,3 +196,22 @@ def test_get_company_news_refresh_bypasses_cache(monkeypatch):
     )
     enriched_news_service.store_view.assert_called_once_with(symbol="AAPL", view=fresh)
     assert result.summary == "Fresh"
+
+
+def test_analyze_company_news_rejects_free_user(monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset())
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            analyze_company_news(
+                symbol="AAPL",
+                refresh=False,
+                user_id="free-user",
+                news_service=MagicMock(),
+                prompt_enrichment_service=MagicMock(),
+                llm_service=MagicMock(),
+                enriched_news_service=MagicMock(),
+            )
+        )
+
+    assert exc.value.status_code == 403

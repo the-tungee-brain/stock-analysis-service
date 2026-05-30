@@ -52,13 +52,23 @@ class LLMService:
             yield chunk
 
     @staticmethod
-    def build_headlines_only_view(symbol: str, news: NewsResponse) -> StockNewsView:
-        """Headlines without LLM synthesis (free tier)."""
+    def build_headlines_only_view(
+        symbol: str,
+        news: NewsResponse,
+        *,
+        pro: bool = False,
+    ) -> StockNewsView:
+        """Headlines without LLM synthesis."""
         if not news.root:
+            empty_summary = (
+                "No recent market headlines for this symbol."
+                if pro
+                else "No recent market headlines for this symbol."
+            )
             return StockNewsView(
                 symbol=symbol,
                 overall_sentiment="neutral",
-                summary="No recent market headlines for this symbol.",
+                summary=empty_summary,
                 insights=[],
                 risks=[],
                 dominant_driver="No recent headlines.",
@@ -70,13 +80,20 @@ class LLMService:
                 aiEnrichment=False,
             )
 
+        summary = (
+            "Headlines are loaded below. Run Analyze news for sentiment, summaries, "
+            "and an AI brief."
+            if pro
+            else (
+                "Headlines are available below. Upgrade to Pro for an AI news brief, "
+                "per-story sentiment, and actionable context."
+            )
+        )
+
         return StockNewsView(
             symbol=symbol,
             overall_sentiment="neutral",
-            summary=(
-                "Headlines are available below. Upgrade to Pro for an AI news brief, "
-                "per-story sentiment, and actionable context."
-            ),
+            summary=summary,
             insights=[],
             risks=[],
             dominant_driver="",

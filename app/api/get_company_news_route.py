@@ -1,6 +1,6 @@
 import asyncio
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from app.auth.dependencies import get_current_user_id
 from app.core.paid_access import is_paid_user
 from app.services.news_service import NewsService, COMPANY_NEWS_LLM_LIMIT
@@ -18,45 +18,41 @@ from app.services.llm_service import LLMService
 
 router = APIRouter()
 
+COMPANY_NEWS_LOOKBACK_DAYS = 7
 
-@router.get("/get-company-news", response_model=StockNewsView)
-async def get_company_news(
+
+async def _fetch_company_news(
+    news_service: NewsService,
     symbol: str,
-    refresh: bool = Query(
-        default=False,
-        description="Bypass cached news and re-fetch from Finnhub",
-    ),
-    user_id: str = Depends(get_current_user_id),
-    news_service: NewsService = Depends(get_news_service),
-    prompt_enrichment_service: PromptEnrichmentService = Depends(
-        get_prompt_enrichment_service
-    ),
-    llm_service: LLMService = Depends(get_llm_service),
-    enriched_news_service: EnrichedNewsService = Depends(get_enriched_news_service),
-) -> StockNewsView:
-    paid = is_paid_user(user_id)
-
-    if refresh:
-        if paid:
-            enriched_news_service.invalidate(symbol=symbol)
-        news_service.invalidate_company_news_cache(symbol=symbol, lookback_days=7)
-    elif paid:
-        cached_view = enriched_news_service.get_cached_view(symbol=symbol)
-        if cached_view is not None and cached_view.aiEnrichment:
-            return cached_view
-
+) -> NewsResponse:
     try:
-        news = await asyncio.to_thread(
+        return await asyncio.to_thread(
             news_service.get_company_news,
             symbol=symbol,
-            lookback_days=7,
+            lookback_days=COMPANY_NEWS_LOOKBACK_DAYS,
         )
     except Exception:
-        news = NewsResponse(root=[])
+        return NewsResponse(root=[])
 
-    if not paid:
-        return LLMService.build_headlines_only_view(symbol=symbol, news=news)
 
+async def _analyze_company_news(
+    *,
+    symbol: str,
+    user_id: str,
+    news_service: NewsService,
+    prompt_enrichment_service: PromptEnrichmentService,
+    llm_service: LLMService,
+    enriched_news_service: EnrichedNewsService,
+    refresh: bool = False,
+) -> StockNewsView:
+    if refresh:
+        enriched_news_service.invalidate(symbol=symbol)
+
+    cached_view = enriched_news_service.get_cached_view(symbol=symbol)
+    if cached_view is not None and cached_view.aiEnrichment and not refresh:
+        return cached_view
+
+    news = await _fetch_company_news(news_service, symbol)
     llm_news = NewsResponse(root=news.root[:COMPANY_NEWS_LLM_LIMIT])
     prompts = prompt_enrichment_service.enrich_news_prompt(
         symbol=symbol,
@@ -70,3 +66,74 @@ async def get_company_news(
     )
     enriched_news_service.store_view(symbol=symbol, view=stock_news_view)
     return stock_news_view
+
+
+@router.get("/get-company-news", response_model=StockNewsView)
+async def get_company_news(
+    symbol: str,
+    refresh: bool = Query(
+        default=False,
+        description="Bypass cached headlines and re-fetch from Finnhub",
+    ),
+    user_id: str = Depends(get_current_user_id),
+    news_service: NewsService = Depends(get_news_service),
+    enriched_news_service: EnrichedNewsService = Depends(get_enriched_news_service),
+) -> StockNewsView:
+    paid = is_paid_user(user_id)
+
+    if refresh:
+        if paid:
+            enriched_news_service.invalidate(symbol=symbol)
+        news_service.invalidate_company_news_cache(
+            symbol=symbol,
+            lookback_days=COMPANY_NEWS_LOOKBACK_DAYS,
+        )
+    elif paid:
+        cached_view = enriched_news_service.get_cached_view(symbol=symbol)
+        if cached_view is not None and cached_view.aiEnrichment:
+            return cached_view
+
+    news = await _fetch_company_news(news_service, symbol)
+    return LLMService.build_headlines_only_view(
+        symbol=symbol,
+        news=news,
+        pro=paid,
+    )
+
+
+@router.post("/analyze-company-news", response_model=StockNewsView)
+async def analyze_company_news(
+    symbol: str,
+    refresh: bool = Query(
+        default=False,
+        description="Bypass cached AI analysis and run a fresh synthesis",
+    ),
+    user_id: str = Depends(get_current_user_id),
+    news_service: NewsService = Depends(get_news_service),
+    prompt_enrichment_service: PromptEnrichmentService = Depends(
+        get_prompt_enrichment_service
+    ),
+    llm_service: LLMService = Depends(get_llm_service),
+    enriched_news_service: EnrichedNewsService = Depends(get_enriched_news_service),
+) -> StockNewsView:
+    if not is_paid_user(user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="AI news analysis requires a Pro plan.",
+        )
+
+    if refresh:
+        news_service.invalidate_company_news_cache(
+            symbol=symbol,
+            lookback_days=COMPANY_NEWS_LOOKBACK_DAYS,
+        )
+
+    return await _analyze_company_news(
+        symbol=symbol,
+        user_id=user_id,
+        news_service=news_service,
+        prompt_enrichment_service=prompt_enrichment_service,
+        llm_service=llm_service,
+        enriched_news_service=enriched_news_service,
+        refresh=refresh,
+    )
