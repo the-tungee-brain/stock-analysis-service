@@ -1,6 +1,8 @@
+import warnings
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+from pydantic import HttpUrl
 
 from app.models.finnhub_company_profile_models import CompanyProfile
 from app.services.company_profile_service import CompanyProfileService
@@ -205,7 +207,56 @@ def test_get_snapshot_uses_ticker_symbols_logo_url_for_stocks():
         snapshot = service.get_snapshot("AAPL")
 
     assert str(snapshot.logo) == "https://cdn.example.com/logos/aapl.png"
+    assert isinstance(snapshot.logo, HttpUrl)
+    snapshot.model_dump_json()
     ticker_builder.get_by_symbol.assert_called_once_with(symbol="AAPL")
+
+
+def test_get_snapshot_logo_serializes_without_pydantic_warning():
+    finnhub_builder = MagicMock()
+    yfinance_adapter = MagicMock()
+    yfinance_adapter.get_ticker_info.return_value = {
+        "longName": "NVIDIA Corporation",
+        "sector": "Technology",
+        "country": "United States",
+        "marketCap": 3_000_000_000_000,
+        "website": "https://www.nvidia.com",
+        "volume": 52_000_000,
+        "averageVolume": 48_000_000,
+    }
+    yfinance_adapter.get_history.return_value = _mock_history([120.0, 125.0])
+
+    ticker_builder = MagicMock()
+    ticker_builder.get_by_symbol.return_value = MagicMock(
+        logo_url=(
+            "https://raw.githubusercontent.com/the-tungee-brain/stock-icons/"
+            "main/ticker_icons/NVDA.png"
+        ),
+        asset_type="STOCK",
+    )
+
+    service = CompanyProfileService(
+        finnhub_builder=finnhub_builder,
+        yfinance_adapter=yfinance_adapter,
+        ticker_symbol_builder=ticker_builder,
+    )
+
+    with patch.object(
+        service,
+        "get_52w_range_yf",
+        return_value=(100.0, 140.0),
+    ):
+        with warnings.catch_warnings(record=True) as warning_list:
+            warnings.simplefilter("always")
+            snapshot = service.get_snapshot("NVDA")
+            payload = snapshot.model_dump_json()
+
+    assert isinstance(snapshot.logo, HttpUrl)
+    assert "ticker_icons/NVDA.png" in payload
+    assert not any(
+        "PydanticSerializationUnexpectedValue" in str(warning.message)
+        for warning in warning_list
+    )
 
 
 def test_finnhub_logo_url_uses_fb_for_meta():

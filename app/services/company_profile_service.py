@@ -162,9 +162,12 @@ class CompanyProfileService:
 
     def _apply_ticker_logo(self, snapshot: ResearchSnapshot) -> ResearchSnapshot:
         logo = self._resolve_stock_logo(snapshot.symbol)
-        if logo == snapshot.logo:
+        current_logo = str(snapshot.logo) if snapshot.logo is not None else None
+        if logo == current_logo:
             return snapshot
-        return snapshot.model_copy(update={"logo": logo})
+        return snapshot.model_validate(
+            snapshot.model_dump(mode="python") | {"logo": logo}
+        )
 
     def _resolve_stock_logo(self, symbol: str) -> str | None:
         item = None
