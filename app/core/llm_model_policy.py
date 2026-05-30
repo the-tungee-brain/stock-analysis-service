@@ -9,8 +9,6 @@ FREE_ALLOWED_MODELS = frozenset(
         "gpt-5-nano",
         "gpt-4o-mini",
         "gpt-4.1-mini",
-        "gpt-5.1",
-        "gpt-4o",
     }
 )
 
@@ -18,6 +16,8 @@ FREE_ALLOWED_MODELS = frozenset(
 PAID_ALLOWED_MODELS = FREE_ALLOWED_MODELS | frozenset(
     {
         "gpt-5-mini",
+        "gpt-5.1",
+        "gpt-4o",
         "gpt-5.4",
         "o3",
         "o4-mini",

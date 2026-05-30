@@ -9,7 +9,13 @@ def test_free_user_advanced_model_falls_back(monkeypatch):
 
 def test_free_user_can_pick_standard_model(monkeypatch):
     monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset())
-    assert resolve_llm_model("gpt-4o", "user-free") == "gpt-4o"
+    assert resolve_llm_model("gpt-4.1-mini", "user-free") == "gpt-4.1-mini"
+
+
+def test_free_user_pro_standard_models_fall_back(monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset())
+    assert resolve_llm_model("gpt-4o", "user-free") == settings.OPENAI_FREE_MODEL
+    assert resolve_llm_model("gpt-5.1", "user-free") == settings.OPENAI_FREE_MODEL
 
 
 def test_free_user_can_pick_simple_model(monkeypatch):
