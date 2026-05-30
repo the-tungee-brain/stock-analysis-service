@@ -151,6 +151,7 @@ class DividendResearchService:
                 share_price=resolved_share_price,
                 investment_usd=resolved_investment,
                 price_cagr_pct=resolved_price_cagr,
+                reinvest_dividends=reinvest_dividends,
                 symbol=symbol_upper,
                 annual_contribution_usd=annual_contribution_usd,
             )

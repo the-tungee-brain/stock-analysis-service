@@ -257,3 +257,21 @@ def test_build_historical_backtest_includes_cash_and_drip():
     assert result["cash_collected_annual"] > 0
     assert result["drip"] is not None
     assert result["drip"]["final_shares"] > result["drip"]["initial_shares"]
+
+
+def test_build_historical_backtest_omits_drip_when_reinvest_disabled():
+    result = build_historical_backtest(
+        dividends=SCHD_DIVIDENDS,
+        annual_totals=SCHD_ANNUAL_TOTALS,
+        shares=100,
+        start_year=2015,
+        share_price=80,
+        investment_usd=10_000,
+        price_cagr_pct=8,
+        reinvest_dividends=False,
+        symbol="SCHD",
+    )
+
+    assert result is not None
+    assert result["cash_collected"] > 0
+    assert result["drip"] is None

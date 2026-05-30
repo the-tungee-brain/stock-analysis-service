@@ -341,6 +341,7 @@ def build_historical_backtest(
     investment_usd: float | None = None,
     price_cagr_pct: float | None = None,
     annual_contribution_usd: float = 0.0,
+    reinvest_dividends: bool = True,
     symbol: str,
 ) -> dict[str, Any] | None:
     completed = completed_annual_totals(annual_totals)
@@ -367,7 +368,12 @@ def build_historical_backtest(
     )
 
     drip: dict[str, Any] | None = None
-    if share_price is not None and share_price > 0 and resolved_start < end_year:
+    if (
+        reinvest_dividends
+        and share_price is not None
+        and share_price > 0
+        and resolved_start < end_year
+    ):
         from app.utils.stock_price_cagr import fetch_price_cagr_pct
 
         resolved_investment = (
