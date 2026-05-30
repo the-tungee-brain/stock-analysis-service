@@ -208,6 +208,11 @@ def test_get_snapshot_uses_ticker_symbols_logo_url_for_stocks():
     ticker_builder.get_by_symbol.assert_called_once_with(symbol="AAPL")
 
 
+def test_finnhub_logo_url_uses_fb_for_meta():
+    service = CompanyProfileService(finnhub_builder=MagicMock())
+    assert "stock_logo/FB.png" in service._finnhub_stock_logo_url("META")
+
+
 def test_get_snapshot_skips_ticker_logo_for_etfs():
     finnhub_builder = MagicMock()
     yfinance_adapter = MagicMock()

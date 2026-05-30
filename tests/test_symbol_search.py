@@ -22,6 +22,32 @@ def _mock_adapter_rows(rows: list[tuple[str, str | None, str | None]]) -> Ticker
     return adapter
 
 
+def test_dict_to_item_reads_logo_url_from_oracle_lob():
+    adapter = TickerSymbolAdapter(client=MagicMock())
+
+    class FakeLogoLob:
+        def read(self):
+            return "  https://cdn.example.com/meta.png  "
+
+    class FakeTitleLob:
+        def read(self):
+            return "Meta Platforms, Inc."
+
+    item = adapter.dict_to_item(
+        {
+            "SYMBOL": "META",
+            "TITLE": FakeTitleLob(),
+            "ASSET_TYPE": "STOCK",
+            "LOGO_URL": FakeLogoLob(),
+        }
+    )
+
+    assert item.symbol == "META"
+    assert item.title == "Meta Platforms, Inc."
+    assert item.asset_type == "STOCK"
+    assert item.logo_url == "https://cdn.example.com/meta.png"
+
+
 def test_dict_to_item_maps_title_asset_type_and_logo_url():
     adapter = TickerSymbolAdapter(client=MagicMock())
     item = adapter.dict_to_item(

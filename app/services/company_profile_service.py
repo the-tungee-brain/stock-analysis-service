@@ -17,6 +17,11 @@ FINNHUB_STOCK_LOGO_URL = (
     "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/{symbol}.png"
 )
 
+# Finnhub's CDN predates some ticker changes (e.g. FB → META).
+FINNHUB_LOGO_SYMBOL_ALIASES: dict[str, str] = {
+    "META": "FB",
+}
+
 
 class CompanyProfileService:
     def __init__(
@@ -181,7 +186,9 @@ class CompanyProfileService:
 
     @staticmethod
     def _finnhub_stock_logo_url(symbol: str) -> str:
-        return FINNHUB_STOCK_LOGO_URL.format(symbol=symbol.strip().upper())
+        symbol_upper = symbol.strip().upper()
+        finnhub_symbol = FINNHUB_LOGO_SYMBOL_ALIASES.get(symbol_upper, symbol_upper)
+        return FINNHUB_STOCK_LOGO_URL.format(symbol=finnhub_symbol)
 
     @staticmethod
     def _key_stats_from_yfinance(info: dict, *, is_etf: bool) -> dict:

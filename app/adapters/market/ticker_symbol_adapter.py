@@ -9,19 +9,26 @@ class TickerSymbolAdapter:
         self.client = client
         self.table_name = "TICKER_SYMBOLS"
 
+    @staticmethod
+    def _coerce_db_str(value) -> str | None:
+        if value is None:
+            return None
+        if hasattr(value, "read"):
+            value = value.read()
+        if not isinstance(value, str):
+            return None
+        stripped = value.strip()
+        return stripped or None
+
     def dict_to_item(self, row: dict) -> TickerSymbolItem:
-        title = row.get("TITLE")
-        asset_type = row.get("ASSET_TYPE")
-        logo_url = row.get("LOGO_URL")
+        title = self._coerce_db_str(row.get("TITLE"))
+        asset_type = self._coerce_db_str(row.get("ASSET_TYPE"))
+        logo_url = self._coerce_db_str(row.get("LOGO_URL"))
         return TickerSymbolItem(
             symbol=row["SYMBOL"],
-            title=title.strip() if isinstance(title, str) and title.strip() else None,
-            asset_type=asset_type if isinstance(asset_type, str) and asset_type else None,
-            logo_url=(
-                logo_url.strip()
-                if isinstance(logo_url, str) and logo_url.strip()
-                else None
-            ),
+            title=title,
+            asset_type=asset_type if asset_type else None,
+            logo_url=logo_url,
         )
 
     def get_by_keyword(self, keyword: str, limit: int = 10) -> List[TickerSymbolItem]:
