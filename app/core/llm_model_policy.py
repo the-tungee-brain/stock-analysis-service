@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.llm_config import settings
+from app.core.llm_routes import LLMRoute
 from app.core.paid_access import is_paid_user as _is_paid_user
 
 # Simple (fast) + Standard (balanced) — available on Free and Pro.
@@ -89,6 +90,7 @@ def chat_model_policy_for_client(*, is_paid: bool) -> dict[str, Any]:
     return {
         "freeModel": settings.OPENAI_FREE_MODEL,
         "defaultModel": settings.OPENAI_MODEL,
+        "backgroundModel": settings.OPENAI_PRO_BACKGROUND_MODEL,
         "freeModels": sorted(FREE_ALLOWED_MODELS),
         "proOnlyModels": sorted(PRO_ONLY_MODELS),
         "paidModels": sorted(PAID_ALLOWED_MODELS),
@@ -97,6 +99,21 @@ def chat_model_policy_for_client(*, is_paid: bool) -> dict[str, Any]:
         ),
         "chatModels": [dict(entry) for entry in CHAT_MODEL_CATALOG],
     }
+
+
+def resolve_background_llm_model(
+    user_id: str | None,
+    route: LLMRoute | None = None,
+) -> str:
+    """Server-picked models for summaries, research AI, structured analysis, etc."""
+    if user_id and is_paid_user(user_id):
+        candidate = settings.OPENAI_PRO_BACKGROUND_MODEL.strip()
+        if candidate in PAID_ALLOWED_MODELS:
+            return candidate
+        return settings.OPENAI_MODEL
+    if route is not None:
+        return settings.model_for_route(route)
+    return settings.OPENAI_FAST_MODEL
 
 
 def resolve_llm_model(requested: str | None, user_id: str) -> str:

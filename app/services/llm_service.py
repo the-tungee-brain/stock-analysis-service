@@ -10,7 +10,7 @@ from app.adapters.llm.openai_adapter import OpenAIAdapter
 from app.builders.news_analytics_builder import NewsAnalyticsBuilder
 from app.builders.prompt_builder import PromptBuilder
 from app.core.llm_config import settings
-from app.core.llm_model_policy import resolve_llm_model
+from app.core.llm_model_policy import resolve_background_llm_model, resolve_llm_model
 from app.core.llm_json import validate_llm_model
 from app.core.llm_routes import LLMRoute
 from app.models.finnhub_news_models import NewsItem, NewsResponse
@@ -110,10 +110,10 @@ class LLMService:
         symbol: str,
         prompts: List[str],
         news: NewsResponse,
-        model: Optional[ResponsesModel] = settings.OPENAI_FAST_MODEL,
         user_id: str | None = None,
+        *,
+        model: Optional[ResponsesModel] = None,
     ) -> StockNewsView:
-        resolved_model = resolve_llm_model(model, user_id or "")
         if not news.root:
             return StockNewsView(
                 symbol=symbol,
@@ -137,7 +137,8 @@ class LLMService:
             route=LLMRoute.NEWS,
             symbol=symbol,
             context_fingerprint=f"combined:{fingerprint}",
-            model=resolved_model,
+            user_id=user_id,
+            model=model,
         )
 
         llm_by_id = {item.id: item for item in combined.items}
@@ -188,9 +189,10 @@ class LLMService:
         prompts: List[str],
         *,
         route: LLMRoute,
+        user_id: str | None = None,
         model: Optional[ResponsesModel] = None,
     ) -> AsyncGenerator[str, None]:
-        resolved_model = model or settings.model_for_route(route)
+        resolved_model = model or resolve_background_llm_model(user_id, route)
         max_tokens = settings.max_tokens_for_route(route)
         async for chunk in self.openai_adapter.generate_stream_from_prompts(
             model=resolved_model,
@@ -207,10 +209,11 @@ class LLMService:
         route: LLMRoute,
         symbol: str | None = None,
         context_fingerprint: str | None = None,
+        user_id: str | None = None,
         model: Optional[ResponsesModel] = None,
         max_output_tokens: int | None = None,
     ) -> T:
-        resolved_model = model or settings.model_for_route(route)
+        resolved_model = model or resolve_background_llm_model(user_id, route)
         resolved_max_tokens = max_output_tokens or settings.max_tokens_for_route(route)
 
         if (

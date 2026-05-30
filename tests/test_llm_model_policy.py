@@ -2,8 +2,10 @@ from app.core.llm_config import settings
 from app.core.llm_model_policy import (
     chat_model_policy_for_client,
     is_paid_user,
+    resolve_background_llm_model,
     resolve_llm_model,
 )
+from app.core.llm_routes import LLMRoute
 
 
 def test_free_user_advanced_model_falls_back(monkeypatch):
@@ -33,6 +35,20 @@ def test_chat_model_policy_for_client_paid():
     policy = chat_model_policy_for_client(is_paid=True)
     assert "gpt-4o" in policy["allowedModels"]
     assert len(policy["chatModels"]) >= 8
+    assert policy["backgroundModel"] == settings.OPENAI_PRO_BACKGROUND_MODEL
+
+
+def test_resolve_background_llm_model(monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset({"user-paid"}))
+    monkeypatch.setattr(settings, "OPENAI_PRO_BACKGROUND_MODEL", "gpt-5.4")
+    monkeypatch.setattr(settings, "OPENAI_FAST_MODEL", "gpt-4.1-mini")
+    assert (
+        resolve_background_llm_model("user-paid", LLMRoute.NEWS) == "gpt-5.4"
+    )
+    assert (
+        resolve_background_llm_model("user-free", LLMRoute.NEWS)
+        == "gpt-4.1-mini"
+    )
 
 
 def test_free_user_can_pick_simple_model(monkeypatch):

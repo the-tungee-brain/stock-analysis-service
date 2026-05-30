@@ -91,7 +91,7 @@ async def analyze_positions_by_symbol(
     chat_service: ChatService = Depends(get_chat_service),
 ):
     positions = PortfolioService._annotate_option_strategies(request.positions)
-    model = resolve_llm_model(request.model, user_id)
+    chat_model = resolve_llm_model(request.model, user_id)
 
     structured = uses_structured_system_message(
         request.prompt,
@@ -179,7 +179,7 @@ async def analyze_positions_by_symbol(
                 prompts=[system_prompt, user_prompt["content"]],
                 response_model=PortfolioAnalysisV1LLMResponse,
                 route=LLMRoute.NEWS,
-                model=model,
+                user_id=user_id,
                 max_output_tokens=settings.MAX_OUTPUT_TOKENS_STREAM,
             )
             if request.symbol is None:
@@ -205,7 +205,7 @@ async def analyze_positions_by_symbol(
         )
         llm_history = [] if structured else recent_messages
         async for chunk in llm_service.analyze_option_position(
-            model=model,
+            model=chat_model,
             system_prompt=system_prompt,
             user_prompt=[*llm_history, user_prompt],
         ):

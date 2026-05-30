@@ -99,6 +99,7 @@ async def get_fundamentals(
                 street_analysis=street_analysis,
                 etf_funds=etf_funds,
             ),
+            user_id=user_id,
         )
         overview_note = overview.at_a_glance
 

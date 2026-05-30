@@ -12,6 +12,9 @@ class Settings:
     OPENAI_FAST_MODEL: str = os.getenv("OPENAI_FAST_MODEL", "gpt-4.1-mini")
     OPENAI_QUALITY_MODEL: str = os.getenv("OPENAI_QUALITY_MODEL", "gpt-4.1-mini")
     OPENAI_FREE_MODEL: str = os.getenv("OPENAI_FREE_MODEL", "gpt-4.1-mini")
+    OPENAI_PRO_BACKGROUND_MODEL: str = os.getenv(
+        "OPENAI_PRO_BACKGROUND_MODEL", "gpt-5.4"
+    )
     PAID_USER_IDS: frozenset[str] = frozenset(
         user_id.strip()
         for user_id in os.getenv("PAID_USER_IDS", "").split(",")

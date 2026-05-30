@@ -16,6 +16,7 @@ def test_free_user_plan(monkeypatch):
     monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset())
     monkeypatch.setattr(settings, "PAID_USER_EMAILS", frozenset())
     monkeypatch.setattr(settings, "OPENAI_FREE_MODEL", "gpt-4.1-mini")
+    monkeypatch.setattr(settings, "OPENAI_PRO_BACKGROUND_MODEL", "gpt-5.4")
     paid_access._email_for_identity.cache_clear()
 
     result = get_account_plan(user=_user(sub="user-free"))
@@ -24,6 +25,7 @@ def test_free_user_plan(monkeypatch):
     assert result["isPaid"] is False
     assert result["identitySub"] == "user-free"
     assert result["freeModel"] == "gpt-4.1-mini"
+    assert result["backgroundModel"] == "gpt-5.4"
     assert result["freeModels"] == ["gpt-4.1-mini", "gpt-4o-mini", "gpt-5-nano"]
     assert "gpt-4o" in result["proOnlyModels"]
     assert "gpt-5.1" in result["proOnlyModels"]

@@ -116,5 +116,6 @@ async def get_earnings_detail(
         route=LLMRoute.EARNINGS,
         symbol=detail.symbol,
         context_fingerprint=f"{detail.symbol}:{detail.event.reportDate}",
+        user_id=user_id,
     )
     return detail

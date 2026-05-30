@@ -320,6 +320,7 @@ class StrategyStockSuggestionService:
                     held_symbols=held_symbols,
                     journey_step_id=journey_step_id,
                 ),
+                user_id=profile.user_id,
             )
         except Exception:
             logger.exception(

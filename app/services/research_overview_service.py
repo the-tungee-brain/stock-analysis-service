@@ -168,6 +168,7 @@ class ResearchOverviewService:
                     context_fingerprint=CompanyResearchService.context_fingerprint(
                         ctx
                     ),
+                    user_id=user_id,
                 )
             )
 
