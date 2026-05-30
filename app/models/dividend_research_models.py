@@ -29,6 +29,10 @@ class DividendAdvancedSnowballScenario(BaseModel):
         default=0.0,
         serialization_alias="totalAnnualContributionsUsd",
     )
+    uses_historical_share_prices: bool = Field(
+        default=False,
+        serialization_alias="usesHistoricalSharePrices",
+    )
 
 
 class DividendBacktestYearRow(BaseModel):

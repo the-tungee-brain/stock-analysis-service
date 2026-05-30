@@ -354,13 +354,24 @@ def build_historical_backtest(
     resolved_start = start_year if start_year is not None else default_start
     resolved_start = max(first_year, min(resolved_start, end_year))
 
+    from app.utils.stock_price_cagr import fetch_annual_close_prices, fetch_price_cagr_pct
+
+    annual_share_prices = fetch_annual_close_prices(symbol, resolved_start, end_year)
+    uses_historical_share_prices = backtest_uses_historical_share_prices(
+        annual_share_prices,
+        resolved_start,
+        end_year,
+    )
+
     share_price_at_start: float | None = None
     backtest_shares = shares
     resolved_price_cagr = price_cagr_pct
-    if share_price is not None and share_price > 0:
+    if annual_share_prices.get(resolved_start):
+        share_price_at_start = annual_share_prices[resolved_start]
+        if investment_usd is not None and investment_usd > 0 and share_price_at_start > 0:
+            backtest_shares = investment_usd / share_price_at_start
+    elif share_price is not None and share_price > 0:
         if resolved_price_cagr is None:
-            from app.utils.stock_price_cagr import fetch_price_cagr_pct
-
             resolved_price_cagr = fetch_price_cagr_pct(symbol, lookback_years=5) or 0.0
         years_elapsed = end_year - resolved_start
         share_price_at_start = derive_share_price_at_start(
@@ -370,6 +381,12 @@ def build_historical_backtest(
         )
         if investment_usd is not None and investment_usd > 0 and share_price_at_start > 0:
             backtest_shares = investment_usd / share_price_at_start
+
+    latest_share_price = share_price
+    if latest_share_price is None and annual_share_prices.get(end_year):
+        latest_share_price = annual_share_prices[end_year]
+    elif uses_historical_share_prices and annual_share_prices.get(end_year):
+        latest_share_price = annual_share_prices[end_year]
 
     cash_collected = cash_collected_since_year(
         dividends,
@@ -388,15 +405,16 @@ def build_historical_backtest(
     yearly_breakdown: list[dict[str, Any]] = []
     if (
         reinvest_dividends
-        and share_price is not None
-        and share_price > 0
-        and resolved_start < end_year
         and share_price_at_start is not None
+        and share_price_at_start > 0
+        and latest_share_price is not None
+        and latest_share_price > 0
+        and resolved_start < end_year
     ):
         resolved_investment = (
             investment_usd
             if investment_usd is not None and investment_usd > 0
-            else backtest_shares * share_price
+            else backtest_shares * latest_share_price
         )
         drip = simulate_drip_backtest(
             annual_totals=annual_totals,
@@ -405,8 +423,10 @@ def build_historical_backtest(
             initial_investment_usd=resolved_investment,
             share_price_at_start=share_price_at_start,
             price_cagr_pct=resolved_price_cagr or 0.0,
-            current_share_price=share_price,
+            current_share_price=latest_share_price,
             annual_contribution_usd=annual_contribution_usd,
+            annual_share_prices=annual_share_prices,
+            uses_historical_share_prices=uses_historical_share_prices,
         )
         cash_collected = float(drip["total_dividends_collected"])
         cash_collected_annual = cash_collected
@@ -419,7 +439,8 @@ def build_historical_backtest(
             shares=backtest_shares,
             share_price_at_start=share_price_at_start,
             price_cagr_pct=resolved_price_cagr or 0.0,
-            current_share_price=share_price,
+            current_share_price=latest_share_price,
+            annual_share_prices=annual_share_prices,
         )
 
     return {
@@ -449,6 +470,41 @@ def derive_share_price_at_start(
     return current_share_price / denominator
 
 
+def backtest_uses_historical_share_prices(
+    annual_share_prices: dict[int, float],
+    start_year: int,
+    end_year: int,
+) -> bool:
+    if not annual_share_prices:
+        return False
+    return all(
+        annual_share_prices.get(year, 0) > 0
+        for year in range(start_year, end_year + 1)
+    )
+
+
+def resolve_share_price_for_year(
+    *,
+    year: int,
+    start_year: int,
+    share_price_at_start: float,
+    price_cagr_pct: float,
+    annual_share_prices: dict[int, float] | None,
+) -> float:
+    if (
+        annual_share_prices
+        and year in annual_share_prices
+        and annual_share_prices[year] > 0
+    ):
+        return annual_share_prices[year]
+    return modeled_share_price_for_year(
+        share_price_at_start=share_price_at_start,
+        price_cagr_pct=price_cagr_pct,
+        start_year=start_year,
+        year=year,
+    )
+
+
 def modeled_share_price_for_year(
     *,
     share_price_at_start: float,
@@ -472,6 +528,7 @@ def build_backtest_yearly_rows(
     share_price_at_start: float | None,
     price_cagr_pct: float,
     current_share_price: float | None,
+    annual_share_prices: dict[int, float] | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     resolved_start_price = share_price_at_start
@@ -481,11 +538,12 @@ def build_backtest_yearly_rows(
     for year in range(start_year, end_year + 1):
         dps = annual_totals.get(year, 0.0)
         year_price = (
-            modeled_share_price_for_year(
+            resolve_share_price_for_year(
+                year=year,
+                start_year=start_year,
                 share_price_at_start=resolved_start_price,
                 price_cagr_pct=price_cagr_pct,
-                start_year=start_year,
-                year=year,
+                annual_share_prices=annual_share_prices,
             )
             if resolved_start_price > 0
             else 0.0
@@ -515,6 +573,8 @@ def simulate_drip_backtest(
     price_cagr_pct: float,
     current_share_price: float,
     annual_contribution_usd: float = 0.0,
+    annual_share_prices: dict[int, float] | None = None,
+    uses_historical_share_prices: bool = False,
 ) -> dict[str, Any]:
     if (
         initial_investment_usd <= 0
@@ -528,6 +588,7 @@ def simulate_drip_backtest(
             "share_price_at_start": round(share_price_at_start, 2),
             "share_price_latest": round(current_share_price, 2),
             "price_cagr_pct": price_cagr_pct,
+            "uses_historical_share_prices": uses_historical_share_prices,
             "annual_income_latest_drip": 0.0,
             "portfolio_value_latest": 0.0,
             "total_dividends_reinvested": 0.0,
@@ -538,8 +599,6 @@ def simulate_drip_backtest(
 
     shares = initial_investment_usd / share_price_at_start
     initial_shares = shares
-    price = share_price_at_start
-    rate = price_cagr_pct / 100.0
     total_reinvested = 0.0
     total_dividends_collected = 0.0
     contribution = max(float(annual_contribution_usd), 0.0)
@@ -547,6 +606,14 @@ def simulate_drip_backtest(
     yearly_breakdown: list[dict[str, Any]] = []
 
     for year in range(start_year, end_year + 1):
+        price = resolve_share_price_for_year(
+            year=year,
+            start_year=start_year,
+            share_price_at_start=share_price_at_start,
+            price_cagr_pct=price_cagr_pct,
+            annual_share_prices=annual_share_prices,
+        )
+
         if year > start_year and contribution > 0 and price > 0:
             shares += contribution / price
             total_contributions += contribution
@@ -571,9 +638,6 @@ def simulate_drip_backtest(
                 shares += dividend_income / price
                 total_reinvested += dividend_income
 
-        if year < end_year:
-            price *= 1.0 + rate
-
     latest_dps = annual_totals.get(end_year, 0.0)
     portfolio_value = shares * current_share_price
 
@@ -584,6 +648,7 @@ def simulate_drip_backtest(
         "share_price_at_start": round(share_price_at_start, 2),
         "share_price_latest": round(current_share_price, 2),
         "price_cagr_pct": price_cagr_pct,
+        "uses_historical_share_prices": uses_historical_share_prices,
         "annual_income_latest_drip": round(latest_dps * shares, 2),
         "portfolio_value_latest": round(portfolio_value, 2),
         "total_dividends_reinvested": round(total_reinvested, 2),

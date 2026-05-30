@@ -39,7 +39,7 @@ async def get_dividend_history(
     ),
     reinvest_dividends: bool = Query(
         default=False,
-        description="Simulate dividend reinvestment with average annual price growth",
+        description="Simulate dividend reinvestment using actual year-end prices when available",
     ),
     price_cagr_pct: float | None = Query(
         default=None,

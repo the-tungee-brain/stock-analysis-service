@@ -3,6 +3,7 @@ from datetime import date
 import pytest
 
 from app.utils.dividend_snowball import (
+    backtest_uses_historical_share_prices,
     build_historical_backtest,
     build_scenario,
     cash_collected_since_year,
@@ -11,6 +12,7 @@ from app.utils.dividend_snowball import (
     normalize_project_years,
     parse_annual_totals,
     resolve_dividend_yield_pct,
+    resolve_share_price_for_year,
     simulate_drip_backtest,
     simulate_forward_projection,
 )
@@ -305,13 +307,17 @@ def test_build_historical_backtest_uses_start_price_share_count():
     )
 
     assert result is not None
-    price_at_start = derive_share_price_at_start(
-        current_share_price=80,
-        price_cagr_pct=8,
-        years_elapsed=result["end_year"] - result["start_year"],
-    )
-    expected_shares = 10_000 / price_at_start
+    start_price = result["drip"]["share_price_at_start"]
+    expected_shares = 10_000 / start_price
     assert result["initial_shares"] == pytest.approx(expected_shares, rel=1e-4)
+    if result["drip"].get("uses_historical_share_prices"):
+        assert start_price != pytest.approx(
+            derive_share_price_at_start(
+                current_share_price=80,
+                price_cagr_pct=8,
+                years_elapsed=result["end_year"] - result["start_year"],
+            ),
+        )
     assert result["drip"] is not None
     assert result["drip"]["initial_shares"] == pytest.approx(result["initial_shares"])
     assert result["cash_collected"] == pytest.approx(
@@ -357,3 +363,53 @@ def test_build_historical_backtest_omits_drip_when_reinvest_disabled():
     assert result is not None
     assert result["cash_collected"] > 0
     assert result["drip"] is None
+
+
+def test_simulate_drip_backtest_uses_historical_share_prices():
+    historical_prices = {
+        2015: 20.0,
+        2016: 24.0,
+        2017: 28.0,
+        2018: 32.0,
+        2019: 36.0,
+        2020: 40.0,
+        2021: 44.0,
+        2022: 48.0,
+        2023: 52.0,
+        2024: 80.0,
+    }
+    result = simulate_drip_backtest(
+        annual_totals=SCHD_ANNUAL_TOTALS,
+        start_year=2015,
+        end_year=2024,
+        initial_investment_usd=10_000,
+        share_price_at_start=20.0,
+        price_cagr_pct=8.0,
+        current_share_price=80.0,
+        annual_share_prices=historical_prices,
+        uses_historical_share_prices=True,
+    )
+
+    assert result["uses_historical_share_prices"] is True
+    assert result["yearly_breakdown"][0]["share_price"] == pytest.approx(20.0)
+    assert result["yearly_breakdown"][-1]["share_price"] == pytest.approx(80.0)
+    assert backtest_uses_historical_share_prices(historical_prices, 2015, 2024)
+
+
+def test_resolve_share_price_for_year_prefers_historical():
+    historical = {2020: 42.5}
+    assert resolve_share_price_for_year(
+        year=2020,
+        start_year=2018,
+        share_price_at_start=30.0,
+        price_cagr_pct=10.0,
+        annual_share_prices=historical,
+    ) == pytest.approx(42.5)
+    modeled = resolve_share_price_for_year(
+        year=2019,
+        start_year=2018,
+        share_price_at_start=30.0,
+        price_cagr_pct=10.0,
+        annual_share_prices=historical,
+    )
+    assert modeled == pytest.approx(33.0)
