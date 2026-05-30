@@ -238,6 +238,32 @@ def test_simulate_forward_projection_with_annual_contributions():
     )
 
 
+def test_simulate_drip_backtest_with_annual_contributions():
+    baseline = simulate_drip_backtest(
+        annual_totals=SCHD_ANNUAL_TOTALS,
+        start_year=2015,
+        end_year=2024,
+        initial_investment_usd=10_000,
+        share_price_at_start=20,
+        price_cagr_pct=8,
+        current_share_price=80,
+    )
+    with_contrib = simulate_drip_backtest(
+        annual_totals=SCHD_ANNUAL_TOTALS,
+        start_year=2015,
+        end_year=2024,
+        initial_investment_usd=10_000,
+        share_price_at_start=20,
+        price_cagr_pct=8,
+        current_share_price=80,
+        annual_contribution_usd=35_000,
+    )
+
+    assert with_contrib["final_shares"] > baseline["final_shares"]
+    assert with_contrib["portfolio_value_latest"] > baseline["portfolio_value_latest"]
+    assert with_contrib["total_annual_contributions_usd"] == pytest.approx(315_000)
+
+
 def test_build_historical_backtest_uses_start_price_share_count():
     result = build_historical_backtest(
         dividends=SCHD_DIVIDENDS,

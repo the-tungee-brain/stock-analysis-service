@@ -69,7 +69,6 @@ async def get_dividend_history(
         default=0.0,
         ge=0,
         le=100_000_000,
-        alias="annualContributionUsd",
         description="New cash invested at the start of each projected year (after year one)",
     ),
     dividend_research_service: DividendResearchService = Depends(
