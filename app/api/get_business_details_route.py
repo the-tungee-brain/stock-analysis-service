@@ -2,7 +2,9 @@ import asyncio
 
 from fastapi import APIRouter, Depends
 
+from app.auth.dependencies import get_current_user_id
 from app.core.llm_routes import LLMRoute
+from app.core.plan_features import PRO_FEATURE_BUSINESS, require_paid_feature
 from app.models.company_research_models import BusinessBlock
 from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.llm_service import LLMService
@@ -19,6 +21,7 @@ router = APIRouter()
 @router.get("/research/business")
 async def get_business_details(
     symbol: str,
+    user_id: str = Depends(get_current_user_id),
     company_research_service: CompanyResearchService = Depends(
         get_company_research_service
     ),
@@ -27,6 +30,7 @@ async def get_business_details(
     ),
     llm_service: LLMService = Depends(get_llm_service),
 ):
+    require_paid_feature(user_id, PRO_FEATURE_BUSINESS)
     ctx = await asyncio.to_thread(
         company_research_service.build_context,
         symbol=symbol,

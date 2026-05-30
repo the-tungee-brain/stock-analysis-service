@@ -4,7 +4,9 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
+from app.api.get_business_details_route import get_business_details
 from app.api.get_dividend_history_route import get_dividend_history
+from app.api.get_research_overview_bundle_route import get_research_overview_bundle
 from app.api.wheel_backtest_route import get_wheel_backtest
 from app.core.llm_config import settings
 from app.core.plan_features import paid_features_for_user
@@ -19,6 +21,8 @@ def test_paid_features_for_free_user(monkeypatch):
     assert features["news_ai"] is False
     assert features["financial_strength"] is False
     assert features["earnings_ai"] is False
+    assert features["business"] is False
+    assert features["big_picture"] is False
 
 
 def test_paid_features_for_pro_user(monkeypatch):
@@ -29,6 +33,8 @@ def test_paid_features_for_pro_user(monkeypatch):
     assert features["news_ai"] is True
     assert features["financial_strength"] is True
     assert features["earnings_ai"] is True
+    assert features["business"] is True
+    assert features["big_picture"] is True
 
 
 def test_wheel_backtest_requires_pro(monkeypatch):
@@ -79,3 +85,42 @@ def test_free_dividend_history_omits_snowball(monkeypatch):
     assert call.kwargs["project_years"] is None
     assert call.kwargs["annual_contribution_usd"] == 0.0
     assert call.kwargs["include_snowball"] is False
+
+
+def test_business_details_requires_pro(monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset())
+    service = MagicMock()
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            get_business_details(
+                symbol="AAPL",
+                user_id="user-free",
+                company_research_service=service,
+                prompt_enrichment_service=MagicMock(),
+                llm_service=MagicMock(),
+            )
+        )
+
+    assert exc.value.status_code == 403
+    service.build_context.assert_not_called()
+
+
+def test_overview_bundle_summary_requires_pro(monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset())
+    service = MagicMock()
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            get_research_overview_bundle(
+                request=MagicMock(headers={}),
+                symbol="AAPL",
+                holdings_limit=8,
+                include_summary=True,
+                user_id="user-free",
+                overview_service=service,
+            )
+        )
+
+    assert exc.value.status_code == 403
+    service.build_bundle_async.assert_not_called()

@@ -36,6 +36,8 @@ def test_free_user_plan(monkeypatch):
     assert result["features"]["news_ai"] is False
     assert result["features"]["financial_strength"] is False
     assert result["features"]["earnings_ai"] is False
+    assert result["features"]["business"] is False
+    assert result["features"]["big_picture"] is False
 
 
 def test_paid_user_plan(monkeypatch):
@@ -54,3 +56,5 @@ def test_paid_user_plan(monkeypatch):
     assert result["features"]["news_ai"] is True
     assert result["features"]["financial_strength"] is True
     assert result["features"]["earnings_ai"] is True
+    assert result["features"]["business"] is True
+    assert result["features"]["big_picture"] is True

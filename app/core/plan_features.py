@@ -9,6 +9,8 @@ PRO_FEATURE_DIVIDEND_SNOWBALL = "dividend_snowball"
 PRO_FEATURE_NEWS_AI = "news_ai"
 PRO_FEATURE_FINANCIAL_STRENGTH = "financial_strength"
 PRO_FEATURE_EARNINGS_AI = "earnings_ai"
+PRO_FEATURE_BUSINESS = "business"
+PRO_FEATURE_BIG_PICTURE = "big_picture"
 
 PRO_FEATURES = frozenset(
     {
@@ -17,6 +19,8 @@ PRO_FEATURES = frozenset(
         PRO_FEATURE_NEWS_AI,
         PRO_FEATURE_FINANCIAL_STRENGTH,
         PRO_FEATURE_EARNINGS_AI,
+        PRO_FEATURE_BUSINESS,
+        PRO_FEATURE_BIG_PICTURE,
     }
 )
 

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from app.auth.dependencies import get_current_user_id
+from app.core.plan_features import PRO_FEATURE_BIG_PICTURE, require_paid_feature
 from app.dependencies.service_dependencies import get_research_overview_service
 from app.http.etag import json_weak_etag, normalize_if_none_match
 from app.services.research_overview_service import (
@@ -35,6 +36,9 @@ async def get_research_overview_bundle(
     user_id: str = Depends(get_current_user_id),
     overview_service: ResearchOverviewService = Depends(get_research_overview_service),
 ):
+    if include_summary:
+        require_paid_feature(user_id, PRO_FEATURE_BIG_PICTURE)
+
     symbol_upper = symbol.strip().upper()
     started = time.perf_counter()
     bundle = await overview_service.build_bundle_async(

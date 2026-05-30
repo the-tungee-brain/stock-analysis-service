@@ -138,6 +138,7 @@ class PortfolioIntelligenceService:
         since: datetime | None = None,
         option_chain: OptionChain | None = None,
         include_peers: bool = True,
+        include_cached_research: bool = True,
         underlying_iv_percent: float | None = None,
         profile: UserInvestmentProfile | None = None,
     ) -> SymbolIntelligence:
@@ -205,7 +206,9 @@ class PortfolioIntelligenceService:
                 profile=profile,
             )
 
-        cached_research = self._load_cached_research(research)
+        cached_research = (
+            self._load_cached_research(research) if include_cached_research else None
+        )
 
         return SymbolIntelligence(
             symbol=symbol.upper(),

@@ -32,6 +32,7 @@ from app.core.prompts import (
     _build_account_summary,
     _enrich_positions_table,
 )
+from app.core.llm_model_policy import is_paid_user
 from app.models.company_research_models import ResearchContext
 from app.models.intelligence_models import (
     PortfolioIntelligence,
@@ -1045,6 +1046,7 @@ class PortfolioAnalysisService:
                 orders=orders,
                 option_chain=option_chain,
                 include_peers=True,
+                include_cached_research=is_paid_user(user_id),
                 underlying_iv_percent=underlying_iv_percent,
                 profile=profile,
             )
