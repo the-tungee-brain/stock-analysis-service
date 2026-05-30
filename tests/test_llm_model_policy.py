@@ -29,6 +29,7 @@ def test_chat_model_policy_for_client_free():
     assert "gpt-4o" in policy["proOnlyModels"]
     assert "gpt-4o" not in policy["freeModels"]
     assert policy["allowedModels"] == policy["freeModels"]
+    assert policy["defaultModel"] == settings.OPENAI_FREE_MODEL
 
 
 def test_chat_model_policy_for_client_paid():
@@ -36,6 +37,7 @@ def test_chat_model_policy_for_client_paid():
     assert "gpt-4o" in policy["allowedModels"]
     assert len(policy["chatModels"]) >= 8
     assert policy["backgroundModel"] == settings.OPENAI_PRO_BACKGROUND_MODEL
+    assert policy["defaultModel"] == settings.OPENAI_PRO_BACKGROUND_MODEL
 
 
 def test_resolve_background_llm_model(monkeypatch):
@@ -63,7 +65,9 @@ def test_paid_user_can_request_allowed_model(monkeypatch):
 
 def test_paid_user_invalid_model_falls_back(monkeypatch):
     monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset({"user-paid"}))
-    assert resolve_llm_model("gpt-unknown", "user-paid") == settings.OPENAI_MODEL
+    monkeypatch.setattr(settings, "OPENAI_PRO_BACKGROUND_MODEL", "gpt-5.4")
+    assert resolve_llm_model("gpt-unknown", "user-paid") == "gpt-5.4"
+    assert resolve_llm_model(None, "user-paid") == "gpt-5.4"
 
 
 def test_is_paid_user():

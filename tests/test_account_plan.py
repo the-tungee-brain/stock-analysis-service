@@ -25,6 +25,7 @@ def test_free_user_plan(monkeypatch):
     assert result["isPaid"] is False
     assert result["identitySub"] == "user-free"
     assert result["freeModel"] == "gpt-4.1-mini"
+    assert result["defaultModel"] == "gpt-4.1-mini"
     assert result["backgroundModel"] == "gpt-5.4"
     assert result["freeModels"] == ["gpt-4.1-mini", "gpt-4o-mini", "gpt-5-nano"]
     assert "gpt-4o" in result["proOnlyModels"]
@@ -49,6 +50,7 @@ def test_paid_user_plan(monkeypatch):
 
     assert result["plan"] == "pro"
     assert result["isPaid"] is True
+    assert result["defaultModel"] == settings.OPENAI_PRO_BACKGROUND_MODEL
     assert "gpt-4o" in result["allowedModels"]
     assert result["allowedModels"] == result["paidModels"]
     assert result["features"]["wheel_backtest"] is True

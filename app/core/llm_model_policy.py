@@ -89,7 +89,11 @@ def chat_model_policy_for_client(*, is_paid: bool) -> dict[str, Any]:
     """Model picker metadata and allowlists for the web client."""
     return {
         "freeModel": settings.OPENAI_FREE_MODEL,
-        "defaultModel": settings.OPENAI_MODEL,
+        "defaultModel": (
+            settings.OPENAI_PRO_BACKGROUND_MODEL
+            if is_paid
+            else settings.OPENAI_FREE_MODEL
+        ),
         "backgroundModel": settings.OPENAI_PRO_BACKGROUND_MODEL,
         "freeModels": sorted(FREE_ALLOWED_MODELS),
         "proOnlyModels": sorted(PRO_ONLY_MODELS),
@@ -125,7 +129,7 @@ def resolve_llm_model(requested: str | None, user_id: str) -> str:
             return candidate
         return settings.OPENAI_FREE_MODEL
 
-    resolved = candidate or settings.OPENAI_MODEL
+    resolved = candidate or settings.OPENAI_PRO_BACKGROUND_MODEL
     if resolved in PAID_ALLOWED_MODELS:
         return resolved
-    return settings.OPENAI_MODEL
+    return settings.OPENAI_PRO_BACKGROUND_MODEL
