@@ -122,3 +122,20 @@ def test_route_json_uses_camel_case_aliases():
     assert payload["annualIncome"][0]["totalPerShare"] == 0.995
     assert payload["payments"][0]["amountPerShare"] == 0.249
     assert payload["scenario"]["startYear"] == 2016
+
+
+def test_route_passes_annual_contribution_query_param():
+    service = MagicMock()
+    service.build_history_context.return_value = _sample_context()
+
+    asyncio.run(
+        get_dividend_history(
+            user_id="user-pro",
+            symbol="SCHD",
+            shares=100,
+            annual_contribution_usd=35_000,
+            dividend_research_service=service,
+        )
+    )
+
+    assert service.build_history_context.call_args.kwargs["annual_contribution_usd"] == 35_000
