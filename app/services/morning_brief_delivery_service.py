@@ -373,19 +373,25 @@ class MorningBriefDeliveryService:
             )
 
         html_sections.append(
-            f'<p style="margin-top: 24px;"><a href="{html.escape(self.frontend_uri)}/portfolio">'
-            f"Open {html.escape(self.brand_name)}</a></p>"
+            f'<p style="margin-top: 32px;"><a href="{html.escape(self.frontend_uri)}/portfolio" '
+            f'style="display: inline-block; padding: 12px 20px; background: #6366f1; '
+            f'color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: 600; '
+            f'font-size: 14px;">Open {html.escape(self.brand_name)}</a></p>'
         )
         html_sections.append(
-            f'<p style="margin-top: 24px; color: #666; font-size: 13px;">'
+            f'<p style="margin-top: 24px; color: #71717a; font-size: 13px;">'
             f"— {html.escape(self.brand_name)}</p>"
         )
 
         html_body = (
-            '<html><body style="font-family: sans-serif; line-height: 1.5; '
-            'color: #111; max-width: 640px; margin: 0 auto; padding: 24px;">'
+            '<html><body style="font-family: -apple-system, BlinkMacSystemFont, '
+            '"Segoe UI", Roboto, sans-serif; line-height: 1.6; '
+            'color: #18181b; background: #fafafa; max-width: 640px; margin: 0 auto; '
+            'padding: 32px 24px;">'
+            '<div style="border: 1px solid #e4e4e7; border-radius: 12px; '
+            'background: #ffffff; padding: 28px 24px;">'
             + "".join(html_sections)
-            + "</body></html>"
+            + "</div></body></html>"
         )
 
         return subject, text_body, html_body
