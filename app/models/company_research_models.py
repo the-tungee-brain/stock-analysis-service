@@ -191,11 +191,13 @@ class EarningsContext(BaseModel):
 
 
 class EtfHoldingItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     ticker: str | None = None
     name: str
-    weight_pct: float
+    weight_pct: float = Field(serialization_alias="weightPct")
     sector: str | None = None
-    market_cap: str | None = None
+    market_cap: str | None = Field(default=None, serialization_alias="marketCap")
     piotroski_f: int | None = Field(default=None, serialization_alias="piotroskiF")
     altman_z: float | None = Field(default=None, serialization_alias="altmanZ")
     quality_score: float | None = Field(
@@ -204,10 +206,14 @@ class EtfHoldingItem(BaseModel):
 
 
 class EtfHoldingsContext(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     ticker: str
-    total_holdings: int
+    total_holdings: int = Field(serialization_alias="totalHoldings")
     aum: str | None = None
-    sector_breakdown: dict[str, float] = Field(default_factory=dict)
+    sector_breakdown: dict[str, float] = Field(
+        default_factory=dict, serialization_alias="sectorBreakdown"
+    )
     holdings: list[EtfHoldingItem] = Field(default_factory=list)
     strongest_holdings: list[EtfHoldingItem] = Field(
         default_factory=list, serialization_alias="strongestHoldings"
@@ -215,8 +221,8 @@ class EtfHoldingsContext(BaseModel):
     weakest_holdings: list[EtfHoldingItem] = Field(
         default_factory=list, serialization_alias="weakestHoldings"
     )
-    dividend_yield: str | None = None
-    expense_ratio: str | None = None
+    dividend_yield: str | None = Field(default=None, serialization_alias="dividendYield")
+    expense_ratio: str | None = Field(default=None, serialization_alias="expenseRatio")
     data_as_of: str | None = Field(default=None, serialization_alias="dataAsOf")
     confidence_score: float | None = Field(
         default=None, serialization_alias="confidenceScore"
