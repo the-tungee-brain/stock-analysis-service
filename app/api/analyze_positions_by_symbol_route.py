@@ -116,7 +116,7 @@ async def analyze_positions_by_symbol(
             user_id=user_id,
             symbol=request.symbol,
             prompt=session_prompt,
-            model=model,
+            model=chat_model,
             chat_session_id=request.chat_session_id,
             new_chat_session=request.new_chat_session,
         )
