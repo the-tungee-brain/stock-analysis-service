@@ -53,7 +53,7 @@ class WheelBacktestService:
         if dte_days not in ALLOWED_WHEEL_BACKTEST_DTE_DAYS:
             raise ValueError(
                 f"dte_days must be one of {sorted(ALLOWED_WHEEL_BACKTEST_DTE_DAYS)} "
-                "(5=1 week, 10=2 weeks, 30=1 month, 63=3 months trading days)"
+                "(7=1 week, 14=2 weeks, 30=1 month, 90=3 months trading days)"
             )
         if contracts < 1 or contracts > 20:
             raise ValueError("contracts must be between 1 and 20")

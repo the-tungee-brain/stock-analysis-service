@@ -14,7 +14,7 @@ from app.broker.option_greeks import (
 SHARES_PER_CONTRACT = 100
 ALLOWED_LOOKBACK_YEARS = frozenset({5, 10, 15})
 DEFAULT_WHEEL_BACKTEST_DTE_DAYS = 30
-ALLOWED_WHEEL_BACKTEST_DTE_DAYS = frozenset({5, 10, 30, 63})
+ALLOWED_WHEEL_BACKTEST_DTE_DAYS = frozenset({7, 14, 30, 90})
 CallStrikeMode = Literal["delta", "at_or_above_assignment"]
 
 TRADE_ACTION_LABELS: dict[str, str] = {
