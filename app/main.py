@@ -14,6 +14,7 @@ from app.api.auth_schwab_status_route import router as auth_schwab_status_route
 from app.dependencies.lifespan import lifespan
 from app.auth.dependencies import get_current_user
 from app.api.auth_google_callback_route import router as auth_google_callback_route
+from app.api.auth_refresh_route import router as auth_refresh_route
 from app.api.get_company_news_route import router as get_company_news_route
 from app.api.get_press_releases_route import router as get_press_releases_router
 from app.api.get_stock_data_route import router as get_stock_data_route
@@ -80,6 +81,7 @@ app.add_middleware(
 app.include_router(health_check_router)
 app.include_router(internal_morning_brief_router, prefix=API_PREFIX)
 app.include_router(auth_google_callback_route, prefix=AUTH_GOOGLE_PREFIX)
+app.include_router(auth_refresh_route, prefix=API_PREFIX)
 app.include_router(auth_schwab_callback_router, prefix=AUTH_SCHWAB_PREFIX)
 
 app.include_router(

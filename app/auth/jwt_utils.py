@@ -29,3 +29,30 @@ def verify_jwt(token: str) -> Dict[str, Any]:
         raise
 
     return payload
+
+
+def verify_jwt_for_refresh(token: str) -> Dict[str, Any]:
+    """Accept valid or recently-expired JWTs for silent refresh."""
+    try:
+        return verify_jwt(token)
+    except InvalidTokenError:
+        pass
+
+    try:
+        payload = jwt.decode(
+            token,
+            get_jwt_signing_key(),
+            algorithms=[JWT_ALGORITHM],
+            options={"verify_exp": False, "require": ["exp", "sub"]},
+        )
+    except InvalidTokenError as exc:
+        raise InvalidTokenError("Invalid refresh token") from exc
+
+    exp = payload.get("exp")
+    if exp is not None:
+        expired_at = datetime.fromtimestamp(exp, tz=timezone.utc)
+        refresh_deadline = expired_at + timedelta(minutes=JWT_EXPIRES_MINUTES)
+        if datetime.now(timezone.utc) > refresh_deadline:
+            raise InvalidTokenError("Refresh window expired")
+
+    return payload
