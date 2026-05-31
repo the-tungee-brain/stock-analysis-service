@@ -19,6 +19,20 @@ def redirect_to_oauth_result(
     return RedirectResponse(url=f"{frontend_uri}{path}?status={status}")
 
 
+def redirect_for_oauth_client(
+    *,
+    oauth_client: str,
+    status: str,
+    frontend_uri: str,
+) -> RedirectResponse:
+    if oauth_client == "ios":
+        ios_uri = os.getenv("POWERPOCKET_IOS_OAUTH_REDIRECT_URI", "tomcrest://schwab")
+        return RedirectResponse(url=f"{ios_uri}?status={status}")
+
+    path = "/portfolio" if status == "success" else "/settings"
+    return redirect_to_oauth_result(frontend_uri, status, path=path)
+
+
 @router.get("/callback")
 def auth_schwab_callback(
     code: str,
@@ -27,23 +41,32 @@ def auth_schwab_callback(
     schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
     transaction_service: TransactionService = Depends(get_transaction_service),
 ):
-    powerpocket_frontend_uri = os.getenv("POWERPOCKET_FRONTEND_URI")
+    powerpocket_frontend_uri = os.getenv("POWERPOCKET_FRONTEND_URI", "")
+    oauth_state = schwab_auth_service.get_oauth_state(state=state) if state else None
+    oauth_client = oauth_state.client if oauth_state else "web"
+
     if error is not None:
-        return redirect_to_oauth_result(
-            powerpocket_frontend_uri, "error", path="/settings"
+        return redirect_for_oauth_client(
+            oauth_client=oauth_client,
+            status="error",
+            frontend_uri=powerpocket_frontend_uri,
         )
 
     if code is None:
-        return redirect_to_oauth_result(
-            powerpocket_frontend_uri, "invalid", path="/settings"
+        return redirect_for_oauth_client(
+            oauth_client=oauth_client,
+            status="invalid",
+            frontend_uri=powerpocket_frontend_uri,
         )
 
-    user_id = schwab_auth_service.get_user_id_by_state(state=state)
-    if not user_id:
-        return redirect_to_oauth_result(
-            powerpocket_frontend_uri, "error_state", path="/settings"
+    if not oauth_state:
+        return redirect_for_oauth_client(
+            oauth_client=oauth_client,
+            status="error_state",
+            frontend_uri=powerpocket_frontend_uri,
         )
 
+    user_id = oauth_state.user_id
     schwab_auth_service.delete_cache(key=f"oauth:{state}")
     print("Getting access token: ", user_id, code, state)
     try:
@@ -52,8 +75,14 @@ def auth_schwab_callback(
     except Exception as e:
         print("Error in callback:" + user_id + ":" + code, e, flush=True)
         traceback.print_exc()
-        return redirect_to_oauth_result(
-            powerpocket_frontend_uri, "error_token", path="/settings"
+        return redirect_for_oauth_client(
+            oauth_client=oauth_client,
+            status="error_token",
+            frontend_uri=powerpocket_frontend_uri,
         )
 
-    return redirect_to_oauth_result(powerpocket_frontend_uri, "success")
+    return redirect_for_oauth_client(
+        oauth_client=oauth_client,
+        status="success",
+        frontend_uri=powerpocket_frontend_uri,
+    )

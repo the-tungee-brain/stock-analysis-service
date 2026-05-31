@@ -24,7 +24,7 @@ def test_build_reauth_authorization_url_caches_oauth_state(schwab_auth_service):
     assert "state=" in url
     schwab_auth_service.schwab_auth_builder.cache.assert_called_once()
     cache_kwargs = schwab_auth_service.schwab_auth_builder.cache.call_args.kwargs
-    assert cache_kwargs["value"] == "user-123"
+    assert cache_kwargs["value"] == '{"user_id": "user-123", "client": "web"}'
     assert cache_kwargs["ttl_seconds"] == 600
     assert cache_kwargs["key"].startswith("oauth:")
 
@@ -58,3 +58,24 @@ def test_disconnect_user_clears_cached_and_persisted_tokens(schwab_auth_service)
     schwab_auth_service.schwab_auth_builder.delete_token_by_user_id.assert_called_once_with(
         user_id="user-123"
     )
+
+
+def test_get_oauth_state_reads_legacy_user_id_string(schwab_auth_service):
+    schwab_auth_service.schwab_auth_builder.get_cached_raw_data.return_value = (
+        "user-legacy"
+    )
+
+    payload = schwab_auth_service.get_oauth_state(state="abc")
+
+    assert payload is not None
+    assert payload.user_id == "user-legacy"
+    assert payload.client == "web"
+
+
+def test_cache_state_persists_ios_client(schwab_auth_service):
+    schwab_auth_service.cache_state(
+        state="state-1", user_id="user-123", oauth_client="ios"
+    )
+
+    cache_kwargs = schwab_auth_service.schwab_auth_builder.cache.call_args.kwargs
+    assert cache_kwargs["value"] == '{"user_id": "user-123", "client": "ios"}'

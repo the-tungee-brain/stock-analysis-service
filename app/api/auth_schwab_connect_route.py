@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from app.services.schwab_auth_service import SchwabAuthService
 from app.dependencies.service_dependencies import get_schwab_auth_service
 from app.auth.dependencies import get_current_user_id
@@ -10,9 +10,13 @@ router = APIRouter()
 @router.get("/connect")
 def auth_schwab_connect(
     user_id: str = Depends(get_current_user_id),
+    client: str = Query(default="web"),
     schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
 ):
     state = secrets.token_urlsafe(32)
-    schwab_auth_service.cache_state(state=state, user_id=user_id)
+    oauth_client = "ios" if client.lower() == "ios" else "web"
+    schwab_auth_service.cache_state(
+        state=state, user_id=user_id, oauth_client=oauth_client
+    )
     auth_url = schwab_auth_service.build_authorization_url(state=state)
     return {"auth_url": auth_url}

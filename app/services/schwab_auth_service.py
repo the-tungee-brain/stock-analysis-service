@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 from urllib.parse import urlencode
@@ -16,6 +18,12 @@ class SchwabAuthError(RuntimeError):
 
 class SchwabReauthRequired(SchwabAuthError):
     pass
+
+
+@dataclass(frozen=True)
+class OAuthStatePayload:
+    user_id: str
+    client: str = "web"
 
 
 class SchwabAuthService:
@@ -37,17 +45,43 @@ class SchwabAuthService:
     def _token_key(self, user_id: str) -> str:
         return f"token:{user_id}"
 
-    def get_user_id_by_state(self, state: str) -> Optional[str]:
-        return self.schwab_auth_builder.get_cached_raw_data(
+    def _encode_oauth_state(self, user_id: str, oauth_client: str = "web") -> str:
+        return json.dumps({"user_id": user_id, "client": oauth_client})
+
+    def _decode_oauth_state(self, raw: str) -> OAuthStatePayload:
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict) and data.get("user_id"):
+                return OAuthStatePayload(
+                    user_id=str(data["user_id"]),
+                    client=str(data.get("client", "web")),
+                )
+        except json.JSONDecodeError:
+            pass
+        return OAuthStatePayload(user_id=raw, client="web")
+
+    def get_oauth_state(self, state: str) -> Optional[OAuthStatePayload]:
+        raw = self.schwab_auth_builder.get_cached_raw_data(
             key=self._state_key(state=state)
         )
+        if not raw:
+            return None
+        return self._decode_oauth_state(raw)
+
+    def get_user_id_by_state(self, state: str) -> Optional[str]:
+        payload = self.get_oauth_state(state=state)
+        return payload.user_id if payload else None
 
     def delete_cache(self, key: str) -> int:
         return self.schwab_auth_builder.delete_cache(key=key)
 
-    def cache_state(self, state: str, user_id: str) -> None:
+    def cache_state(
+        self, state: str, user_id: str, oauth_client: str = "web"
+    ) -> None:
         self.schwab_auth_builder.cache(
-            key=self._state_key(state=state), value=user_id, ttl_seconds=600
+            key=self._state_key(state=state),
+            value=self._encode_oauth_state(user_id, oauth_client),
+            ttl_seconds=600,
         )
 
     def build_authorization_url(self, state: str) -> str:
