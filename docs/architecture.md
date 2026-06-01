@@ -11,7 +11,7 @@ Build a long-term, production-grade system to:
 
 ## Scope
 
-- Asset class: Stocks only (US-listed, e.g., S&P 500 universe or a custom symbol list).
+- Asset class: US-listed **stocks and ETFs** (daily OHLCV via a configurable symbol universe).
 - Timeframe: Daily bars.
 - Horizon: Predict direction of the next 5 trading days.
 

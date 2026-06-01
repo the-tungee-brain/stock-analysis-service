@@ -8,7 +8,7 @@ from typing import Sequence
 import pandas as pd
 
 from data.download import download_and_store_all
-from data.symbols import get_symbols
+from data.symbols import get_training_symbols
 from features.build_features import build_and_save_all
 from models.train_and_save import TrainAndSaveConfig, train_and_save
 
@@ -24,7 +24,7 @@ def run_pipeline(
     train_end: str | None = None,
     train_start: str | None = None,
 ) -> dict[str, str | int]:
-    tickers = list(symbols) if symbols else get_symbols()
+    tickers = list(symbols) if symbols else get_training_symbols()
     resolved_train_end = train_end or default_train_end()
 
     print(f"Downloading {len(tickers)} symbols ({years}y)...")
@@ -50,7 +50,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--symbols",
         nargs="+",
         default=None,
-        help="Symbols to include (default: data.symbols.DEFAULT_SYMBOLS)",
+        help="Symbols to include (default: stocks + ETFs from data.symbols)",
     )
     parser.add_argument(
         "--years",

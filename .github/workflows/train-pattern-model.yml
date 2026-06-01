@@ -6,7 +6,7 @@ on:
       symbols:
         description: Space-separated symbols
         required: false
-        default: AAPL MSFT GOOGL AMZN NVDA
+        default: AAPL MSFT GOOGL AMZN NVDA SPY QQQ VTI SCHD IWM
       train_end:
         description: Last training date (YYYY-MM-DD). Leave blank for yesterday.
         required: false
@@ -51,7 +51,7 @@ jobs:
           YFINANCE_CACHE_DIR: ${{ runner.temp }}/yfinance-cache
         run: |
           set -euo pipefail
-          SYMBOLS=(AAPL MSFT GOOGL AMZN NVDA)
+          SYMBOLS=(AAPL MSFT GOOGL AMZN NVDA SPY QQQ VTI SCHD IWM)
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.symbols }}" ]; then
             read -r -a SYMBOLS <<< "${{ inputs.symbols }}"
           fi
