@@ -11,7 +11,12 @@ import xgboost as xgb
 
 from models.labels import LabelScheme, get_label_values, resolve_label_scheme
 
-LabelSchemeName = Literal["original_3class", "binary_updown", "wideband_3class"]
+LabelSchemeName = Literal[
+    "original_3class",
+    "binary_updown",
+    "wideband_3class",
+    "binary_outperform_spy",
+]
 
 MODEL_CLASS_LABELS: tuple[int, ...] = (-1, 0, 1)
 MODEL_CLASS_TO_INDEX: dict[int, int] = {-1: 0, 0: 1, 1: 2}

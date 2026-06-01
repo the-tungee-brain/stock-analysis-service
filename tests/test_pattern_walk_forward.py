@@ -34,7 +34,7 @@ def _synthetic_labeled_frame(
         },
         index=index,
     )
-    labeled = add_labels(features, close)
+    labeled = add_labels(features, close, benchmark_close=close * 0.99 + 1.0)
     return labeled.dropna(subset=["ret_1d", "f1", "f2"])
 
 
@@ -119,6 +119,7 @@ def test_run_walk_forward_prediction_count_matches_test_rows():
         LabelScheme.ORIGINAL_3CLASS,
         LabelScheme.BINARY_UPDOWN,
         LabelScheme.WIDEBAND_3CLASS,
+        LabelScheme.BINARY_OUTPERFORM_SPY,
     ],
 )
 def test_run_walk_forward_executes_for_each_label_scheme(label_scheme: LabelScheme):

@@ -2,35 +2,31 @@
 
 Use this checklist before promoting a new pattern model to production.
 
-## 1. Backtest the tradeable universe
+## 1. Backtest the production portfolio
 
-Validate walk-forward performance with the production strategy config:
+Validate ranking portfolio performance on the TOP20 universe:
 
 ```bash
-.venv/bin/python scripts/run_tradeable_backtest.py
+.venv/bin/python scripts/run_phase3_backtest.py --universe top20
 ```
 
 Review the compact summary:
 
-- Strategy **profit factor** should stay above ~1.3.
-- Per-symbol **Sharpe** should be ≥ 1.0 for names you intend to trade.
-- Compare strategy **Sharpe / max drawdown** vs buy-and-hold; weak aggregate numbers mean the model is not ready to drive live signals.
+- Portfolio **Sharpe** should stay competitive with Phase 2 ranking baseline.
+- **Max drawdown** should remain acceptable vs buy-and-hold.
+- Concentration and rebalance diagnostics should not show persistent drift.
 
-For a full report (per-window tables, recommended symbols):
-
-```bash
-.venv/bin/python scripts/run_tradeable_backtest.py --full-report
-```
-
-Trial extra symbols before adding them permanently:
+For Phase 5 minimal-model comparison:
 
 ```bash
-.venv/bin/python scripts/run_tradeable_backtest.py --extra-symbols GOOGL JNJ
+.venv/bin/python scripts/run_phase5_audit.py --skip-data-prep
 ```
+
+Confirm **Model C** (relative strength + trend, 11 features) remains the production baseline.
 
 ## 2. Train production artifacts
 
-When backtest results look acceptable, train on the same universe and label scheme:
+When backtest results look acceptable, train Model C on TOP20:
 
 ```bash
 .venv/bin/python scripts/train_tradeable_model.py
@@ -38,24 +34,25 @@ When backtest results look acceptable, train on the same universe and label sche
 
 This runs download → features → XGBoost with:
 
-- Universe: `UNIVERSE_TRADEABLE_V1` (`COST`, `JPM`, `MSFT`, `NVDA`, `SPY`)
-- Labels: `binary_updown`
+- Universe: `top20` (production training panel)
+- Model: **C** — relative strength + trend (11 features)
+- Labels: `binary_outperform_spy`
 - Class weights: enabled
-- Metadata: `min_up_prob=0.65`, `universe=tradeable_v1`
+- Portfolio metadata: ranking strategy, top 10, 5d rebalance/hold, 15% max weight
 
 Artifacts land in `artifacts/` (or `PATTERN_ARTIFACT_DIR`).
 
 ## 3. Smoke-test locally
 
 ```bash
-.venv/bin/python -m pytest tests/test_pattern_api_route.py tests/test_pattern_train_and_save.py -q
+.venv/bin/python -m pytest tests/test_pattern_api_route.py tests/test_pattern_forecast_service.py tests/test_pattern_train_and_save.py -q
 curl -sS -H "Authorization: Bearer $TOKEN" \
   "$API_BASE/api/v1/pattern/health" | jq .
 curl -sS -H "Authorization: Bearer $TOKEN" \
   "$API_BASE/api/v1/pattern/predict?symbol=MSFT" | jq .
 ```
 
-Confirm `/predict` returns `upProb`, `tradeSignal`, and `inTrainingUniverse`.
+Confirm `/predict` returns `rankingScore`, `upProb`, `inTrainingUniverse`, RS/trend `indicators`, and `portfolioStrategy`.
 
 Research overview / intelligence should expose the same forecast as `patternForecast`:
 
@@ -68,21 +65,25 @@ curl -sS -H "Authorization: Bearer $TOKEN" \
 
 **Manual:** copy `model_xgb.joblib` and `model_meta.json` to the VM artifact dir and restart `sas-server`.
 
-**CI:** GitHub Actions → **Train Pattern Model** (weekly cron or manual dispatch). The workflow uses the tradeable universe and production label config, then SCPs artifacts to `/home/ubuntu/sas-pattern-artifacts` and restarts the container.
+**CI:** GitHub Actions → **Train Pattern Model** (weekly cron or manual dispatch). The workflow trains Model C on TOP20 and SCPs artifacts to `/home/ubuntu/sas-pattern-artifacts`, then restarts the container.
 
 ## 5. Post-deploy checks
 
 See [deploy-smoke.md](./deploy-smoke.md#pattern-model).
 
+Frontend (my-pocket) should render the research overview ranking card using `rankingScore` and `portfolioStrategy` — not threshold `tradeSignal` alone.
+
 ## Config reference
 
 | Setting | Production value |
 |---------|------------------|
-| Universe | `tradeable_v1` |
-| Label scheme | `binary_updown` |
+| Model | **C** — relative strength + trend |
+| Features | 11 (RS vs SPY + trend) |
+| Training universe | `top20` |
+| Label scheme | `binary_outperform_spy` |
 | Class weights | on |
-| Min P(up) for trade signal | 0.65 |
-| Backtest trade cost | 10 bps |
-| Walk-forward train / test | 3y / 1y |
+| Portfolio strategy | ranking, top 10, 5d rebalance |
+| Max position weight | 15% |
+| Legacy min P(up) | 0.65 (informational only) |
 
 Shared constants live in `models/pattern_production.py`.

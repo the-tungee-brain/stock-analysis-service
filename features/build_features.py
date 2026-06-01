@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from typing import Sequence
 
+import numpy as np
 import pandas as pd
 
 from data.loader import load_symbol
@@ -13,8 +14,33 @@ from data.symbols import get_symbols
 from features.indicators import compute_indicators
 from features.patterns import compute_patterns
 
-# Longest lookback in the feature set (SMA 200).
-FEATURE_WARMUP_DAYS = 200
+MOMENTUM_HORIZONS: tuple[int, ...] = (21, 63, 126, 252)
+# Longest lookback in the per-symbol feature set (252d momentum).
+FEATURE_WARMUP_DAYS = 252
+
+
+def compute_momentum_features(close: pd.Series) -> pd.DataFrame:
+    """Multi-horizon price momentum."""
+    out = pd.DataFrame(index=close.index)
+    for horizon in MOMENTUM_HORIZONS:
+        out[f"ret_{horizon}d"] = close.pct_change(horizon)
+    return out
+
+
+def compute_volume_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Volume level, z-score, and short-term trend metrics."""
+    volume = df["volume"].astype("float64")
+    out = pd.DataFrame(index=df.index)
+    vol_ma20 = volume.rolling(20).mean()
+    vol_std20 = volume.rolling(20).std()
+    vol_ma5 = volume.rolling(5).mean()
+
+    out["vol_ratio_20d"] = volume / vol_ma20.replace(0, np.nan)
+    safe_std = vol_std20.replace(0, np.nan)
+    out["vol_zscore_20d"] = (volume - vol_ma20) / safe_std
+    out["vol_trend_5d_20d"] = vol_ma5 / vol_ma20.replace(0, np.nan)
+    out["vol_chg_5d"] = volume.pct_change(5)
+    return out
 
 
 def compute_price_features(
@@ -32,6 +58,7 @@ def compute_price_features(
     ind = indicators if indicators is not None else compute_indicators(df)
     out["close_vs_sma20"] = close / ind["sma_20"] - 1.0
     out["close_vs_sma200"] = close / ind["sma_200"] - 1.0
+    out = pd.concat([out, compute_momentum_features(close)], axis=1)
     return out
 
 
@@ -39,9 +66,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     """Build the full daily feature matrix indexed by date."""
     indicators = compute_indicators(df)
     price = compute_price_features(df, indicators=indicators)
+    volume = compute_volume_features(df)
     patterns = compute_patterns(df)
 
-    features = pd.concat([price, indicators, patterns], axis=1)
+    features = pd.concat([price, volume, indicators, patterns], axis=1)
     features.index.name = "date"
     return features.sort_index()
 

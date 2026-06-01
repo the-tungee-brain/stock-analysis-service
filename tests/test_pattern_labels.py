@@ -7,9 +7,12 @@ import pytest
 
 from models.labels import (
     BINARY_LABEL_COLUMN,
+    BINARY_OUTPERFORM_SPY_COLUMN,
     DOWN_THRESHOLD,
+    EXCESS_RETURN_COLUMN,
     FUTURE_RETURN_COLUMN,
     LABEL_COLUMN,
+    PATTERN_FEATURE_PREFIX,
     UP_THRESHOLD,
     WIDE_DOWN_THRESHOLD,
     WIDE_LABEL_COLUMN,
@@ -93,11 +96,50 @@ def test_wideband_label_uses_wider_thresholds():
     assert row1[WIDE_LABEL_COLUMN] == 0
 
 
+def test_add_labels_with_spy_benchmark_computes_excess_return():
+    index = pd.date_range("2024-01-01", periods=8, freq="B", name="date")
+    close = pd.Series([100.0, 100.0, 100.0, 100.0, 100.0, 106.0, 94.0, 100.3], index=index)
+    spy_close = pd.Series([100.0, 100.0, 100.0, 100.0, 100.0, 103.0, 97.0, 100.0], index=index)
+    features = pd.DataFrame({"ret_1d": close.pct_change().fillna(0.0)}, index=index)
+
+    labeled = add_labels(features, close, benchmark_close=spy_close)
+    row0 = labeled.iloc[0]
+
+    assert row0[FUTURE_RETURN_COLUMN] == pytest.approx(0.06)
+    assert row0[EXCESS_RETURN_COLUMN] == pytest.approx(0.03)
+    assert row0[BINARY_OUTPERFORM_SPY_COLUMN] == 1
+    assert row0[BINARY_LABEL_COLUMN] == 1
+
+
+def test_get_feature_columns_excludes_patterns_and_label_columns():
+    index = pd.date_range("2024-01-01", periods=7, freq="B", name="date")
+    close = pd.Series([100.0] * 7, index=index)
+    features = pd.DataFrame(
+        {
+            "ret_1d": 0.0,
+            f"{PATTERN_FEATURE_PREFIX}doji": 0.0,
+        },
+        index=index,
+    )
+    labeled = add_labels(features, close)
+
+    feature_cols = get_feature_columns(labeled)
+    assert "ret_1d" in feature_cols
+    assert f"{PATTERN_FEATURE_PREFIX}doji" not in feature_cols
+    assert LABEL_COLUMN not in feature_cols
+    assert BINARY_LABEL_COLUMN not in feature_cols
+    assert WIDE_LABEL_COLUMN not in feature_cols
+    assert FUTURE_RETURN_COLUMN not in feature_cols
+    assert EXCESS_RETURN_COLUMN not in feature_cols
+
+
 def test_label_scheme_helpers():
     assert get_label_column(LabelScheme.ORIGINAL_3CLASS) == LABEL_COLUMN
     assert get_label_column("binary_updown") == BINARY_LABEL_COLUMN
     assert get_label_column("wideband_3class") == WIDE_LABEL_COLUMN
+    assert get_label_column("binary_outperform_spy") == BINARY_OUTPERFORM_SPY_COLUMN
     assert get_label_values(LabelScheme.BINARY_UPDOWN) == (0, 1)
+    assert get_label_values(LabelScheme.BINARY_OUTPERFORM_SPY) == (0, 1)
     assert get_label_values(LabelScheme.WIDEBAND_3CLASS) == (-1, 0, 1)
 
 

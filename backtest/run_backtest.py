@@ -12,21 +12,38 @@ from backtest.baselines import build_backtest_analysis
 from backtest.config import BacktestStrategyConfig
 from backtest.metrics import summarize_predictions
 from backtest.symbol_quality import SymbolQualityConfig, filter_recommended_symbols
+from data.benchmarks import BENCHMARK_SYMBOL, VIX_SYMBOL, ensure_benchmark_ohlcv
 from data.symbols import get_symbols, get_universe, list_universe_names
 from data.store import load_features
 from data.loader import load_symbol
+from features.market_context import attach_market_context
 from models.labels import LabelScheme, add_labels, get_label_values, resolve_label_scheme
 from models.walk_forward import WalkForwardConfig, WalkForwardResult, run_walk_forward
 from models.xgb_model import XGBModelConfig
 
 
 def load_labeled_universe(symbols: Sequence[str]) -> dict[str, pd.DataFrame]:
-    """Load feature Parquets and attach labels using raw close prices."""
+    """Load feature Parquets, attach market context, labels, and SPY excess returns."""
+    ensure_benchmark_ohlcv()
+    spy_close = load_symbol(BENCHMARK_SYMBOL)["close"]
+    vix_close = load_symbol(VIX_SYMBOL)["close"]
+
     labeled: dict[str, pd.DataFrame] = {}
     for symbol in symbols:
-        features = load_features(symbol)
-        raw = load_symbol(symbol)
-        labeled[symbol.strip().upper()] = add_labels(features, raw["close"])
+        symbol_upper = symbol.strip().upper()
+        features = load_features(symbol_upper)
+        raw = load_symbol(symbol_upper)
+        enriched = attach_market_context(
+            features,
+            stock_close=raw["close"],
+            spy_close=spy_close,
+            vix_close=vix_close,
+        )
+        labeled[symbol_upper] = add_labels(
+            enriched,
+            raw["close"],
+            benchmark_close=spy_close,
+        )
     return labeled
 
 
@@ -145,9 +162,11 @@ def format_backtest_report(
         f"  Windows: {model['n_windows']}",
         f"  Predictions: {model['n_predictions']}",
         f"  Directional accuracy: {_format_float(model['directional_accuracy'])}",
+        f"  Information coefficient (IC): {_format_float(model.get('information_coefficient', float('nan')))}",
+        f"  Rank IC: {_format_float(model.get('rank_ic', float('nan')))}",
     ]
 
-    if scheme == LabelScheme.BINARY_UPDOWN:
+    if scheme in {LabelScheme.BINARY_UPDOWN, LabelScheme.BINARY_OUTPERFORM_SPY}:
         lines.extend(
             [
                 f"  Binary accuracy: {_format_float(model.get('binary_accuracy', float('nan')))}",
@@ -242,15 +261,19 @@ def format_compact_backtest_report(analysis: dict) -> str:
         "Compact backtest summary",
         "",
         "Aggregate (strategy vs buy-and-hold)",
-        f"  {'':12}  {'Sharpe':>8}  {'PF':>8}  {'MaxDD':>8}",
+        f"  {'':12}  {'Sharpe':>8}  {'PF':>8}  {'MaxDD':>8}  {'IC':>8}  {'RankIC':>8}",
         f"  {'Strategy':12}  "
         f"{_format_float(model['sharpe_ratio']):>8}  "
         f"{_format_float(model['profit_factor']):>8}  "
-        f"{_format_float(model['max_drawdown']):>8}",
+        f"{_format_float(model['max_drawdown']):>8}  "
+        f"{_format_float(model.get('information_coefficient', float('nan'))):>8}  "
+        f"{_format_float(model.get('rank_ic', float('nan'))):>8}",
         f"  {'Buy & hold':12}  "
         f"{_format_float(buy_hold['sharpe_ratio']):>8}  "
         f"{'n/a':>8}  "
-        f"{_format_float(buy_hold['max_drawdown']):>8}",
+        f"{_format_float(buy_hold['max_drawdown']):>8}  "
+        f"{'n/a':>8}  "
+        f"{'n/a':>8}",
         "",
         "Per symbol",
         f"  {'Symbol':<8}  {'Sharpe':>8}  {'PF':>8}",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import pandas as pd
 
@@ -28,6 +28,8 @@ class TrainAndSaveConfig:
     model_config: XGBModelConfig | None = None
     min_up_prob: float | None = None
     universe: str | None = None
+    feature_columns: Sequence[str] | None = None
+    extra_metadata: dict[str, Any] | None = None
 
 
 def build_training_panel(
@@ -54,9 +56,24 @@ def build_training_panel(
     return panel.sort_values(["date", "symbol"]).reset_index(drop=True)
 
 
+def _resolve_training_features(
+    panel: pd.DataFrame,
+    config: TrainAndSaveConfig,
+) -> list[str] | None:
+    if config.feature_columns is not None:
+        return list(config.feature_columns)
+    if config.universe and config.universe.strip().lower() == "top20":
+        from models.pattern_production import production_training_feature_columns
+
+        return production_training_feature_columns(get_feature_columns(panel))
+    return None
+
+
 def train_model_from_panel(
     panel: pd.DataFrame,
     model_config: XGBModelConfig | None = None,
+    *,
+    feature_columns: Sequence[str] | None = None,
 ) -> tuple[object, list[str], XGBModelConfig]:
     """Train an XGBoost classifier on a labeled panel."""
     if len(panel) < MIN_TRAINING_ROWS:
@@ -64,8 +81,15 @@ def train_model_from_panel(
             f"Need at least {MIN_TRAINING_ROWS} training rows, got {len(panel)}"
         )
 
-    feature_columns = get_feature_columns(panel)
-    if not feature_columns:
+    available = get_feature_columns(panel)
+    if feature_columns is None:
+        selected = available
+    else:
+        missing = sorted(set(feature_columns) - set(available))
+        if missing:
+            raise ValueError(f"Training panel missing requested feature columns: {missing}")
+        selected = [column for column in feature_columns if column in available]
+    if not selected:
         raise ValueError("No feature columns found in training panel")
 
     cfg = model_config or default_xgb_config()
@@ -74,12 +98,12 @@ def train_model_from_panel(
         raise ValueError(f"Training panel missing label column {label_column!r}")
 
     model = train_xgb_classifier(
-        panel[feature_columns],
+        panel[selected],
         panel[label_column],
         cfg,
         label_scheme=cfg.label_scheme,
     )
-    return model, feature_columns, cfg
+    return model, selected, cfg
 
 
 def train_and_save(config: TrainAndSaveConfig) -> dict[str, str | int]:
@@ -89,8 +113,17 @@ def train_and_save(config: TrainAndSaveConfig) -> dict[str, str | int]:
         config.train_end_date,
         config.train_start_date,
     )
-    model, feature_columns, model_cfg = train_model_from_panel(panel, config.model_config)
+    feature_columns = _resolve_training_features(panel, config)
+    model, feature_columns, model_cfg = train_model_from_panel(
+        panel,
+        config.model_config,
+        feature_columns=feature_columns,
+    )
     scheme = resolve_label_scheme(model_cfg.label_scheme)
+
+    extra_metadata = dict(config.extra_metadata or {})
+    extra_metadata.pop("label_scheme", None)
+    extra_metadata.pop("use_class_weights", None)
 
     metadata = build_model_metadata(
         feature_columns=feature_columns,
@@ -101,6 +134,7 @@ def train_and_save(config: TrainAndSaveConfig) -> dict[str, str | int]:
         use_class_weights=model_cfg.use_class_weights,
         min_up_prob=config.min_up_prob,
         universe=config.universe,
+        **extra_metadata,
     )
     model_path, meta_path = save_model_artifacts(
         model,

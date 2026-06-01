@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 
 from models.labels import (
+    EXCESS_RETURN_COLUMN,
     FUTURE_RETURN_COLUMN,
     LabelScheme,
     get_feature_columns,
@@ -17,7 +19,12 @@ from models.labels import (
 )
 from models.xgb_model import XGBModelConfig, default_xgb_config, predict_xgb, train_xgb_classifier
 
-LabelSchemeName = Literal["original_3class", "binary_updown", "wideband_3class"]
+LabelSchemeName = Literal[
+    "original_3class",
+    "binary_updown",
+    "wideband_3class",
+    "binary_outperform_spy",
+]
 
 
 @dataclass(frozen=True)
@@ -141,6 +148,8 @@ def run_walk_forward(
             "y_pred": y_pred,
             FUTURE_RETURN_COLUMN: test_df[FUTURE_RETURN_COLUMN].to_numpy(),
         }
+        if EXCESS_RETURN_COLUMN in test_df.columns:
+            pred_data[EXCESS_RETURN_COLUMN] = test_df[EXCESS_RETURN_COLUMN].to_numpy()
         pred_data.update(_probability_columns(class_labels, y_proba))
         preds = pd.DataFrame(pred_data)
         prediction_frames.append(preds)
@@ -187,7 +196,20 @@ def build_model_panel(labeled_by_symbol: dict[str, pd.DataFrame]) -> pd.DataFram
         return pd.DataFrame()
 
     panel = pd.concat(frames, ignore_index=True)
-    return panel.sort_values(["date", "symbol"]).reset_index(drop=True)
+    panel = panel.sort_values(["date", "symbol"]).reset_index(drop=True)
+    return sanitize_panel_features(panel)
+
+
+def sanitize_panel_features(panel: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows with NaN/inf in modeling feature columns."""
+    if panel.empty:
+        return panel
+    feature_cols = get_feature_columns(panel)
+    if not feature_cols:
+        return panel
+    cleaned = panel.copy()
+    cleaned[feature_cols] = cleaned[feature_cols].replace([np.inf, -np.inf], np.nan)
+    return cleaned.dropna(subset=feature_cols)
 
 
 def _effective_model_config(config: WalkForwardConfig) -> XGBModelConfig:

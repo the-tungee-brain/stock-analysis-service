@@ -15,7 +15,7 @@ from features.build_features import (
 )
 
 
-def _synthetic_ohlcv(rows: int = 320) -> pd.DataFrame:
+def _synthetic_ohlcv(rows: int = 400) -> pd.DataFrame:
     rng = np.random.default_rng(42)
     index = pd.date_range("2018-01-01", periods=rows, freq="B", name="date")
     close = 100 + np.cumsum(rng.normal(0, 1, size=rows))
@@ -45,6 +45,10 @@ def test_build_features_has_expected_columns():
     assert "bb_upper" in features.columns
     assert "atr_14" in features.columns
     assert "pat_doji" in features.columns
+    assert "ret_21d" in features.columns
+    assert "ret_252d" in features.columns
+    assert "vol_ratio_20d" in features.columns
+    assert "vol_zscore_20d" in features.columns
 
 
 def test_features_have_no_nans_after_warmup():

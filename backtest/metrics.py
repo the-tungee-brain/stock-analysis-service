@@ -9,12 +9,113 @@ import pandas as pd
 from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
 
 from backtest.config import BacktestStrategyConfig, default_backtest_strategy
-from models.labels import FUTURE_RETURN_COLUMN, LabelScheme, get_label_values, resolve_label_scheme, LABEL_HORIZON_DAYS
+from models.labels import (
+    EXCESS_RETURN_COLUMN,
+    FUTURE_RETURN_COLUMN,
+    LabelScheme,
+    get_label_values,
+    is_binary_label_scheme,
+    resolve_label_scheme,
+    LABEL_HORIZON_DAYS,
+)
 
 TRADING_DAYS_PER_YEAR = 252
 LONG_SIGNAL = 1
 TRADES_PER_YEAR = TRADING_DAYS_PER_YEAR / LABEL_HORIZON_DAYS
 UP_PROB_COLUMN = "prob_1"
+RANKING_SCORE_COLUMN = "ranking_score"
+RANKING_TARGET_COLUMN = EXCESS_RETURN_COLUMN
+MIN_CROSS_SECTION_SIZE = 2
+
+
+def compute_information_coefficient(
+    predictions: pd.DataFrame,
+    *,
+    score_col: str | None = None,
+    target_col: str = RANKING_TARGET_COLUMN,
+) -> float:
+    """Mean daily Pearson IC between predicted score and realized excess return."""
+    frame = attach_ranking_score(predictions)
+    resolved_score = score_col or (
+        RANKING_SCORE_COLUMN if RANKING_SCORE_COLUMN in frame.columns else UP_PROB_COLUMN
+    )
+    daily_ics = _daily_cross_sectional_correlations(
+        frame,
+        score_col=resolved_score,
+        target_col=target_col,
+        method="pearson",
+    )
+    if not daily_ics:
+        return float("nan")
+    return float(np.mean(daily_ics))
+
+
+def compute_rank_ic(
+    predictions: pd.DataFrame,
+    *,
+    score_col: str | None = None,
+    target_col: str = RANKING_TARGET_COLUMN,
+) -> float:
+    """Mean daily Spearman rank IC between predicted score and realized excess return."""
+    frame = attach_ranking_score(predictions)
+    resolved_score = score_col or (
+        RANKING_SCORE_COLUMN if RANKING_SCORE_COLUMN in frame.columns else UP_PROB_COLUMN
+    )
+    daily_ics = _daily_cross_sectional_correlations(
+        frame,
+        score_col=resolved_score,
+        target_col=target_col,
+        method="spearman",
+    )
+    if not daily_ics:
+        return float("nan")
+    return float(np.mean(daily_ics))
+
+
+def attach_ranking_score(predictions: pd.DataFrame) -> pd.DataFrame:
+    """Add ``ranking_score`` from class probabilities when missing."""
+    if predictions.empty:
+        return predictions.copy()
+
+    out = predictions.copy()
+    if RANKING_SCORE_COLUMN in out.columns:
+        return out
+
+    if UP_PROB_COLUMN in out.columns:
+        out[RANKING_SCORE_COLUMN] = out[UP_PROB_COLUMN].astype("float64")
+        return out
+
+    return out
+
+
+def _daily_cross_sectional_correlations(
+    predictions: pd.DataFrame,
+    *,
+    score_col: str,
+    target_col: str,
+    method: str,
+) -> list[float]:
+    if predictions.empty:
+        return []
+    if score_col not in predictions.columns or target_col not in predictions.columns:
+        return []
+
+    frame = predictions[["date", score_col, target_col]].copy()
+    frame["date"] = pd.to_datetime(frame["date"])
+    frame = frame.dropna(subset=[score_col, target_col])
+
+    daily_ics: list[float] = []
+    for _, group in frame.groupby("date", sort=True):
+        if len(group) < MIN_CROSS_SECTION_SIZE:
+            continue
+        score = group[score_col].astype("float64")
+        target = group[target_col].astype("float64")
+        if score.nunique(dropna=True) < 2 or target.nunique(dropna=True) < 2:
+            continue
+        ic = score.corr(target, method=method)
+        if pd.notna(ic):
+            daily_ics.append(float(ic))
+    return daily_ics
 
 
 def compute_directional_accuracy(y_true: pd.Series, y_pred: pd.Series) -> float:
@@ -302,9 +403,11 @@ def _empty_classification_summary(
         "sharpe_ratio": float("nan"),
         "max_drawdown": float("nan"),
         "profit_factor": float("nan"),
+        "information_coefficient": float("nan"),
+        "rank_ic": float("nan"),
         "n_windows": 0,
     }
-    if scheme == LabelScheme.BINARY_UPDOWN or labels == (0, 1):
+    if scheme is not None and is_binary_label_scheme(scheme):
         summary.update(
             {
                 "binary_accuracy": float("nan"),
@@ -358,8 +461,19 @@ def summarize_predictions(
         "n_windows": int(predictions["window_id"].nunique()),
     }
 
-    is_binary = scheme == LabelScheme.BINARY_UPDOWN or resolved_labels == (0, 1)
-    if is_binary:
+    ranked = attach_ranking_score(predictions)
+    if (
+        RANKING_SCORE_COLUMN in ranked.columns
+        and EXCESS_RETURN_COLUMN in ranked.columns
+    ):
+        summary["information_coefficient"] = compute_information_coefficient(ranked)
+        summary["rank_ic"] = compute_rank_ic(ranked)
+    else:
+        summary["information_coefficient"] = float("nan")
+        summary["rank_ic"] = float("nan")
+
+    is_binary = scheme is not None and is_binary_label_scheme(scheme)
+    if is_binary or resolved_labels == (0, 1):
         binary_metrics = compute_binary_classification_metrics(y_true, y_pred)
         summary["binary_accuracy"] = binary_metrics["binary_accuracy"]
         summary["precision_up"] = binary_metrics["precision_up"]

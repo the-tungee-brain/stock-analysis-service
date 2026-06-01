@@ -46,9 +46,9 @@ def run_pipeline(
         model_config=model_config,
         min_up_prob=meta_kwargs.pop("min_up_prob", None),
         universe=meta_kwargs.pop("universe", universe),
+        feature_columns=meta_kwargs.pop("feature_columns", None),
+        extra_metadata=meta_kwargs or None,
     )
-    if meta_kwargs:
-        raise ValueError(f"Unsupported train_metadata keys: {sorted(meta_kwargs)}")
     return train_and_save(config)
 
 
@@ -69,7 +69,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument(
         "--label-scheme",
-        choices=["original_3class", "binary_updown", "wideband_3class"],
+        choices=[
+            "original_3class",
+            "binary_updown",
+            "wideband_3class",
+            "binary_outperform_spy",
+        ],
         default="original_3class",
         help="Target label scheme for training (default: original_3class)",
     )

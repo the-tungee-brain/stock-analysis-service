@@ -17,13 +17,17 @@ LABEL_COLUMN = "label_5d"
 BINARY_LABEL_COLUMN = "label_updown_5d"
 WIDE_LABEL_COLUMN = "label_5d_wide"
 FUTURE_RETURN_COLUMN = "future_ret_5d"
+EXCESS_RETURN_COLUMN = "excess_ret_5d"
+BINARY_OUTPERFORM_SPY_COLUMN = "label_outperform_spy_5d"
 LABEL_HORIZON_DAYS = 5
+PATTERN_FEATURE_PREFIX = "pat_"
 
 ALL_LABEL_COLUMNS: frozenset[str] = frozenset(
     {
         LABEL_COLUMN,
         BINARY_LABEL_COLUMN,
         WIDE_LABEL_COLUMN,
+        BINARY_OUTPERFORM_SPY_COLUMN,
     }
 )
 
@@ -31,6 +35,7 @@ EXCLUDE_FROM_FEATURES: frozenset[str] = frozenset(
     ALL_LABEL_COLUMNS
     | {
         FUTURE_RETURN_COLUMN,
+        EXCESS_RETURN_COLUMN,
         "symbol",
     }
 )
@@ -42,18 +47,21 @@ class LabelScheme(str, Enum):
     ORIGINAL_3CLASS = "original_3class"
     BINARY_UPDOWN = "binary_updown"
     WIDEBAND_3CLASS = "wideband_3class"
+    BINARY_OUTPERFORM_SPY = "binary_outperform_spy"
 
 
 LABEL_SCHEME_TO_COLUMN: dict[LabelScheme, str] = {
     LabelScheme.ORIGINAL_3CLASS: LABEL_COLUMN,
     LabelScheme.BINARY_UPDOWN: BINARY_LABEL_COLUMN,
     LabelScheme.WIDEBAND_3CLASS: WIDE_LABEL_COLUMN,
+    LabelScheme.BINARY_OUTPERFORM_SPY: BINARY_OUTPERFORM_SPY_COLUMN,
 }
 
 LABEL_SCHEME_TO_VALUES: dict[LabelScheme, tuple[int, ...]] = {
     LabelScheme.ORIGINAL_3CLASS: (-1, 0, 1),
     LabelScheme.BINARY_UPDOWN: (0, 1),
     LabelScheme.WIDEBAND_3CLASS: (-1, 0, 1),
+    LabelScheme.BINARY_OUTPERFORM_SPY: (0, 1),
 }
 
 
@@ -74,8 +82,17 @@ def get_label_values(scheme: LabelScheme | str = LabelScheme.ORIGINAL_3CLASS) ->
     return LABEL_SCHEME_TO_VALUES[resolve_label_scheme(scheme)]
 
 
-def add_labels(features: pd.DataFrame, close: pd.Series) -> pd.DataFrame:
-    """Attach ``future_ret_5d`` and all label variants; drop rows without a horizon."""
+def is_binary_label_scheme(scheme: LabelScheme | str) -> bool:
+    """Return True when ``scheme`` maps to two-class labels."""
+    return len(get_label_values(scheme)) == 2
+
+
+def add_labels(
+    features: pd.DataFrame,
+    close: pd.Series,
+    benchmark_close: pd.Series | None = None,
+) -> pd.DataFrame:
+    """Attach forward returns and label variants; drop rows without a horizon."""
     out = features.copy()
     close_aligned = close.reindex(out.index).astype("float64")
     future_ret = close_aligned.shift(-LABEL_HORIZON_DAYS) / close_aligned - 1.0
@@ -84,20 +101,35 @@ def add_labels(features: pd.DataFrame, close: pd.Series) -> pd.DataFrame:
     out[LABEL_COLUMN] = _label_original_3class(future_ret)
     out[BINARY_LABEL_COLUMN] = _label_binary_updown(future_ret)
     out[WIDE_LABEL_COLUMN] = _label_wideband_3class(future_ret)
+
+    if benchmark_close is not None:
+        spy_aligned = benchmark_close.reindex(out.index).astype("float64")
+        spy_future_ret = spy_aligned.shift(-LABEL_HORIZON_DAYS) / spy_aligned - 1.0
+        excess_ret = future_ret - spy_future_ret
+        out[EXCESS_RETURN_COLUMN] = excess_ret
+        out[BINARY_OUTPERFORM_SPY_COLUMN] = _label_binary_outperform_spy(excess_ret)
+
     return out.dropna(subset=[FUTURE_RETURN_COLUMN])
 
 
-def add_labels_for_symbol(symbol: str) -> pd.DataFrame:
+def add_labels_for_symbol(symbol: str, *, benchmark_symbol: str = "SPY") -> pd.DataFrame:
     """Load features and raw close for ``symbol``, then add labels."""
     features = load_features(symbol)
     raw = load_symbol(symbol)
-    return add_labels(features, raw["close"])
+    benchmark_close = None
+    if benchmark_symbol:
+        benchmark_close = load_symbol(benchmark_symbol.strip().upper())["close"]
+    return add_labels(features, raw["close"], benchmark_close=benchmark_close)
 
 
 def get_feature_columns(df: pd.DataFrame) -> list[str]:
-    """Return numeric modeling columns, excluding labels and metadata."""
+    """Return numeric modeling columns, excluding labels, metadata, and patterns."""
     numeric = df.select_dtypes(include="number").columns
-    return [col for col in numeric if col not in EXCLUDE_FROM_FEATURES]
+    return [
+        col
+        for col in numeric
+        if col not in EXCLUDE_FROM_FEATURES and not col.startswith(PATTERN_FEATURE_PREFIX)
+    ]
 
 
 def _label_original_3class(future_ret: pd.Series) -> pd.Series:
@@ -109,6 +141,10 @@ def _label_original_3class(future_ret: pd.Series) -> pd.Series:
 
 def _label_binary_updown(future_ret: pd.Series) -> pd.Series:
     return (future_ret > 0).astype("int8")
+
+
+def _label_binary_outperform_spy(excess_ret: pd.Series) -> pd.Series:
+    return (excess_ret > 0).astype("int8")
 
 
 def _label_wideband_3class(future_ret: pd.Series) -> pd.Series:

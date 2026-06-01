@@ -8,6 +8,8 @@ import pytest
 from backtest.metrics import (
     compute_binary_classification_metrics,
     compute_directional_accuracy,
+    compute_information_coefficient,
+    compute_rank_ic,
     equity_curve,
     max_drawdown,
     profit_factor,
@@ -17,7 +19,7 @@ from backtest.metrics import (
     strategy_returns_non_overlapping,
     summarize_predictions,
 )
-from models.labels import FUTURE_RETURN_COLUMN, LABEL_HORIZON_DAYS, LabelScheme
+from models.labels import EXCESS_RETURN_COLUMN, FUTURE_RETURN_COLUMN, LABEL_HORIZON_DAYS, LabelScheme
 
 
 def test_summarize_predictions_computes_core_metrics():
@@ -212,3 +214,34 @@ def test_binary_classification_metrics_and_summary():
     assert summary["precision_up"] == metrics["precision_up"]
     assert summary["recall_up"] == metrics["recall_up"]
     assert summary["f1_up"] == metrics["f1_up"]
+
+
+def test_information_coefficient_and_rank_ic_use_daily_cross_section():
+    predictions = pd.DataFrame(
+        {
+            "window_id": [0, 0, 0, 0],
+            "symbol": ["A", "B", "A", "B"],
+            "date": [
+                "2024-01-01",
+                "2024-01-01",
+                "2024-01-02",
+                "2024-01-02",
+            ],
+            "y_true": [1, 0, 1, 0],
+            "y_pred": [1, 0, 1, 0],
+            FUTURE_RETURN_COLUMN: [0.02, -0.01, 0.03, -0.02],
+            EXCESS_RETURN_COLUMN: [0.03, -0.02, 0.04, -0.03],
+            "prob_1": [0.9, 0.1, 0.8, 0.2],
+        }
+    )
+
+    assert compute_information_coefficient(predictions) == pytest.approx(1.0)
+    assert compute_rank_ic(predictions) == pytest.approx(1.0)
+
+    summary = summarize_predictions(
+        predictions,
+        class_labels=(0, 1),
+        label_scheme=LabelScheme.BINARY_OUTPERFORM_SPY,
+    )
+    assert summary["information_coefficient"] == pytest.approx(1.0)
+    assert summary["rank_ic"] == pytest.approx(1.0)

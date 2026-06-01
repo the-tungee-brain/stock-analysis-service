@@ -10,6 +10,7 @@ from data.symbols import (
     UNIVERSE_TRADEABLE_V1,
     get_symbols,
     get_training_symbols,
+    get_training_universe,
     get_universe,
     list_universe_names,
 )
@@ -39,7 +40,8 @@ def test_named_universes():
     assert len(UNIVERSE_TOP20) == 20
     assert "tradeable_v1" in list_universe_names()
     assert get_universe("tradeable_v1") == list(UNIVERSE_TRADEABLE_V1)
-    assert set(UNIVERSE_TRADEABLE_V1) == {"COST", "JPM", "MSFT", "NVDA", "SPY"}
+    assert set(UNIVERSE_TRADEABLE_V1) == {"COST", "JPM", "MSFT", "NVDA"}
+    assert get_training_universe("top20") == [s for s in UNIVERSE_TOP20 if s != "SPY"]
 
 
 def test_tradeable_script_extra_symbols():

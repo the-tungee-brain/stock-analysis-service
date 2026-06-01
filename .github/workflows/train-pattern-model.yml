@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       symbols:
-        description: Space-separated symbols
+        description: Extra symbols beyond TOP20 (space-separated). Leave blank for TOP20 only.
         required: false
-        default: COST JPM MSFT NVDA SPY
+        default: ""
       train_end:
         description: Last training date (YYYY-MM-DD). Leave blank for yesterday.
         required: false
@@ -51,11 +51,10 @@ jobs:
           YFINANCE_CACHE_DIR: ${{ runner.temp }}/yfinance-cache
         run: |
           set -euo pipefail
-          SYMBOLS=(COST JPM MSFT NVDA SPY)
-          CMD=(python -m models.train_pipeline --universe tradeable_v1 --label-scheme binary_updown --use-class-weights --min-up-prob 0.65)
+          CMD=(python scripts/train_tradeable_model.py --universe top20)
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.symbols }}" ]; then
-            read -r -a SYMBOLS <<< "${{ inputs.symbols }}"
-            CMD=(python -m models.train_pipeline --symbols "${SYMBOLS[@]}" --label-scheme binary_updown --use-class-weights --min-up-prob 0.65)
+            read -r -a EXTRA <<< "${{ inputs.symbols }}"
+            CMD+=(--extra-symbols "${EXTRA[@]}")
           fi
           if [ -n "${{ inputs.train_end }}" ]; then
             CMD+=(--train-end "${{ inputs.train_end }}")

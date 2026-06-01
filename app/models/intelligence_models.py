@@ -208,6 +208,20 @@ class PortfolioDigest(BaseModel):
     )
 
 
+class PatternPortfolioStrategy(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
+    strategy_type: str = Field(default="ranking", serialization_alias="strategyType")
+    universe: str
+    top_n: int = Field(serialization_alias="topN")
+    rebalance_days: int = Field(default=5, serialization_alias="rebalanceDays")
+    hold_days: int = Field(default=5, serialization_alias="holdDays")
+    max_position_weight: float = Field(
+        default=0.15,
+        serialization_alias="maxPositionWeight",
+    )
+
+
 class PatternTrendForecast(BaseModel):
     model_config = _INTELLIGENCE_MODEL_CONFIG
 
@@ -216,6 +230,7 @@ class PatternTrendForecast(BaseModel):
     label_scheme: str = Field(serialization_alias="labelScheme")
     prediction: int
     up_prob: float | None = Field(default=None, serialization_alias="upProb")
+    ranking_score: float | None = Field(default=None, serialization_alias="rankingScore")
     trade_signal: bool | None = Field(default=None, serialization_alias="tradeSignal")
     in_training_universe: bool = Field(
         default=False, serialization_alias="inTrainingUniverse"
@@ -224,6 +239,14 @@ class PatternTrendForecast(BaseModel):
     indicators: dict[str, float] = Field(default_factory=dict)
     model_train_end_date: str | None = Field(
         default=None, serialization_alias="modelTrainEndDate"
+    )
+    model_key: str | None = Field(default=None, serialization_alias="modelKey")
+    model_label: str | None = Field(default=None, serialization_alias="modelLabel")
+    training_universe: str | None = Field(default=None, serialization_alias="trainingUniverse")
+    n_features: int | None = Field(default=None, serialization_alias="nFeatures")
+    feature_groups: list[str] = Field(default_factory=list, serialization_alias="featureGroups")
+    portfolio_strategy: PatternPortfolioStrategy | None = Field(
+        default=None, serialization_alias="portfolioStrategy"
     )
 
 

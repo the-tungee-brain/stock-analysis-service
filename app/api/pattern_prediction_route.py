@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.auth.dependencies import get_current_user_id
 from app.core.plan_features import PRO_FEATURE_PATTERN_TREND, require_paid_feature
+from app.services.pattern_forecast_service import pattern_forecast_to_api_dict
 from models.prediction_service import (
     LoadedModel,
     health_payload,
@@ -52,7 +53,8 @@ async def pattern_predict(
         )
 
     try:
-        return await asyncio.to_thread(predict_for_symbol, symbol, loaded)
+        payload = await asyncio.to_thread(predict_for_symbol, symbol, loaded)
+        return {"symbol": payload["symbol"], **pattern_forecast_to_api_dict(payload)}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

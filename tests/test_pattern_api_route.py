@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
+
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
@@ -9,21 +12,45 @@ from fastapi.testclient import TestClient
 from app.auth.dependencies import get_current_user
 from app.core.llm_config import settings
 from app.main import app
+from app.models.user_models import AppUserItem
 from data.store import save_raw
 from features.build_features import build_and_save_features
+from models.pattern_production import production_model_config
 from models.train_and_save import TrainAndSaveConfig, train_and_save
 from tests.test_pattern_train_and_save import _synthetic_ohlcv
 
 
-def _fake_user():
-    return {"sub": "test-user", "email": "test@example.com"}
+def _fake_user() -> AppUserItem:
+    return AppUserItem(
+        id="user-1",
+        identity_sub="test-user",
+        identity_provider="google",
+        email="test@example.com",
+        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
 
 
 @pytest.fixture(autouse=True)
 def auth_override():
-    app.dependency_overrides[get_current_user] = _fake_user
+    async def _override_current_user() -> AppUserItem:
+        return _fake_user()
+
+    app.dependency_overrides[get_current_user] = _override_current_user
     yield
     app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.fixture(autouse=True)
+def jwt_override(monkeypatch):
+    monkeypatch.setattr(
+        "app.auth.dependencies.verify_jwt",
+        lambda token: {"sub": "test-user"},
+    )
+
+
+@pytest.fixture
+def auth_headers() -> dict[str, str]:
+    return {"Authorization": "Bearer test-token"}
 
 
 @pytest.fixture(autouse=True)
@@ -40,13 +67,26 @@ def pattern_client(tmp_path, monkeypatch):
     monkeypatch.setattr("data.paths.FEATURES_DIR", features_dir)
     monkeypatch.setattr("models.artifact_store.DEFAULT_ARTIFACT_DIR", artifact_dir)
 
-    save_raw(_synthetic_ohlcv(), "AAPL")
+    save_raw(_synthetic_ohlcv(rows=600), "AAPL")
     build_and_save_features("AAPL")
     train_and_save(
         TrainAndSaveConfig(
             symbols=("AAPL",),
-            train_end_date=pd.Timestamp("2021-06-30"),
+            train_end_date=pd.Timestamp("2021-12-31"),
             artifact_dir=artifact_dir,
+            model_config=production_model_config(),
+            universe="top20",
+            extra_metadata={
+                "model_key": "C",
+                "model_label": "Relative strength + trend",
+                "feature_groups": ["relative_strength", "trend"],
+                "strategy_type": "ranking",
+                "portfolio_universe": "top20",
+                "top_n": 10,
+                "rebalance_days": 5,
+                "hold_days": 5,
+                "max_position_weight": 0.15,
+            },
         )
     )
 
@@ -57,25 +97,36 @@ def pattern_client(tmp_path, monkeypatch):
     app.state.pattern_loaded_model = None
 
 
-def test_pattern_health_requires_loaded_model():
+def test_pattern_health_requires_loaded_model(auth_headers):
     app.state.pattern_loaded_model = None
     client = TestClient(app)
-    response = client.get("/api/v1/pattern/health")
+    response = client.get("/api/v1/pattern/health", headers=auth_headers)
     assert response.status_code == 503
 
 
-def test_pattern_predict_returns_payload(pattern_client):
-    response = pattern_client.get("/api/v1/pattern/predict", params={"symbol": "AAPL"})
+def test_pattern_predict_returns_payload(pattern_client, auth_headers):
+    response = pattern_client.get(
+        "/api/v1/pattern/predict",
+        params={"symbol": "AAPL"},
+        headers=auth_headers,
+    )
     assert response.status_code == 200
     payload = response.json()
     assert payload["symbol"] == "AAPL"
-    assert payload["prediction"] in (-1, 0, 1)
-    assert set(payload["probabilities"].keys()) == {"-1", "0", "1"}
-    assert "upProb" in payload or "up_prob" in payload
-    assert "inTrainingUniverse" in payload or "in_training_universe" in payload
+    assert payload["prediction"] in (0, 1)
+    assert set(payload["probabilities"].keys()) == {"0", "1"}
+    assert payload["upProb"] is not None
+    assert payload["rankingScore"] is not None
+    assert payload["modelKey"] == "C"
+    assert payload["portfolioStrategy"]["strategyType"] == "ranking"
+    assert "inTrainingUniverse" in payload
 
 
-def test_pattern_predict_requires_pro(pattern_client, monkeypatch):
+def test_pattern_predict_requires_pro(pattern_client, monkeypatch, auth_headers):
     monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset())
-    response = pattern_client.get("/api/v1/pattern/predict", params={"symbol": "AAPL"})
+    response = pattern_client.get(
+        "/api/v1/pattern/predict",
+        params={"symbol": "AAPL"},
+        headers=auth_headers,
+    )
     assert response.status_code == 403

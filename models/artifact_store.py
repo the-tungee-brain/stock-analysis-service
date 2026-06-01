@@ -47,10 +47,19 @@ def build_model_metadata(
     use_class_weights: bool = False,
     min_up_prob: float | None = None,
     universe: str | None = None,
+    model_key: str | None = None,
+    model_label: str | None = None,
+    feature_groups: list[str] | None = None,
+    strategy_type: str | None = None,
+    top_n: int | None = None,
+    rebalance_days: int | None = None,
+    hold_days: int | None = None,
+    max_position_weight: float | None = None,
+    portfolio_universe: str | None = None,
 ) -> dict[str, Any]:
     scheme = resolve_label_scheme(label_scheme)
     class_labels = get_label_values(scheme)
-    return {
+    metadata: dict[str, Any] = {
         "feature_columns": feature_columns,
         "train_start_date": pd.Timestamp(train_start_date).strftime("%Y-%m-%d"),
         "train_end_date": pd.Timestamp(train_end_date).strftime("%Y-%m-%d"),
@@ -65,6 +74,21 @@ def build_model_metadata(
         },
         "n_features": len(feature_columns),
     }
+    optional_fields = {
+        "model_key": model_key,
+        "model_label": model_label,
+        "feature_groups": feature_groups,
+        "strategy_type": strategy_type,
+        "top_n": top_n,
+        "rebalance_days": rebalance_days,
+        "hold_days": hold_days,
+        "max_position_weight": max_position_weight,
+        "portfolio_universe": portfolio_universe,
+    }
+    for key, value in optional_fields.items():
+        if value is not None:
+            metadata[key] = value
+    return metadata
 
 
 def metadata_class_labels(metadata: dict[str, Any]) -> tuple[int, ...]:

@@ -42,10 +42,14 @@ Automated prewarm timing: [loadtests/README.md](../loadtests/README.md).
 After training or deploying a new pattern model, see [pattern-model-review.md](./pattern-model-review.md).
 
 1. Confirm artifacts exist on the VM: `/home/ubuntu/sas-pattern-artifacts/model_xgb.joblib`.
-2. `GET /api/v1/pattern/health` returns `status=ok` with `labelScheme=binary_updown` and tradeable symbols.
-3. `GET /api/v1/pattern/predict?symbol=MSFT` includes `upProb`, `tradeSignal`, and `inTrainingUniverse`.
+2. `GET /api/v1/pattern/health` returns `status=ok` with:
+   - `labelScheme=binary_outperform_spy`
+   - `modelKey=C`, `modelLabel=Relative strength + trend`
+   - `featureGroups=["relative_strength","trend"]`, `nFeatures=11`
+   - `portfolioStrategy.strategyType=ranking`, `portfolioStrategy.universe=top20`, `topN=10`
+3. `GET /api/v1/pattern/predict?symbol=MSFT` includes `rankingScore`, `upProb`, `inTrainingUniverse`, RS/trend `indicators`, and `portfolioStrategy`.
 4. Research intelligence exposes the same payload: `GET /api/v1/research/intelligence?symbol=MSFT` → `patternForecast`.
-5. Frontend (my-pocket): research overview should render the 5-day trend card when `patternForecast` is present.
+5. Frontend (my-pocket): research overview should render the 5-day ranking card using `rankingScore` / `portfolioStrategy` (not threshold `tradeSignal` alone).
 
 ## Regression
 
