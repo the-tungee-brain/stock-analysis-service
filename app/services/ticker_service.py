@@ -16,3 +16,6 @@ class TickerService:
 
     def get_by_symbol(self, symbol: str) -> TickerSymbolItem | None:
         return self.ticker_symbol_builder.get_by_symbol(symbol=symbol)
+
+    def get_by_symbols(self, symbols: list[str]) -> dict[str, TickerSymbolItem]:
+        return self.ticker_symbol_builder.get_by_symbols(symbols=symbols)

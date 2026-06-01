@@ -1,0 +1,96 @@
+import pytest
+
+from app.adapters.user.watchlist_adapter import WatchlistAdapter
+from app.models.watchlist_models import WatchlistFolderRecord, WatchlistSymbolRecord
+from app.services.watchlist_service import WatchlistService
+
+
+def _folder(
+    *,
+    folder_id: str = "folder-1",
+    symbol: str = "AAPL",
+    item_id: str = "item-1",
+) -> WatchlistFolderRecord:
+    return WatchlistFolderRecord(
+        id=folder_id,
+        name="Tech",
+        iconName="chart.line.uptrend.xyaxis",
+        swatchID="lavender",
+        accentHex=None,
+        isPinned=True,
+        isCollapsed=False,
+        sortOrder=0,
+        symbols=[
+            WatchlistSymbolRecord(
+                id=item_id,
+                ticker=symbol,
+                sortOrder=0,
+            )
+        ],
+    )
+
+
+def test_validate_workspace_rejects_duplicate_symbols_in_folder():
+    folder = WatchlistFolderRecord(
+        id="folder-1",
+        name="Tech",
+        iconName="folder.fill",
+        swatchID="slate",
+        accentHex=None,
+        isPinned=False,
+        isCollapsed=False,
+        sortOrder=0,
+        symbols=[
+            WatchlistSymbolRecord(id="item-1", ticker="AAPL", sortOrder=0),
+            WatchlistSymbolRecord(id="item-2", ticker="aapl", sortOrder=1),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="Duplicate symbol"):
+        WatchlistAdapter._validate_workspace([folder])
+
+
+def test_normalize_folders_sanitizes_swatch_and_symbols():
+    service = WatchlistService(
+        watchlist_adapter=object(),  # type: ignore[arg-type]
+        ticker_service=object(),  # type: ignore[arg-type]
+        finnhub_builder=object(),  # type: ignore[arg-type]
+    )
+
+    normalized = service._normalize_folders(
+        [
+            WatchlistFolderRecord(
+                id="folder-1",
+                name="  Tech  ",
+                iconName="",
+                swatchID="not-real",
+                accentHex=None,
+                isPinned=False,
+                isCollapsed=False,
+                sortOrder=0,
+                symbols=[
+                    WatchlistSymbolRecord(id="item-1", ticker=" nvda ", sortOrder=0),
+                ],
+            )
+        ]
+    )
+
+    assert normalized[0].name == "Tech"
+    assert normalized[0].icon_name == "folder.fill"
+    assert normalized[0].swatch_id == "slate"
+    assert normalized[0].symbols[0].ticker == "NVDA"
+
+
+def test_build_response_includes_quote_fields():
+    folders = [_folder()]
+    response = WatchlistAdapter.build_response(
+        folders,
+        titles_by_symbol={"AAPL": "Apple Inc."},
+        quotes_by_symbol={"AAPL": (190.0, 1.5, 0.8)},
+    )
+
+    symbol = response.folders[0].symbols[0]
+    assert symbol.company_name == "Apple Inc."
+    assert symbol.price == 190.0
+    assert symbol.day_change == 1.5
+    assert symbol.day_change_percent == 0.8

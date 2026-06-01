@@ -33,6 +33,7 @@ from app.adapters.user.user_investment_profile_adapter import (
     UserInvestmentProfileAdapter,
 )
 from app.adapters.user.user_strategy_journey_adapter import UserStrategyJourneyAdapter
+from app.adapters.user.watchlist_adapter import WatchlistAdapter
 from app.adapters.market.ticker_symbol_adapter import TickerSymbolAdapter
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.adapters.email.email_adapter import EmailAdapter
@@ -76,6 +77,7 @@ from app.services.schwab_auth_service import SchwabAuthService
 from app.services.user_service import UserService
 from app.services.account_deletion_service import AccountDeletionService
 from app.services.ticker_service import TickerService
+from app.services.watchlist_service import WatchlistService
 from app.services.transaction_service import TransactionService
 from app.adapters.sec.sec_edgar_adapter import SecEdgarAdapter
 from app.adapters.securitiesdb.securitiesdb_adapter import SecuritiesDbAdapter
@@ -172,6 +174,7 @@ async def lifespan(app: FastAPI):
     user_strategy_journey_adapter = UserStrategyJourneyAdapter(
         client=powerpocketdb_client
     )
+    watchlist_adapter = WatchlistAdapter(client=powerpocketdb_client)
     schwab_auth = SchwabAuth(
         client_id=schwab_client_id,
         client_secret=schwab_client_secret,
@@ -301,6 +304,7 @@ async def lifespan(app: FastAPI):
         app_user_adapter=app_user_adapter,
         user_investment_profile_adapter=user_investment_profile_adapter,
         user_strategy_journey_adapter=user_strategy_journey_adapter,
+        watchlist_adapter=watchlist_adapter,
         alert_history_adapter=alert_history_adapter,
         portfolio_snapshot_adapter=portfolio_snapshot_adapter,
         morning_brief_delivery_adapter=morning_brief_delivery_adapter,
@@ -357,6 +361,11 @@ async def lifespan(app: FastAPI):
         portfolio_brief_cache=portfolio_brief_cache,
     )
     ticker_service = TickerService(ticker_symbol_builder=ticker_symbol_builder)
+    watchlist_service = WatchlistService(
+        watchlist_adapter=watchlist_adapter,
+        ticker_service=ticker_service,
+        finnhub_builder=finnhub_builder,
+    )
     research_overview_service = ResearchOverviewService(
         company_research_service=company_research_service,
         company_profile_service=company_profile_service,
@@ -426,6 +435,7 @@ async def lifespan(app: FastAPI):
     app.state.etf_research_service = etf_research_service
     app.state.dividend_research_service = dividend_research_service
     app.state.ticker_service = ticker_service
+    app.state.watchlist_service = watchlist_service
     app.state.research_overview_service = research_overview_service
     app.state.transaction_service = transaction_service
     app.state.recent_orders_cache = recent_orders_cache

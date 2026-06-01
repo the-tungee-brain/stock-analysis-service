@@ -70,7 +70,41 @@ class TickerSymbolAdapter:
             rows = cur.fetchall()
             return [self.dict_to_item(dict(zip(cols, row))) for row in rows]
         finally:
-            con.close()
+            self.client.release(con)
+
+    def get_by_symbols(self, symbols: list[str]) -> dict[str, TickerSymbolItem]:
+        normalized = [
+            symbol.strip().upper()
+            for symbol in symbols
+            if symbol and symbol.strip()
+        ]
+        unique_symbols = list(dict.fromkeys(normalized))
+        if not unique_symbols:
+            return {}
+
+        placeholders = ", ".join(
+            f":symbol_{index}" for index, _ in enumerate(unique_symbols)
+        )
+        params = {
+            f"symbol_{index}": symbol
+            for index, symbol in enumerate(unique_symbols)
+        }
+
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            sql = f"""
+                SELECT SYMBOL, TITLE, ASSET_TYPE, LOGO_URL
+                FROM {self.table_name}
+                WHERE UPPER(SYMBOL) IN ({placeholders})
+            """
+            cur.execute(sql, params)
+            cols = [col[0] for col in cur.description]
+            rows = cur.fetchall()
+            items = [self.dict_to_item(dict(zip(cols, row))) for row in rows]
+            return {item.symbol.upper(): item for item in items}
+        finally:
+            self.client.release(con)
 
     def get_by_symbol(self, symbol: str) -> TickerSymbolItem | None:
         symbol_upper = symbol.strip().upper()
@@ -93,4 +127,4 @@ class TickerSymbolAdapter:
                 return None
             return self.dict_to_item(dict(zip(cols, row)))
         finally:
-            con.close()
+            self.client.release(con)

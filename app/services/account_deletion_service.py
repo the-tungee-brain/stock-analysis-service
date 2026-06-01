@@ -12,6 +12,7 @@ from app.adapters.user.user_investment_profile_adapter import (
     UserInvestmentProfileAdapter,
 )
 from app.adapters.user.user_strategy_journey_adapter import UserStrategyJourneyAdapter
+from app.adapters.user.watchlist_adapter import WatchlistAdapter
 from app.adapters.user.waitlist_adapter import WaitlistAdapter
 from app.builders.chat_messages_builder import ChatMessagesBuilder
 from app.builders.chat_sessions_builder import ChatSessionsBuilder
@@ -28,6 +29,7 @@ class AccountDeletionService:
         app_user_adapter: AppUserAdapter,
         user_investment_profile_adapter: UserInvestmentProfileAdapter,
         user_strategy_journey_adapter: UserStrategyJourneyAdapter,
+        watchlist_adapter: WatchlistAdapter,
         alert_history_adapter: AlertHistoryAdapter,
         portfolio_snapshot_adapter: PortfolioSnapshotAdapter,
         morning_brief_delivery_adapter: MorningBriefDeliveryAdapter,
@@ -41,6 +43,7 @@ class AccountDeletionService:
         self.app_user_adapter = app_user_adapter
         self.user_investment_profile_adapter = user_investment_profile_adapter
         self.user_strategy_journey_adapter = user_strategy_journey_adapter
+        self.watchlist_adapter = watchlist_adapter
         self.alert_history_adapter = alert_history_adapter
         self.portfolio_snapshot_adapter = portfolio_snapshot_adapter
         self.morning_brief_delivery_adapter = morning_brief_delivery_adapter
@@ -53,6 +56,7 @@ class AccountDeletionService:
         self._delete_chat_data(user_id)
         self.user_investment_profile_adapter.delete_by_user_id(user_id)
         self.user_strategy_journey_adapter.delete_by_user_id(user_id)
+        self.watchlist_adapter.delete_by_user_id(user_id)
         self.alert_history_adapter.delete_by_user_id(user_id)
         self.portfolio_snapshot_adapter.delete_by_user_id(user_id)
         self.morning_brief_delivery_adapter.delete_by_user_id(user_id)
