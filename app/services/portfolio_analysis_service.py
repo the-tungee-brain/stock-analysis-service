@@ -1064,12 +1064,15 @@ class PortfolioAnalysisService:
 
         from app.services.pattern_forecast_service import build_pattern_trend_forecast
 
-        forecast = build_pattern_trend_forecast(
-            symbol_upper,
-            self._pattern_loaded_model,
-        )
-        if forecast is not None:
-            intelligence = intelligence.model_copy(update={"pattern_forecast": forecast})
+        if is_paid_user(user_id):
+            forecast = build_pattern_trend_forecast(
+                symbol_upper,
+                self._pattern_loaded_model,
+            )
+            if forecast is not None:
+                intelligence = intelligence.model_copy(
+                    update={"pattern_forecast": forecast}
+                )
         return intelligence
 
     @staticmethod

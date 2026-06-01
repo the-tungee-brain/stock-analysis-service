@@ -11,6 +11,7 @@ PRO_FEATURE_FINANCIAL_STRENGTH = "financial_strength"
 PRO_FEATURE_EARNINGS_AI = "earnings_ai"
 PRO_FEATURE_BUSINESS = "business"
 PRO_FEATURE_BIG_PICTURE = "big_picture"
+PRO_FEATURE_PATTERN_TREND = "pattern_trend"
 
 PRO_FEATURES = frozenset(
     {
@@ -21,6 +22,7 @@ PRO_FEATURES = frozenset(
         PRO_FEATURE_EARNINGS_AI,
         PRO_FEATURE_BUSINESS,
         PRO_FEATURE_BIG_PICTURE,
+        PRO_FEATURE_PATTERN_TREND,
     }
 )
 

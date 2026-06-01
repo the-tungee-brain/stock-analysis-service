@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from app.auth.dependencies import get_current_user_id
+from app.core.plan_features import PRO_FEATURE_PATTERN_TREND, require_paid_feature
 from models.prediction_service import (
     LoadedModel,
     health_payload,
@@ -21,7 +23,11 @@ def _get_loaded_model(app) -> LoadedModel | None:  # noqa: ANN001
 
 
 @router.get("/health")
-async def pattern_health(request: Request) -> dict:
+async def pattern_health(
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+) -> dict:
+    require_paid_feature(user_id, PRO_FEATURE_PATTERN_TREND)
     loaded = _get_loaded_model(request.app)
     if loaded is None:
         raise HTTPException(
@@ -35,7 +41,9 @@ async def pattern_health(request: Request) -> dict:
 async def pattern_predict(
     request: Request,
     symbol: str = Query(..., min_length=1),
+    user_id: str = Depends(get_current_user_id),
 ) -> dict:
+    require_paid_feature(user_id, PRO_FEATURE_PATTERN_TREND)
     loaded = _get_loaded_model(request.app)
     if loaded is None:
         raise HTTPException(

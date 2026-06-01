@@ -23,6 +23,7 @@ def test_paid_features_for_free_user(monkeypatch):
     assert features["earnings_ai"] is False
     assert features["business"] is False
     assert features["big_picture"] is False
+    assert features["pattern_trend"] is False
 
 
 def test_paid_features_for_pro_user(monkeypatch):
@@ -35,6 +36,7 @@ def test_paid_features_for_pro_user(monkeypatch):
     assert features["earnings_ai"] is True
     assert features["business"] is True
     assert features["big_picture"] is True
+    assert features["pattern_trend"] is True
 
 
 def test_wheel_backtest_requires_pro(monkeypatch):

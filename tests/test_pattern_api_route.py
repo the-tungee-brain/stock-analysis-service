@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.auth.dependencies import get_current_user
+from app.core.llm_config import settings
 from app.main import app
 from data.store import save_raw
 from features.build_features import build_and_save_features
@@ -23,6 +24,11 @@ def auth_override():
     app.dependency_overrides[get_current_user] = _fake_user
     yield
     app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.fixture(autouse=True)
+def pro_user(monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset({"test-user"}))
 
 
 @pytest.fixture
@@ -67,3 +73,9 @@ def test_pattern_predict_returns_payload(pattern_client):
     assert set(payload["probabilities"].keys()) == {"-1", "0", "1"}
     assert "upProb" in payload or "up_prob" in payload
     assert "inTrainingUniverse" in payload or "in_training_universe" in payload
+
+
+def test_pattern_predict_requires_pro(pattern_client, monkeypatch):
+    monkeypatch.setattr(settings, "PAID_USER_IDS", frozenset())
+    response = pattern_client.get("/api/v1/pattern/predict", params={"symbol": "AAPL"})
+    assert response.status_code == 403
