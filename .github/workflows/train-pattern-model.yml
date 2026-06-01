@@ -73,20 +73,7 @@ jobs:
       - name: Show model metadata
         run: cat artifacts/model_meta.json
 
-      - name: Deploy artifacts to OCI VM
-        if: |
-          (github.event_name == 'workflow_dispatch' && inputs.deploy) ||
-          (github.event_name == 'schedule' && github.ref == 'refs/heads/main')
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VM_IP }}
-          username: ubuntu
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "artifacts/model_xgb.joblib,artifacts/model_meta.json"
-          target: /home/ubuntu/sas-pattern-artifacts
-          strip_components: 1
-
-      - name: Restart sas-server to load new model
+      - name: Prepare remote artifact directory
         if: |
           (github.event_name == 'workflow_dispatch' && inputs.deploy) ||
           (github.event_name == 'schedule' && github.ref == 'refs/heads/main')
@@ -97,11 +84,45 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -euo pipefail
-            mkdir -p /home/ubuntu/sas-pattern-artifacts
+            rm -rf /home/ubuntu/pattern-artifacts-staging
+            mkdir -p /home/ubuntu/pattern-artifacts-staging
+            sudo mkdir -p /home/ubuntu/sas-pattern-artifacts
+
+      - name: Deploy artifacts to OCI VM
+        if: |
+          (github.event_name == 'workflow_dispatch' && inputs.deploy) ||
+          (github.event_name == 'schedule' && github.ref == 'refs/heads/main')
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "artifacts/model_xgb.joblib,artifacts/model_meta.json"
+          target: /home/ubuntu/pattern-artifacts-staging
+          strip_components: 1
+
+      - name: Install artifacts and restart sas-server
+        if: |
+          (github.event_name == 'workflow_dispatch' && inputs.deploy) ||
+          (github.event_name == 'schedule' && github.ref == 'refs/heads/main')
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+            STAGING=/home/ubuntu/pattern-artifacts-staging
+            DEST=/home/ubuntu/sas-pattern-artifacts
+            test -f "$STAGING/model_xgb.joblib"
+            test -f "$STAGING/model_meta.json"
+            sudo cp -f "$STAGING/model_xgb.joblib" "$STAGING/model_meta.json" "$DEST"/
+            sudo chmod 644 "$DEST"/model_xgb.joblib "$DEST"/model_meta.json
+            rm -rf "$STAGING"
             if docker ps --format '{{.Names}}' | grep -qx sas-server; then
               docker restart sas-server
               sleep 5
               curl -sf http://localhost:8000/ || echo "Warning: root health check failed after restart"
             else
-              echo "sas-server container not running; artifacts copied for next deploy"
+              echo "sas-server container not running; artifacts installed for next deploy"
             fi
