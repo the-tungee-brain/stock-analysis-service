@@ -68,13 +68,13 @@ class WatchlistAdapter:
     def list_workspace(self, user_id: str) -> list[WatchlistFolderRecord]:
         folder_sql = f"""
             SELECT id, name, icon_name, swatch_id, accent_hex,
-                   is_pinned, is_collapsed, sort_order
+                   is_pinned, is_collapsed, sort_order, created_at
             FROM {self.folder_table}
             WHERE user_id = :user_id
             ORDER BY is_pinned DESC, sort_order ASC, name ASC
         """
         item_sql = f"""
-            SELECT id, folder_id, symbol, sort_order
+            SELECT id, folder_id, symbol, sort_order, created_at
             FROM {self.item_table}
             WHERE user_id = :user_id
             ORDER BY sort_order ASC, symbol ASC
@@ -92,12 +92,13 @@ class WatchlistAdapter:
             self.client.release(con)
 
         items_by_folder: dict[str, list[WatchlistSymbolRecord]] = {}
-        for item_id, folder_id, symbol, sort_order in item_rows:
+        for item_id, folder_id, symbol, sort_order, created_at in item_rows:
             items_by_folder.setdefault(folder_id, []).append(
                 WatchlistSymbolRecord(
                     id=item_id,
                     ticker=self._normalize_symbol(symbol),
                     sortOrder=int(sort_order or 0),
+                    createdAt=created_at,
                 )
             )
 
@@ -111,6 +112,7 @@ class WatchlistAdapter:
             is_pinned,
             is_collapsed,
             sort_order,
+            created_at,
         ) in folder_rows:
             folders.append(
                 WatchlistFolderRecord(
@@ -122,6 +124,7 @@ class WatchlistAdapter:
                     isPinned=bool(is_pinned),
                     isCollapsed=bool(is_collapsed),
                     sortOrder=int(sort_order or 0),
+                    createdAt=created_at,
                     symbols=items_by_folder.get(folder_id, []),
                 )
             )
@@ -341,8 +344,10 @@ class WatchlistAdapter:
                         price=quote[0] if quote else None,
                         dayChange=quote[1] if quote else None,
                         dayChangePercent=quote[2] if quote else None,
+                        createdAt=item.created_at,
                     )
                 )
+            created_at = folder.created_at or datetime.now(timezone.utc)
             response_folders.append(
                 WatchlistFolderResponse(
                     id=folder.id,
@@ -353,6 +358,7 @@ class WatchlistAdapter:
                     isPinned=folder.is_pinned,
                     isCollapsed=folder.is_collapsed,
                     sortOrder=folder.sort_order,
+                    createdAt=created_at,
                     symbols=symbols,
                 )
             )

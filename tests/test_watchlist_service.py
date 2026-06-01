@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 
 from app.adapters.user.watchlist_adapter import WatchlistAdapter
 from app.models.watchlist_models import WatchlistFolderRecord, WatchlistSymbolRecord
@@ -83,14 +84,32 @@ def test_normalize_folders_sanitizes_swatch_and_symbols():
 
 def test_build_response_includes_quote_fields():
     folders = [_folder()]
+    created_at = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+    symbol_created_at = datetime(2026, 2, 1, 9, 30, tzinfo=timezone.utc)
+    folders[0] = folders[0].model_copy(
+        update={
+            "created_at": created_at,
+            "symbols": [
+                WatchlistSymbolRecord(
+                    id="item-1",
+                    ticker="AAPL",
+                    sortOrder=0,
+                    createdAt=symbol_created_at,
+                )
+            ],
+        }
+    )
     response = WatchlistAdapter.build_response(
         folders,
         titles_by_symbol={"AAPL": "Apple Inc."},
         quotes_by_symbol={"AAPL": (190.0, 1.5, 0.8)},
     )
 
-    symbol = response.folders[0].symbols[0]
+    folder = response.folders[0]
+    assert folder.created_at == created_at
+    symbol = folder.symbols[0]
     assert symbol.company_name == "Apple Inc."
     assert symbol.price == 190.0
     assert symbol.day_change == 1.5
     assert symbol.day_change_percent == 0.8
+    assert symbol.created_at == symbol_created_at

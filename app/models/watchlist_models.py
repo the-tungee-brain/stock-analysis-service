@@ -11,6 +11,7 @@ class WatchlistSymbolRecord(BaseModel):
     id: str
     ticker: str
     sort_order: int = Field(default=0, alias="sortOrder")
+    created_at: datetime | None = Field(default=None, alias="createdAt")
 
 
 class WatchlistFolderRecord(BaseModel):
@@ -24,6 +25,7 @@ class WatchlistFolderRecord(BaseModel):
     is_pinned: bool = Field(default=False, alias="isPinned")
     is_collapsed: bool = Field(default=False, alias="isCollapsed")
     sort_order: int = Field(default=0, alias="sortOrder")
+    created_at: datetime | None = Field(default=None, alias="createdAt")
     symbols: list[WatchlistSymbolRecord] = Field(default_factory=list)
 
 
@@ -43,6 +45,7 @@ class WatchlistSymbolResponse(BaseModel):
     price: float | None = None
     day_change: float | None = Field(default=None, alias="dayChange")
     day_change_percent: float | None = Field(default=None, alias="dayChangePercent")
+    created_at: datetime | None = Field(default=None, alias="createdAt")
 
 
 class WatchlistFolderResponse(BaseModel):
@@ -56,6 +59,7 @@ class WatchlistFolderResponse(BaseModel):
     is_pinned: bool = Field(alias="isPinned")
     is_collapsed: bool = Field(alias="isCollapsed")
     sort_order: int = Field(alias="sortOrder")
+    created_at: datetime = Field(alias="createdAt")
     symbols: list[WatchlistSymbolResponse] = Field(default_factory=list)
 
 
