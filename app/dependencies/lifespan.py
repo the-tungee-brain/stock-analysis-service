@@ -406,6 +406,13 @@ async def lifespan(app: FastAPI):
     strategy_stock_screener_service = StrategyStockScreenerService()
     wheel_backtest_service = WheelBacktestService(yfinance_adapter=yfinance_adapter)
 
+    try:
+        from models.prediction_service import load_deployed_model
+
+        app.state.pattern_loaded_model = load_deployed_model()
+    except FileNotFoundError:
+        app.state.pattern_loaded_model = None
+
     app.state.http_session = session
     app.state.redis_client = redis_client
     app.state.yfinance_adapter = yfinance_adapter
