@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass, replace
+from typing import Any, Literal
 
 import pandas as pd
 
-from models.labels import FUTURE_RETURN_COLUMN, LABEL_COLUMN, get_feature_columns
+from models.labels import (
+    FUTURE_RETURN_COLUMN,
+    LabelScheme,
+    get_feature_columns,
+    get_label_column,
+    get_label_values,
+    resolve_label_scheme,
+)
 from models.xgb_model import XGBModelConfig, default_xgb_config, predict_xgb, train_xgb_classifier
+
+LabelSchemeName = Literal["original_3class", "binary_updown", "wideband_3class"]
 
 
 @dataclass(frozen=True)
@@ -19,6 +28,8 @@ class WalkForwardConfig:
     end_date: pd.Timestamp | None = None
     min_train_samples: int = 500
     min_test_samples: int = 50
+    label_scheme: LabelSchemeName | LabelScheme = LabelScheme.ORIGINAL_3CLASS
+    use_class_weights: bool = False
     model_config: XGBModelConfig | None = None
 
 
@@ -88,10 +99,13 @@ def run_walk_forward(
 ) -> WalkForwardResult:
     """Run walk-forward training and collect out-of-sample predictions."""
     cfg = config or WalkForwardConfig()
-    model_cfg = cfg.model_config or default_xgb_config()
+    scheme = resolve_label_scheme(cfg.label_scheme)
+    label_column = get_label_column(scheme)
+    class_labels = get_label_values(scheme)
+    model_cfg = _effective_model_config(cfg)
     panel = build_model_panel(labeled_by_symbol)
     if panel.empty:
-        return WalkForwardResult(predictions=_empty_predictions(), window_metrics=[], config=cfg)
+        return WalkForwardResult(predictions=_empty_predictions(scheme), window_metrics=[], config=cfg)
 
     feature_cols = get_feature_columns(panel)
     windows = generate_walk_forward_windows(panel["date"], cfg)
@@ -108,24 +122,27 @@ def run_walk_forward(
 
         model = train_xgb_classifier(
             train_df[feature_cols],
-            train_df[LABEL_COLUMN],
+            train_df[label_column],
             model_cfg,
+            label_scheme=scheme,
         )
-        y_pred, y_proba = predict_xgb(model, test_df[feature_cols])
+        y_pred, y_proba = predict_xgb(
+            model,
+            test_df[feature_cols],
+            label_scheme=scheme,
+            config=model_cfg,
+        )
 
-        preds = pd.DataFrame(
-            {
-                "window_id": window.window_id,
-                "symbol": test_df["symbol"].to_numpy(),
-                "date": test_df["date"].to_numpy(),
-                "y_true": test_df[LABEL_COLUMN].to_numpy(),
-                "y_pred": y_pred,
-                FUTURE_RETURN_COLUMN: test_df[FUTURE_RETURN_COLUMN].to_numpy(),
-                "prob_neg": y_proba[:, 0],
-                "prob_neutral": y_proba[:, 1],
-                "prob_pos": y_proba[:, 2],
-            }
-        )
+        pred_data: dict[str, Any] = {
+            "window_id": window.window_id,
+            "symbol": test_df["symbol"].to_numpy(),
+            "date": test_df["date"].to_numpy(),
+            "y_true": test_df[label_column].to_numpy(),
+            "y_pred": y_pred,
+            FUTURE_RETURN_COLUMN: test_df[FUTURE_RETURN_COLUMN].to_numpy(),
+        }
+        pred_data.update(_probability_columns(class_labels, y_proba))
+        preds = pd.DataFrame(pred_data)
         prediction_frames.append(preds)
         window_metrics.append(
             {
@@ -143,7 +160,7 @@ def run_walk_forward(
     predictions = (
         pd.concat(prediction_frames, ignore_index=True)
         if prediction_frames
-        else _empty_predictions()
+        else _empty_predictions(scheme)
     )
     return WalkForwardResult(
         predictions=predictions,
@@ -173,6 +190,29 @@ def build_model_panel(labeled_by_symbol: dict[str, pd.DataFrame]) -> pd.DataFram
     return panel.sort_values(["date", "symbol"]).reset_index(drop=True)
 
 
+def _effective_model_config(config: WalkForwardConfig) -> XGBModelConfig:
+    base = config.model_config or default_xgb_config()
+    scheme = resolve_label_scheme(config.label_scheme)
+    updates: dict[str, Any] = {}
+    if config.use_class_weights and not base.use_class_weights:
+        updates["use_class_weights"] = True
+    if resolve_label_scheme(base.label_scheme) != scheme:
+        updates["label_scheme"] = scheme
+    if updates:
+        return replace(base, **updates)
+    return base
+
+
+def _probability_columns(
+    class_labels: tuple[int, ...],
+    y_proba: Any,
+) -> dict[str, Any]:
+    columns: dict[str, Any] = {}
+    for idx, label in enumerate(class_labels):
+        columns[f"prob_{label}"] = y_proba[:, idx]
+    return columns
+
+
 def _slice_window(
     panel: pd.DataFrame,
     start: pd.Timestamp,
@@ -182,17 +222,15 @@ def _slice_window(
     return panel.loc[mask].copy()
 
 
-def _empty_predictions() -> pd.DataFrame:
-    return pd.DataFrame(
-        columns=[
-            "window_id",
-            "symbol",
-            "date",
-            "y_true",
-            "y_pred",
-            FUTURE_RETURN_COLUMN,
-            "prob_neg",
-            "prob_neutral",
-            "prob_pos",
-        ]
-    )
+def _empty_predictions(scheme: LabelScheme) -> pd.DataFrame:
+    class_labels = get_label_values(scheme)
+    columns = [
+        "window_id",
+        "symbol",
+        "date",
+        "y_true",
+        "y_pred",
+        FUTURE_RETURN_COLUMN,
+        *[f"prob_{label}" for label in class_labels],
+    ]
+    return pd.DataFrame(columns=columns)

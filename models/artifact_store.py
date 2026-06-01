@@ -11,7 +11,8 @@ import joblib
 import pandas as pd
 import xgboost as xgb
 
-from models.xgb_model import MODEL_CLASS_LABELS, MODEL_CLASS_TO_INDEX
+from models.labels import LabelScheme, get_label_values, resolve_label_scheme
+from models.xgb_model import MODEL_CLASS_LABELS
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_ARTIFACT_DIR = PROJECT_ROOT / "artifacts"
@@ -42,16 +43,45 @@ def build_model_metadata(
     train_start_date: pd.Timestamp,
     train_end_date: pd.Timestamp,
     symbols: list[str],
+    label_scheme: LabelScheme | str = LabelScheme.ORIGINAL_3CLASS,
+    use_class_weights: bool = False,
+    min_up_prob: float | None = None,
+    universe: str | None = None,
 ) -> dict[str, Any]:
+    scheme = resolve_label_scheme(label_scheme)
+    class_labels = get_label_values(scheme)
     return {
         "feature_columns": feature_columns,
         "train_start_date": pd.Timestamp(train_start_date).strftime("%Y-%m-%d"),
         "train_end_date": pd.Timestamp(train_end_date).strftime("%Y-%m-%d"),
         "symbols": [symbol.strip().upper() for symbol in symbols],
-        "class_labels": list(MODEL_CLASS_LABELS),
-        "class_mapping": {str(label): idx for label, idx in MODEL_CLASS_TO_INDEX.items()},
+        "label_scheme": scheme.value,
+        "use_class_weights": bool(use_class_weights),
+        "min_up_prob": min_up_prob,
+        "universe": universe,
+        "class_labels": list(class_labels),
+        "class_mapping": {
+            str(label): idx for idx, label in enumerate(class_labels)
+        },
         "n_features": len(feature_columns),
     }
+
+
+def metadata_class_labels(metadata: dict[str, Any]) -> tuple[int, ...]:
+    """Return ordered class labels from artifact metadata with legacy fallback."""
+    raw = metadata.get("class_labels")
+    if raw:
+        return tuple(int(label) for label in raw)
+    return MODEL_CLASS_LABELS
+
+
+def metadata_label_scheme(metadata: dict[str, Any]) -> LabelScheme:
+    if metadata.get("label_scheme"):
+        return resolve_label_scheme(metadata["label_scheme"])
+    labels = metadata_class_labels(metadata)
+    if labels == (0, 1):
+        return LabelScheme.BINARY_UPDOWN
+    return LabelScheme.ORIGINAL_3CLASS
 
 
 def save_model_artifacts(

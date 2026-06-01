@@ -6,7 +6,7 @@ on:
       symbols:
         description: Space-separated symbols
         required: false
-        default: AAPL MSFT GOOGL AMZN NVDA SPY QQQ VTI SCHD IWM
+        default: COST JPM MSFT NVDA SPY
       train_end:
         description: Last training date (YYYY-MM-DD). Leave blank for yesterday.
         required: false
@@ -51,11 +51,12 @@ jobs:
           YFINANCE_CACHE_DIR: ${{ runner.temp }}/yfinance-cache
         run: |
           set -euo pipefail
-          SYMBOLS=(AAPL MSFT GOOGL AMZN NVDA SPY QQQ VTI SCHD IWM)
+          SYMBOLS=(COST JPM MSFT NVDA SPY)
+          CMD=(python -m models.train_pipeline --universe tradeable_v1 --label-scheme binary_updown --use-class-weights --min-up-prob 0.65)
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.symbols }}" ]; then
             read -r -a SYMBOLS <<< "${{ inputs.symbols }}"
+            CMD=(python -m models.train_pipeline --symbols "${SYMBOLS[@]}" --label-scheme binary_updown --use-class-weights --min-up-prob 0.65)
           fi
-          CMD=(python -m models.train_pipeline --symbols "${SYMBOLS[@]}")
           if [ -n "${{ inputs.train_end }}" ]; then
             CMD+=(--train-end "${{ inputs.train_end }}")
           fi

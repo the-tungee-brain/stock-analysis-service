@@ -58,6 +58,7 @@ from app.services.transaction_service import RECENT_ACTIVITY_DAYS, TransactionSe
 
 if TYPE_CHECKING:
     from app.adapters.cache.portfolio_brief_cache import PortfolioBriefCache
+    from models.prediction_service import LoadedModel
 
 BENCHMARK_SYMBOLS = ["$SPX", "$DJI", "$VIX", "TLT"]
 TRANSACTION_ACTIONS = frozenset(
@@ -102,6 +103,10 @@ class PortfolioAnalysisService:
         self.portfolio_intelligence_service = portfolio_intelligence_service
         self.profile_adapter = profile_adapter
         self.portfolio_brief_cache = portfolio_brief_cache
+        self._pattern_loaded_model: LoadedModel | None = None
+
+    def attach_pattern_model(self, loaded: "LoadedModel | None") -> None:
+        self._pattern_loaded_model = loaded
 
     def _portfolio_brief_fingerprint(
         self,
@@ -1038,7 +1043,7 @@ class PortfolioAnalysisService:
         profile = self._get_investment_profile(user_id)
 
         try:
-            return self.portfolio_intelligence_service.build_symbol_intelligence(
+            intelligence = self.portfolio_intelligence_service.build_symbol_intelligence(
                 research=ctx,
                 positions=positions,
                 account=account,
@@ -1056,6 +1061,16 @@ class PortfolioAnalysisService:
                 symbol_upper,
             )
             return SymbolIntelligence(symbol=symbol_upper, partial=True)
+
+        from app.services.pattern_forecast_service import build_pattern_trend_forecast
+
+        forecast = build_pattern_trend_forecast(
+            symbol_upper,
+            self._pattern_loaded_model,
+        )
+        if forecast is not None:
+            intelligence = intelligence.model_copy(update={"pattern_forecast": forecast})
+        return intelligence
 
     @staticmethod
     def _positions_for_symbol(

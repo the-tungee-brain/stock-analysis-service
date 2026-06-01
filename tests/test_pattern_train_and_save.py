@@ -12,6 +12,7 @@ import pytest
 from data.store import OHLCV_COLUMNS, save_raw
 from features.build_features import build_and_save_features
 from models.artifact_store import load_model_artifacts, meta_path, model_path
+from models.labels import LabelScheme
 from models.train_and_save import TrainAndSaveConfig, train_and_save
 from models.xgb_model import XGBModelConfig
 
@@ -76,3 +77,30 @@ def test_train_and_save_writes_model_and_metadata(seeded_symbol_data):
 
     meta_json = json.loads(meta_path(artifact_dir).read_text(encoding="utf-8"))
     assert meta_json["symbols"] == ["AAPL"]
+
+
+def test_train_and_save_binary_metadata(seeded_symbol_data):
+    artifact_dir = seeded_symbol_data["artifact_dir"]
+    config = TrainAndSaveConfig(
+        symbols=("AAPL",),
+        train_end_date=seeded_symbol_data["train_end"],
+        artifact_dir=artifact_dir,
+        model_config=XGBModelConfig(
+            n_estimators=10,
+            max_depth=2,
+            random_state=0,
+            label_scheme=LabelScheme.BINARY_UPDOWN,
+            use_class_weights=True,
+        ),
+        min_up_prob=0.65,
+        universe="tradeable_v1",
+    )
+
+    train_and_save(config)
+    _, metadata = load_model_artifacts(artifact_dir)
+
+    assert metadata["label_scheme"] == "binary_updown"
+    assert metadata["use_class_weights"] is True
+    assert metadata["min_up_prob"] == 0.65
+    assert metadata["universe"] == "tradeable_v1"
+    assert metadata["class_labels"] == [0, 1]

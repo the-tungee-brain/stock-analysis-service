@@ -65,3 +65,5 @@ def test_pattern_predict_returns_payload(pattern_client):
     assert payload["symbol"] == "AAPL"
     assert payload["prediction"] in (-1, 0, 1)
     assert set(payload["probabilities"].keys()) == {"-1", "0", "1"}
+    assert "upProb" in payload or "up_prob" in payload
+    assert "inTrainingUniverse" in payload or "in_training_universe" in payload

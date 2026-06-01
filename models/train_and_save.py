@@ -12,7 +12,7 @@ import pandas as pd
 from backtest.run_backtest import load_labeled_universe
 from data.symbols import get_symbols
 from models.artifact_store import build_model_metadata, save_model_artifacts
-from models.labels import LABEL_COLUMN, get_feature_columns
+from models.labels import get_feature_columns, get_label_column, resolve_label_scheme
 from models.walk_forward import build_model_panel
 from models.xgb_model import XGBModelConfig, default_xgb_config, train_xgb_classifier
 
@@ -26,6 +26,8 @@ class TrainAndSaveConfig:
     train_start_date: pd.Timestamp | None = None
     artifact_dir: Path | None = None
     model_config: XGBModelConfig | None = None
+    min_up_prob: float | None = None
+    universe: str | None = None
 
 
 def build_training_panel(
@@ -55,7 +57,7 @@ def build_training_panel(
 def train_model_from_panel(
     panel: pd.DataFrame,
     model_config: XGBModelConfig | None = None,
-) -> tuple[object, list[str]]:
+) -> tuple[object, list[str], XGBModelConfig]:
     """Train an XGBoost classifier on a labeled panel."""
     if len(panel) < MIN_TRAINING_ROWS:
         raise ValueError(
@@ -66,12 +68,18 @@ def train_model_from_panel(
     if not feature_columns:
         raise ValueError("No feature columns found in training panel")
 
+    cfg = model_config or default_xgb_config()
+    label_column = get_label_column(cfg.label_scheme)
+    if label_column not in panel.columns:
+        raise ValueError(f"Training panel missing label column {label_column!r}")
+
     model = train_xgb_classifier(
         panel[feature_columns],
-        panel[LABEL_COLUMN],
-        model_config or default_xgb_config(),
+        panel[label_column],
+        cfg,
+        label_scheme=cfg.label_scheme,
     )
-    return model, feature_columns
+    return model, feature_columns, cfg
 
 
 def train_and_save(config: TrainAndSaveConfig) -> dict[str, str | int]:
@@ -81,13 +89,18 @@ def train_and_save(config: TrainAndSaveConfig) -> dict[str, str | int]:
         config.train_end_date,
         config.train_start_date,
     )
-    model, feature_columns = train_model_from_panel(panel, config.model_config)
+    model, feature_columns, model_cfg = train_model_from_panel(panel, config.model_config)
+    scheme = resolve_label_scheme(model_cfg.label_scheme)
 
     metadata = build_model_metadata(
         feature_columns=feature_columns,
         train_start_date=panel["date"].min(),
         train_end_date=panel["date"].max(),
         symbols=list(config.symbols),
+        label_scheme=scheme,
+        use_class_weights=model_cfg.use_class_weights,
+        min_up_prob=config.min_up_prob,
+        universe=config.universe,
     )
     model_path, meta_path = save_model_artifacts(
         model,
@@ -102,6 +115,7 @@ def train_and_save(config: TrainAndSaveConfig) -> dict[str, str | int]:
         "n_features": len(feature_columns),
         "train_start_date": metadata["train_start_date"],
         "train_end_date": metadata["train_end_date"],
+        "label_scheme": metadata["label_scheme"],
     }
 
 

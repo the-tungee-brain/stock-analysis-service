@@ -208,6 +208,25 @@ class PortfolioDigest(BaseModel):
     )
 
 
+class PatternTrendForecast(BaseModel):
+    model_config = _INTELLIGENCE_MODEL_CONFIG
+
+    as_of_date: str = Field(serialization_alias="asOfDate")
+    horizon_days: int = Field(default=5, serialization_alias="horizonDays")
+    label_scheme: str = Field(serialization_alias="labelScheme")
+    prediction: int
+    up_prob: float | None = Field(default=None, serialization_alias="upProb")
+    trade_signal: bool | None = Field(default=None, serialization_alias="tradeSignal")
+    in_training_universe: bool = Field(
+        default=False, serialization_alias="inTrainingUniverse"
+    )
+    probabilities: dict[str, float] = Field(default_factory=dict)
+    indicators: dict[str, float] = Field(default_factory=dict)
+    model_train_end_date: str | None = Field(
+        default=None, serialization_alias="modelTrainEndDate"
+    )
+
+
 class CachedResearchSnippet(BaseModel):
     model_config = _INTELLIGENCE_MODEL_CONFIG
 
@@ -261,6 +280,9 @@ class SymbolIntelligence(BaseModel):
     )
     cached_research: CachedResearchSnippet | None = Field(
         default=None, serialization_alias="cachedResearch"
+    )
+    pattern_forecast: PatternTrendForecast | None = Field(
+        default=None, serialization_alias="patternForecast"
     )
     data_gaps: list[str] = Field(default_factory=list, serialization_alias="dataGaps")
     partial: bool = False

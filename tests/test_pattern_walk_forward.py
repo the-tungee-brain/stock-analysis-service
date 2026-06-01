@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
-from models.labels import FUTURE_RETURN_COLUMN, LABEL_COLUMN, add_labels
+from models.labels import FUTURE_RETURN_COLUMN, LabelScheme, add_labels, get_label_column
 from models.walk_forward import (
     WalkForwardConfig,
     build_model_panel,
@@ -110,3 +111,77 @@ def test_run_walk_forward_prediction_count_matches_test_rows():
                 expected += len(test_rows)
 
     assert len(result.predictions) == expected
+
+
+@pytest.mark.parametrize(
+    "label_scheme",
+    [
+        LabelScheme.ORIGINAL_3CLASS,
+        LabelScheme.BINARY_UPDOWN,
+        LabelScheme.WIDEBAND_3CLASS,
+    ],
+)
+def test_run_walk_forward_executes_for_each_label_scheme(label_scheme: LabelScheme):
+    labeled = {"AAA": _synthetic_labeled_frame("2020-01-01", 780, seed=4)}
+    config = WalkForwardConfig(
+        train_years=1,
+        test_years=1,
+        start_date=pd.Timestamp("2020-01-01"),
+        end_date=pd.Timestamp("2022-12-31"),
+        min_train_samples=100,
+        min_test_samples=20,
+        label_scheme=label_scheme,
+        use_class_weights=True,
+        model_config=XGBModelConfig(n_estimators=10, max_depth=2, random_state=0),
+    )
+
+    result = run_walk_forward(labeled, config=config)
+
+    assert not result.predictions.empty
+    label_column = get_label_column(label_scheme)
+    labeled_frame = labeled["AAA"]
+    expected_values = set(labeled_frame[label_column].unique())
+    assert set(result.predictions["y_true"]).issubset(expected_values)
+    assert set(result.predictions["y_pred"]).issubset(expected_values)
+    assert FUTURE_RETURN_COLUMN in result.predictions.columns
+
+
+def test_run_walk_forward_binary_updown_without_class_weights():
+    labeled = {"AAA": _synthetic_labeled_frame("2020-01-01", 780, seed=5)}
+    config = WalkForwardConfig(
+        train_years=1,
+        test_years=1,
+        start_date=pd.Timestamp("2020-01-01"),
+        end_date=pd.Timestamp("2022-12-31"),
+        min_train_samples=100,
+        min_test_samples=20,
+        label_scheme=LabelScheme.BINARY_UPDOWN,
+        use_class_weights=False,
+        model_config=XGBModelConfig(n_estimators=10, max_depth=2, random_state=0),
+    )
+
+    result = run_walk_forward(labeled, config=config)
+
+    assert not result.predictions.empty
+    assert set(result.predictions["y_true"]).issubset({0, 1})
+    assert set(result.predictions["y_pred"]).issubset({0, 1})
+
+
+def test_run_walk_forward_binary_updown_with_class_weights():
+    labeled = {"AAA": _synthetic_labeled_frame("2020-01-01", 780, seed=6)}
+    config = WalkForwardConfig(
+        train_years=1,
+        test_years=1,
+        start_date=pd.Timestamp("2020-01-01"),
+        end_date=pd.Timestamp("2022-12-31"),
+        min_train_samples=100,
+        min_test_samples=20,
+        label_scheme=LabelScheme.BINARY_UPDOWN,
+        use_class_weights=True,
+        model_config=XGBModelConfig(n_estimators=10, max_depth=2, random_state=0),
+    )
+
+    result = run_walk_forward(labeled, config=config)
+
+    assert not result.predictions.empty
+    assert result.config.use_class_weights is True

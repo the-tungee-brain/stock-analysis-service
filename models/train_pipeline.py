@@ -8,9 +8,10 @@ from typing import Sequence
 import pandas as pd
 
 from data.download import download_and_store_all
-from data.symbols import get_training_symbols
+from data.symbols import get_symbols, get_training_symbols, get_universe, list_universe_names
 from features.build_features import build_and_save_all
 from models.train_and_save import TrainAndSaveConfig, train_and_save
+from models.xgb_model import XGBModelConfig
 
 
 def default_train_end() -> str:
@@ -23,9 +24,13 @@ def run_pipeline(
     years: int = 15,
     train_end: str | None = None,
     train_start: str | None = None,
+    model_config: XGBModelConfig | None = None,
+    train_metadata: dict | None = None,
+    universe: str | None = None,
 ) -> dict[str, str | int]:
     tickers = list(symbols) if symbols else get_training_symbols()
     resolved_train_end = train_end or default_train_end()
+    meta_kwargs = dict(train_metadata or {})
 
     print(f"Downloading {len(tickers)} symbols ({years}y)...")
     download_and_store_all(tickers, years=years)
@@ -38,7 +43,12 @@ def run_pipeline(
         symbols=tuple(ticker.strip().upper() for ticker in tickers),
         train_end_date=pd.Timestamp(resolved_train_end),
         train_start_date=pd.Timestamp(train_start) if train_start else None,
+        model_config=model_config,
+        min_up_prob=meta_kwargs.pop("min_up_prob", None),
+        universe=meta_kwargs.pop("universe", universe),
     )
+    if meta_kwargs:
+        raise ValueError(f"Unsupported train_metadata keys: {sorted(meta_kwargs)}")
     return train_and_save(config)
 
 
@@ -51,6 +61,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         nargs="+",
         default=None,
         help="Symbols to include (default: stocks + ETFs from data.symbols)",
+    )
+    parser.add_argument(
+        "--universe",
+        default=None,
+        help=f"Named symbol universe instead of --symbols (choices: {', '.join(list_universe_names())})",
+    )
+    parser.add_argument(
+        "--label-scheme",
+        choices=["original_3class", "binary_updown", "wideband_3class"],
+        default="original_3class",
+        help="Target label scheme for training (default: original_3class)",
+    )
+    parser.add_argument(
+        "--use-class-weights",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Apply inverse-frequency or scale_pos_weight during training",
+    )
+    parser.add_argument(
+        "--min-up-prob",
+        type=float,
+        default=None,
+        help="Store min P(up) threshold in artifact metadata for trade signals",
     )
     parser.add_argument(
         "--years",
@@ -70,11 +103,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
+    if args.symbols and args.universe:
+        parser.error("Use either --symbols or --universe, not both")
+    if args.universe:
+        try:
+            tickers = get_universe(args.universe)
+        except ValueError as exc:
+            parser.error(str(exc))
+    else:
+        tickers = args.symbols
+
+    model_config = XGBModelConfig(
+        label_scheme=args.label_scheme,
+        use_class_weights=args.use_class_weights,
+    )
+    train_metadata = {}
+    if args.min_up_prob is not None:
+        train_metadata["min_up_prob"] = args.min_up_prob
+    if args.universe:
+        train_metadata["universe"] = args.universe
+
     result = run_pipeline(
-        args.symbols,
+        tickers,
         years=args.years,
         train_end=args.train_end,
         train_start=args.train_start,
+        model_config=model_config,
+        train_metadata=train_metadata or None,
+        universe=args.universe,
     )
     print(
         "Pipeline complete:",

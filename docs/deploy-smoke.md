@@ -37,6 +37,16 @@ Automated prewarm timing: [loadtests/README.md](../loadtests/README.md).
 - Local: `k6 run loadtests/morning_brief_prewarm.js` with `API_BASE_URL` + `CRON_SECRET`
 - CI: **Actions → Load test — morning brief** (prewarm only; dispatch opt-in sends email)
 
+## Pattern model
+
+After training or deploying a new pattern model, see [pattern-model-review.md](./pattern-model-review.md).
+
+1. Confirm artifacts exist on the VM: `/home/ubuntu/sas-pattern-artifacts/model_xgb.joblib`.
+2. `GET /api/v1/pattern/health` returns `status=ok` with `labelScheme=binary_updown` and tradeable symbols.
+3. `GET /api/v1/pattern/predict?symbol=MSFT` includes `upProb`, `tradeSignal`, and `inTrainingUniverse`.
+4. Research intelligence exposes the same payload: `GET /api/v1/research/intelligence?symbol=MSFT` → `patternForecast`.
+5. Frontend (my-pocket): research overview should render the 5-day trend card when `patternForecast` is present.
+
 ## Regression
 
 ```bash

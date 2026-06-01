@@ -413,6 +413,8 @@ async def lifespan(app: FastAPI):
     except FileNotFoundError:
         app.state.pattern_loaded_model = None
 
+    portfolio_analysis_service.attach_pattern_model(app.state.pattern_loaded_model)
+
     app.state.http_session = session
     app.state.redis_client = redis_client
     app.state.yfinance_adapter = yfinance_adapter
