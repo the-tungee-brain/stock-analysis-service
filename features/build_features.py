@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
+from typing import Sequence
+
 import pandas as pd
 
 from data.loader import load_symbol
 from data.store import save_features
+from data.symbols import get_symbols
 from features.indicators import compute_indicators
 from features.patterns import compute_patterns
 
@@ -50,8 +54,36 @@ def build_and_save_features(symbol: str) -> pd.DataFrame:
     return features
 
 
+def build_and_save_all(symbols: Sequence[str] | None = None) -> dict[str, pd.DataFrame]:
+    """Build and persist feature Parquets for each symbol."""
+    tickers = list(symbols) if symbols else get_symbols()
+    out: dict[str, pd.DataFrame] = {}
+    for symbol in tickers:
+        features = build_and_save_features(symbol)
+        out[symbol.strip().upper()] = features
+        print(f"Saved features for {symbol.strip().upper()}: {len(features)} rows")
+    return out
+
+
 def features_ready_slice(features: pd.DataFrame) -> pd.DataFrame:
     """Return rows after the indicator warm-up window."""
     if len(features) <= FEATURE_WARMUP_DAYS:
         return features.iloc[0:0]
     return features.iloc[FEATURE_WARMUP_DAYS:]
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Build feature Parquet files from raw OHLCV.")
+    parser.add_argument(
+        "--symbols",
+        nargs="+",
+        default=None,
+        help="Symbols to build (default: data.symbols.DEFAULT_SYMBOLS)",
+    )
+    args = parser.parse_args(list(argv) if argv is not None else None)
+    build_and_save_all(args.symbols)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

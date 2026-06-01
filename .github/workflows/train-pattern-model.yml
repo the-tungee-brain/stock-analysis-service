@@ -1,0 +1,107 @@
+name: Train Pattern Model
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: Space-separated symbols
+        required: false
+        default: AAPL MSFT GOOGL AMZN NVDA
+      train_end:
+        description: Last training date (YYYY-MM-DD). Leave blank for yesterday.
+        required: false
+        default: ""
+      deploy:
+        description: Copy artifacts to OCI VM and restart sas-server
+        required: false
+        type: boolean
+        default: true
+  schedule:
+    # Sundays 06:15 UTC — after US markets close for the week
+    - cron: "15 6 * * 0"
+
+concurrency:
+  group: train-pattern-model
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgomp1
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run training pipeline
+        env:
+          YFINANCE_CACHE_DIR: ${{ runner.temp }}/yfinance-cache
+        run: |
+          set -euo pipefail
+          SYMBOLS=(AAPL MSFT GOOGL AMZN NVDA)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.symbols }}" ]; then
+            read -r -a SYMBOLS <<< "${{ inputs.symbols }}"
+          fi
+          CMD=(python -m models.train_pipeline --symbols "${SYMBOLS[@]}")
+          if [ -n "${{ inputs.train_end }}" ]; then
+            CMD+=(--train-end "${{ inputs.train_end }}")
+          fi
+          "${CMD[@]}"
+
+      - name: Upload model artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pattern-model-${{ github.run_id }}
+          path: |
+            artifacts/model_xgb.joblib
+            artifacts/model_meta.json
+          retention-days: 30
+
+      - name: Show model metadata
+        run: cat artifacts/model_meta.json
+
+      - name: Deploy artifacts to OCI VM
+        if: |
+          (github.event_name == 'workflow_dispatch' && inputs.deploy) ||
+          (github.event_name == 'schedule' && github.ref == 'refs/heads/main')
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "artifacts/model_xgb.joblib,artifacts/model_meta.json"
+          target: /home/ubuntu/sas-pattern-artifacts
+          strip_components: 1
+
+      - name: Restart sas-server to load new model
+        if: |
+          (github.event_name == 'workflow_dispatch' && inputs.deploy) ||
+          (github.event_name == 'schedule' && github.ref == 'refs/heads/main')
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -euo pipefail
+            mkdir -p /home/ubuntu/sas-pattern-artifacts
+            if docker ps --format '{{.Names}}' | grep -qx sas-server; then
+              docker restart sas-server
+              sleep 5
+              curl -sf http://localhost:8000/ || echo "Warning: root health check failed after restart"
+            else
+              echo "sas-server container not running; artifacts copied for next deploy"
+            fi

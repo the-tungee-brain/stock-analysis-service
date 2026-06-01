@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 from datetime import datetime, timedelta
+from typing import Sequence
 
 import pandas as pd
 import yfinance as yf
@@ -57,3 +59,30 @@ def download_and_store_all(
         _, df = download_and_store_symbol(symbol, years=years)
         out[symbol.strip().upper()] = df
     return out
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Download daily OHLCV Parquet files via yfinance.")
+    parser.add_argument(
+        "--symbols",
+        nargs="+",
+        default=None,
+        help="Symbols to download (default: data.symbols.DEFAULT_SYMBOLS)",
+    )
+    parser.add_argument(
+        "--years",
+        type=int,
+        default=DEFAULT_YEARS,
+        help="Years of history to download (default: 15)",
+    )
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    symbols = args.symbols or get_symbols()
+    results = download_and_store_all(symbols, years=args.years)
+    for symbol, frame in results.items():
+        print(f"Saved {symbol}: {len(frame)} rows")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

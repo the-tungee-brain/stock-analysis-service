@@ -83,6 +83,8 @@ jobs:
               --name sas-server \
               --network sas-net \
               -p 8000:8000 \
+              -v /home/ubuntu/sas-pattern-artifacts:/app/artifacts \
+              -e PATTERN_ARTIFACT_DIR=/app/artifacts \
               --memory=5g \
               --memory-swap=6g \
               --cpus=3.5 \
