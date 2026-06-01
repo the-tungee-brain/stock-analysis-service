@@ -2,3 +2,7 @@
 venv/
 __pycache__/
 .venv*/
+data/raw/*.parquet
+data/features/*.parquet
+artifacts/model_xgb.joblib
+artifacts/model_meta.json

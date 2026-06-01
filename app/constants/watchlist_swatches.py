@@ -2,9 +2,14 @@
 
 DEFAULT_WATCHLIST_SWATCH_ID = "slate"
 
-# Classic tones + premium abstract backgrounds (Tomcrest iOS folder picker).
+# Classic tones + Tomcrest Signature + premium art-directed backgrounds.
 WATCHLIST_SWATCH_IDS: frozenset[str] = frozenset(
     {
+        # Tomcrest Signature
+        "sig-aurora",
+        "sig-cascade",
+        "sig-meridian",
+        "sig-prism",
         # Classic
         "mauve",
         "sage",
@@ -14,7 +19,7 @@ WATCHLIST_SWATCH_IDS: frozenset[str] = frozenset(
         "rose",
         "slate",
         "ocean",
-        # Orbs & light
+        # Premium curated (legacy IDs retained for sync compatibility)
         "orb-iris",
         "orb-mist",
         "twin-rose",
@@ -22,7 +27,6 @@ WATCHLIST_SWATCH_IDS: frozenset[str] = frozenset(
         "sphere-noir",
         "radial-dawn",
         "halo-moon",
-        # Lines & flow
         "flow-azure",
         "flow-plum",
         "ribbon-sand",
@@ -34,7 +38,6 @@ WATCHLIST_SWATCH_IDS: frozenset[str] = frozenset(
         "streak-ice",
         "wave-midnight",
         "metal-champagne",
-        # Glass & depth
         "glass-pearl",
         "glass-obsidian",
         "layer-sage",
@@ -44,7 +47,6 @@ WATCHLIST_SWATCH_IDS: frozenset[str] = frozenset(
         "arch-stone",
         "vision-aqua",
         "vision-blush",
-        # Pattern & form
         "ring-slate",
         "ring-copper",
         "grid-fog",
