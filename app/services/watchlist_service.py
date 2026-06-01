@@ -3,6 +3,10 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from app.constants.watchlist_swatches import (
+    DEFAULT_WATCHLIST_SWATCH_ID,
+    normalize_watchlist_swatch_id,
+)
 from app.adapters.user.watchlist_adapter import WatchlistAdapter
 from app.builders.finnhub_builder import FinnhubBuilder
 from app.models.watchlist_models import (
@@ -11,20 +15,6 @@ from app.models.watchlist_models import (
     WatchlistWorkspaceSyncRequest,
 )
 from app.services.ticker_service import TickerService
-
-_ALLOWED_SWATCH_IDS = frozenset(
-    {
-        "mauve",
-        "sage",
-        "lavender",
-        "teal",
-        "sand",
-        "rose",
-        "slate",
-        "ocean",
-    }
-)
-
 
 class WatchlistService:
     def __init__(
@@ -48,7 +38,7 @@ class WatchlistService:
     ) -> list[WatchlistFolderRecord]:
         normalized: list[WatchlistFolderRecord] = []
         for folder in folders:
-            swatch_id = folder.swatch_id if folder.swatch_id in _ALLOWED_SWATCH_IDS else "slate"
+            swatch_id = normalize_watchlist_swatch_id(folder.swatch_id)
             normalized.append(
                 folder.model_copy(
                     update={

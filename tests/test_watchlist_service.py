@@ -2,6 +2,7 @@ import pytest
 from datetime import datetime, timezone
 
 from app.adapters.user.watchlist_adapter import WatchlistAdapter
+from app.constants.watchlist_swatches import DEFAULT_WATCHLIST_SWATCH_ID
 from app.models.watchlist_models import WatchlistFolderRecord, WatchlistSymbolRecord
 from app.services.watchlist_service import WatchlistService
 
@@ -78,8 +79,46 @@ def test_normalize_folders_sanitizes_swatch_and_symbols():
 
     assert normalized[0].name == "Tech"
     assert normalized[0].icon_name == "folder.fill"
-    assert normalized[0].swatch_id == "slate"
+    assert normalized[0].swatch_id == DEFAULT_WATCHLIST_SWATCH_ID
     assert normalized[0].symbols[0].ticker == "NVDA"
+
+
+def test_normalize_folders_preserves_premium_swatch_ids():
+    service = WatchlistService(
+        watchlist_adapter=object(),  # type: ignore[arg-type]
+        ticker_service=object(),  # type: ignore[arg-type]
+        finnhub_builder=object(),  # type: ignore[arg-type]
+    )
+
+    normalized = service._normalize_folders(
+        [
+            WatchlistFolderRecord(
+                id="folder-1",
+                name="Premium",
+                iconName="star.fill",
+                swatchID="orb-iris",
+                accentHex=None,
+                isPinned=False,
+                isCollapsed=False,
+                sortOrder=0,
+                symbols=[],
+            ),
+            WatchlistFolderRecord(
+                id="folder-2",
+                name="Classic",
+                iconName="folder.fill",
+                swatchID="lavender",
+                accentHex=None,
+                isPinned=False,
+                isCollapsed=False,
+                sortOrder=1,
+                symbols=[],
+            ),
+        ]
+    )
+
+    assert normalized[0].swatch_id == "orb-iris"
+    assert normalized[1].swatch_id == "lavender"
 
 
 def test_build_response_includes_quote_fields():
