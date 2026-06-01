@@ -22,13 +22,13 @@ def trained_api_client(tmp_path, monkeypatch):
     monkeypatch.setattr("data.paths.RAW_DIR", raw_dir)
     monkeypatch.setattr("data.paths.FEATURES_DIR", features_dir)
 
-    save_raw(_synthetic_ohlcv(), "AAPL")
+    save_raw(_synthetic_ohlcv(rows=600), "AAPL")
     build_and_save_features("AAPL")
 
     train_and_save(
         TrainAndSaveConfig(
             symbols=("AAPL",),
-            train_end_date=pd.Timestamp("2021-06-30"),
+            train_end_date=pd.Timestamp("2021-12-31"),
             artifact_dir=artifact_dir,
             model_config=XGBModelConfig(n_estimators=10, max_depth=2, random_state=0),
         )
@@ -45,7 +45,7 @@ def test_health_returns_model_metadata(trained_api_client):
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "ok"
-    assert payload["model"]["train_end_date"] <= "2021-06-30"
+    assert payload["model"]["train_end_date"] <= "2021-12-31"
     assert payload["model"]["n_features"] > 0
     assert "AAPL" in payload["model"]["symbols"]
 
@@ -60,7 +60,7 @@ def test_predict_returns_prediction_payload(trained_api_client):
     assert payload["prediction"] in (-1, 0, 1)
     assert set(payload["probabilities"].keys()) == {"-1", "0", "1"}
     assert abs(sum(payload["probabilities"].values()) - 1.0) < 1e-6
-    for key in ("rsi_14", "sma_20", "sma_200", "macd", "bb_pct"):
+    for key in ("rs_vs_spy_21d", "close_vs_sma20", "ret_21d"):
         assert key in payload["indicators"]
 
 

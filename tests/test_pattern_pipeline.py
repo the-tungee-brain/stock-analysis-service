@@ -22,7 +22,7 @@ def pipeline_dirs(tmp_path, monkeypatch):
 
 
 def test_run_pipeline_trains_model(pipeline_dirs):
-    ohlcv = _synthetic_ohlcv(rows=500)
+    ohlcv = _synthetic_ohlcv(rows=600)
 
     with patch("models.train_pipeline.download_and_store_all") as download_mock:
         download_mock.return_value = {"AAPL": ohlcv}
@@ -36,7 +36,7 @@ def test_run_pipeline_trains_model(pipeline_dirs):
                 for symbol in symbols
             }
 
-            result = run_pipeline(["AAPL"], years=2, train_end="2021-06-30")
+            result = run_pipeline(["AAPL"], years=2, train_end="2021-12-31")
 
     assert result["n_rows"] >= 100
     assert (pipeline_dirs / "model_xgb.joblib").exists()

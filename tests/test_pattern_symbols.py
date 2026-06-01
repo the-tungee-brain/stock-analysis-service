@@ -47,5 +47,5 @@ def test_named_universes():
 def test_tradeable_script_extra_symbols():
     from models.pattern_production import resolve_tradeable_symbols
 
-    symbols = resolve_tradeable_symbols(extra_symbols=["AAPL", "msft"])
-    assert symbols == list(UNIVERSE_TRADEABLE_V1) + ["AAPL"]
+    symbols = resolve_tradeable_symbols(extra_symbols=["PLTR"])
+    assert symbols == list(UNIVERSE_TOP20) + ["PLTR"]

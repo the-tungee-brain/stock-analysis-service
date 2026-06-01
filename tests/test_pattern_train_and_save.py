@@ -42,12 +42,12 @@ def seeded_symbol_data(tmp_path, monkeypatch):
     monkeypatch.setattr("data.paths.RAW_DIR", raw_dir)
     monkeypatch.setattr("data.paths.FEATURES_DIR", features_dir)
 
-    save_raw(_synthetic_ohlcv(), "AAPL")
+    save_raw(_synthetic_ohlcv(rows=600), "AAPL")
     build_and_save_features("AAPL")
 
     return {
         "artifact_dir": artifact_dir,
-        "train_end": pd.Timestamp("2021-06-30"),
+        "train_end": pd.Timestamp("2021-12-31"),
     }
 
 
@@ -66,7 +66,7 @@ def test_train_and_save_writes_model_and_metadata(seeded_symbol_data):
     assert meta_path(artifact_dir).exists()
     assert result["n_rows"] >= 100
     assert result["n_features"] > 0
-    assert result["train_end_date"] <= "2021-06-30"
+    assert result["train_end_date"] <= "2021-12-31"
 
     model, metadata = load_model_artifacts(artifact_dir)
     assert metadata["train_end_date"] == result["train_end_date"]
