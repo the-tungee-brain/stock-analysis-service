@@ -4,7 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
 from typing import Sequence
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from data.symbols import get_training_universe
 from models.pattern_production import (

@@ -49,6 +49,7 @@ jobs:
       - name: Run training pipeline
         env:
           YFINANCE_CACHE_DIR: ${{ runner.temp }}/yfinance-cache
+          PYTHONPATH: .
         run: |
           set -euo pipefail
           CMD=(python scripts/train_tradeable_model.py --universe top20)
