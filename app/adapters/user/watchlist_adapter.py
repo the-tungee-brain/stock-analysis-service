@@ -300,10 +300,17 @@ class WatchlistAdapter:
         try:
             cur = con.cursor()
             cur.execute(
+                f"DELETE FROM {self.item_table} WHERE user_id = :user_id",
+                {"user_id": user_id},
+            )
+            cur.execute(
                 f"DELETE FROM {self.folder_table} WHERE user_id = :user_id",
                 {"user_id": user_id},
             )
             con.commit()
+        except Exception:
+            con.rollback()
+            raise
         finally:
             self.client.release(con)
 
