@@ -103,9 +103,12 @@ class YFinanceAdapter:
         period: str,
         interval: str,
         auto_adjust: bool = True,
+        prepost: bool = False,
     ) -> pd.DataFrame:
         symbol_upper = symbol.strip().upper()
-        cache_key = f"{symbol_upper}|{period}|{interval}|adj={int(auto_adjust)}"
+        cache_key = (
+            f"{symbol_upper}|{period}|{interval}|adj={int(auto_adjust)}|pre={int(prepost)}"
+        )
         cached = self._get_cached(
             self._history_cache,
             cache_key,
@@ -121,6 +124,7 @@ class YFinanceAdapter:
                     period=period,
                     interval=interval,
                     auto_adjust=auto_adjust,
+                    prepost=prepost,
                 )
         except Exception as exc:
             self._log_yahoo_failure(
@@ -173,7 +177,14 @@ class YFinanceAdapter:
         interval: str = "1d",
     ) -> dict:
         symbol_upper = symbol.strip().upper()
-        hist = self.get_history(symbol_upper, period=period, interval=interval)
+        intraday_intervals = {"1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"}
+        use_prepost = interval in intraday_intervals
+        hist = self.get_history(
+            symbol_upper,
+            period=period,
+            interval=interval,
+            prepost=use_prepost,
+        )
         if hist.empty:
             raise ValueError("No data found")
 
@@ -212,11 +223,15 @@ class YFinanceAdapter:
             )
 
         info = self.get_ticker_info(symbol_upper)
+        previous_close = info.get("regularMarketPreviousClose")
+        if previous_close is None:
+            previous_close = info.get("previousClose")
         return {
             "symbol": symbol_upper,
             "name": info.get("longName", symbol_upper),
             "currency": info.get("currency", "USD"),
             "data": data,
+            "previousClose": float(previous_close) if previous_close is not None else None,
         }
 
     def get_recommended_peers(self, symbol: str, *, limit: int = 10) -> list[str]:
