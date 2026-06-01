@@ -22,7 +22,7 @@ class GoogleSignInResponse(BaseModel):
     token_type: str = "bearer"
 
 
-@router.post("/callback")
+@router.post("/callback", response_model=GoogleSignInResponse)
 def auth_google_callback(
     payload: GoogleSignInRequest, user_service: UserService = Depends(get_user_service)
 ):
@@ -73,4 +73,4 @@ def auth_google_callback(
         extra={"email": user.email},
     )
 
-    return GoogleSignInResponse(access_token=access_token)
+    return GoogleSignInResponse(access_token=access_token, token_type="bearer")
