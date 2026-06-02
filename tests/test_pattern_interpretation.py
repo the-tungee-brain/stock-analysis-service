@@ -117,4 +117,7 @@ def test_evidence_summary_compressed():
     evidence = interpretation["evidence"]
     assert evidence["occurrence_count"] == 16
     assert evidence["avg_return_5d"] == 0.006
-    assert len(evidence["summary"]) < 280
+    assert "insight" in evidence
+    assert "NOT been reliable reversal" in evidence["insight"] or "unreliable" in evidence["insight"].lower()
+    assert evidence.get("conditional_note")
+    assert "not a predictive guarantee" in evidence["conditional_note"].lower()

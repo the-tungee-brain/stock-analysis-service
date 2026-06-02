@@ -173,6 +173,10 @@ def _evidence_block(
     stats = _pick_stats(setup_outcome, history)
     if stats is None:
         return {
+            "insight": (
+                "Insufficient matched history on this symbol to frame pattern risk — rely on Model C."
+            ),
+            "conditional_note": None,
             "summary": "Insufficient matched history on this symbol — rely on Model C.",
             "setup_label": setup_outcome.label if setup_outcome else None,
             "occurrence_count": None,
@@ -181,13 +185,23 @@ def _evidence_block(
             "avg_return_20d": None,
         }
 
+    filtered = setup_outcome is not None and setup_outcome.avg_return_5d is not None
+    insight = _evidence_insight(
+        stats=stats,
+        context=context,
+        pattern=pattern,
+        filtered=filtered,
+    )
+    conditional_note = _conditional_note(stats["occurrence_count"])
     summary = _evidence_summary(
         stats=stats,
         context=context,
         pattern=pattern,
-        filtered=setup_outcome is not None and setup_outcome.avg_return_5d is not None,
+        filtered=filtered,
     )
     return {
+        "insight": insight,
+        "conditional_note": conditional_note,
         "summary": summary,
         "setup_label": stats.get("setup_label"),
         "occurrence_count": stats.get("occurrence_count"),
@@ -228,6 +242,83 @@ def _pick_stats(
             "filtered": False,
         }
     return None
+
+
+def _regime_phrase(context: TrendContext) -> str:
+    trend = "strong uptrend" if context.trend_bias == "uptrend" else (
+        "downtrend" if context.trend_bias == "downtrend" else "mixed trend"
+    )
+    rs = context.rs_vs_spy_63d
+    if rs is None:
+        rs = context.rs_vs_spy_21d
+    if rs is not None and rs > 0:
+        return f"{trend} + positive RS"
+    if rs is not None and rs < 0:
+        return f"{trend} + negative RS"
+    return trend
+
+
+def _evidence_insight(
+    *,
+    stats: dict[str, Any],
+    context: TrendContext,
+    pattern: CandlestickPatternHit | None,
+    filtered: bool,
+) -> str:
+    count = int(stats["occurrence_count"])
+    win = stats.get("win_rate_5d")
+    pattern_label = pattern.label if pattern is not None else stats.get("setup_label", "This setup")
+    regime = _regime_phrase(context)
+
+    if pattern is None:
+        return (
+            f"Historical matches in {regime} regimes ({count} samples) describe past context only — "
+            "they do not override Model C."
+        )
+
+    if filtered:
+        setup_phrase = f"{pattern_label} patterns in {regime} regimes"
+    else:
+        setup_phrase = f"{pattern_label} patterns on this symbol"
+
+    if pattern.direction == "bearish" and context.trend_bias == "uptrend" and (context.rs_vs_spy_63d or 0) > 0:
+        return (
+            f"Historically, {setup_phrase} have NOT been reliable reversal signals "
+            "when trend and RS remain strong."
+        )
+
+    if pattern.direction == "bullish" and context.trend_bias == "downtrend":
+        return (
+            f"Historically, {setup_phrase} have rarely produced durable reversals "
+            "without RS improvement."
+        )
+
+    if win is not None and win < 0.45:
+        return (
+            f"Historically, {setup_phrase} have been unreliable standalone signals "
+            "in this conditional setup."
+        )
+
+    if win is not None and win >= 0.55 and pattern.direction != "neutral":
+        return (
+            f"Historically, {setup_phrase} have often aligned with the prevailing "
+            "trend/RS backdrop — contextual confirmation only."
+        )
+
+    return (
+        f"Historically, {setup_phrase} show mixed follow-through — "
+        "use as risk context, not a standalone trigger."
+    )
+
+
+def _conditional_note(count: int | None) -> str | None:
+    if count is None:
+        return None
+    sample = "small sample" if count < 12 else "limited historical sample"
+    return (
+        f"Based on {count} past matches on this symbol ({sample}). "
+        "Conditional statistics — descriptive context only, not a predictive guarantee."
+    )
 
 
 def _evidence_summary(

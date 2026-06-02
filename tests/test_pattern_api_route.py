@@ -151,3 +151,4 @@ def test_pattern_intelligence_returns_payload(pattern_client, auth_headers):
     assert payload["interpretation"]["verdict"]
     assert payload["interpretation"]["signalSummary"]["modelC"]
     assert payload["interpretation"]["evidence"]["summary"]
+    assert payload["interpretation"]["evidence"]["insight"]

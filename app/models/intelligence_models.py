@@ -320,6 +320,8 @@ class PatternSignalSummary(BaseModel):
 class PatternEvidence(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    insight: str
+    conditional_note: str | None = Field(default=None, serialization_alias="conditionalNote")
     summary: str
     setup_label: str | None = Field(default=None, serialization_alias="setupLabel")
     occurrence_count: int | None = Field(default=None, serialization_alias="occurrenceCount")
