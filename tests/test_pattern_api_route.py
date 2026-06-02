@@ -148,10 +148,10 @@ def test_pattern_intelligence_returns_payload(pattern_client, auth_headers):
     assert payload["coreModel"] is not None
     assert payload["scores"]["alignmentState"] in {"confirmed", "conflict", "model_only"}
     assert "primary" in payload["explanation"]["disclaimer"].lower()
-    assert payload["interpretation"]["verdict"]
-    assert payload["interpretation"]["signalState"]["label"]
-    assert payload["interpretation"]["timeframe"]["shortTerm"]["label"]
-    assert payload["interpretation"]["signalSummary"]["modelC"]
-    assert payload["interpretation"]["evidence"]["framing"]
-    assert payload["interpretation"]["evidence"]["summary"]
-    assert payload["interpretation"]["evidence"]["insight"]
+    summary = payload["chartIntelligence"]["summary"]
+    assert summary["outlook"]["label"]
+    assert summary["outlook"]["expectation"]
+    assert summary["keyLevel"]["display"]
+    assert summary["whyThisOutlook"]
+    assert summary["thesis"]
+    assert "interpretation" not in payload

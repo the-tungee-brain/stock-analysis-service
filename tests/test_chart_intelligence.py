@@ -1,4 +1,4 @@
-"""Tests for Chart Intelligence overlays and narrative."""
+"""Tests for Chart Intelligence overlays and analyst summary."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from analysis.pattern_intelligence.chart_analysis import (
 from analysis.pattern_intelligence.chart_intelligence import build_chart_intelligence
 from analysis.pattern_intelligence.scoring import build_pattern_scores
 from analysis.pattern_intelligence.service import build_pattern_intelligence
-from analysis.pattern_intelligence.trend_context import build_trend_context
 from tests.test_pattern_intelligence import build_trend_context_from_frame
 from tests.test_pattern_train_and_save import _synthetic_ohlcv
 
@@ -77,9 +76,10 @@ def test_chart_intelligence_payload_shape():
     assert "annotations" in payload
     assert "highlighted_candles" in payload
     assert "pattern_metadata" in payload
-    assert payload["narrative"]["summary"]
-    assert payload["scorecard"]["rows"]
-    assert payload["scorecard"]["thesis"]["headline"]
+    assert payload["summary"]["outlook"]["label"]
+    assert payload["summary"]["thesis"]
+    assert "scorecard" not in payload
+    assert "narrative" not in payload
 
 
 def test_chart_intelligence_includes_breakout_and_fib_channel_keys():
@@ -164,15 +164,15 @@ def test_build_fib_channel_returns_parallel_lines():
     assert all(line["points"] for line in channel["lines"])
 
 
-def test_service_includes_chart_intelligence():
+def test_service_includes_chart_intelligence_summary():
     ohlcv = _synthetic_ohlcv(rows=400)
     result = build_pattern_intelligence("MSFT", raw=ohlcv)
     assert result.chart_intelligence
-    assert result.chart_intelligence["narrative"]["summary"]
-    assert "scorecard" in result.chart_intelligence
+    assert result.chart_intelligence["summary"]["outlook"]["expectation"]
+    assert result.chart_intelligence["summary"]["why_this_outlook"]
 
 
-def test_pattern_metadata_includes_quality_and_checks():
+def test_pattern_metadata_omits_qualification_checks():
     ohlcv = _synthetic_ohlcv(rows=400)
     as_of = pd.Timestamp(ohlcv.index[-1])
     scan = scan_candlestick_patterns(ohlcv)
@@ -193,6 +193,4 @@ def test_pattern_metadata_includes_quality_and_checks():
     )
     meta = payload["pattern_metadata"][0]
     assert "quality_score" in meta
-    assert meta["quality_score"] >= 0
-    assert meta["qualification_checks"]
-    assert meta["candle_indexes"]
+    assert "qualification_checks" not in meta

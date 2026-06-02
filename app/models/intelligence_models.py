@@ -308,108 +308,48 @@ class PatternExplanation(BaseModel):
     disclaimer: str
 
 
-class PatternSignalSummary(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    model_c: str = Field(serialization_alias="modelC")
-    trend: str
-    relative_strength: str = Field(serialization_alias="relativeStrength")
-    pattern: str | None = None
-    pattern_warning: bool = Field(default=False, serialization_alias="patternWarning")
-
-
-class PatternSignalState(BaseModel):
+class ChartAnalystOutlook(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     label: str
-    probability: float | None = None
-    probability_text: str = Field(serialization_alias="probabilityText")
     tone: str
+    probability: float | None = None
+    probability_display: str | None = Field(
+        default=None, serialization_alias="probabilityDisplay"
+    )
+    expectation: str
+    model_context: str | None = Field(default=None, serialization_alias="modelContext")
     is_benchmark: bool = Field(default=False, serialization_alias="isBenchmark")
     benchmark_notice: str | None = Field(default=None, serialization_alias="benchmarkNotice")
 
 
-class PatternTimeframeSlice(BaseModel):
+class ChartAnalystKeyLevel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     label: str
-    caption: str
+    price: float | None = None
+    level_type: str | None = Field(default=None, serialization_alias="levelType")
+    display: str
+    implication: str
 
 
-class PatternTimeframeInterpretation(BaseModel):
+class ChartAnalystEvidenceBullet(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    short_term: PatternTimeframeSlice = Field(serialization_alias="shortTerm")
-    long_term_trend: PatternTimeframeSlice = Field(serialization_alias="longTermTrend")
-    relative_strength: PatternTimeframeSlice = Field(serialization_alias="relativeStrength")
+    text: str
+    tone: str
 
 
-class PatternAlignmentBlock(BaseModel):
-    state: str
-    headline: str
-    explanation: str
-
-
-class PatternEvidence(BaseModel):
+class ChartAnalystSummary(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    framing: str
-    stats_note: str | None = Field(default=None, serialization_alias="statsNote")
-    insight: str
-    conditional_note: str | None = Field(default=None, serialization_alias="conditionalNote")
-    summary: str
-    setup_label: str | None = Field(default=None, serialization_alias="setupLabel")
-    occurrence_count: int | None = Field(default=None, serialization_alias="occurrenceCount")
-    win_rate_5d: float | None = Field(default=None, serialization_alias="winRate5d")
-    avg_return_5d: float | None = Field(default=None, serialization_alias="avgReturn5d")
-    avg_return_20d: float | None = Field(default=None, serialization_alias="avgReturn20d")
-
-
-class PatternInterpretation(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    signal_state: PatternSignalState = Field(serialization_alias="signalState")
-    timeframe: PatternTimeframeInterpretation
-    alignment: PatternAlignmentBlock | None = None
-    signal_summary: PatternSignalSummary = Field(serialization_alias="signalSummary")
-    verdict: str
-    evidence: PatternEvidence
-
-
-class ChartIntelligenceScoreRow(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    name: str
-    bias: str
-    detail: str
-
-
-class ChartIntelligenceThesis(BaseModel):
-    headline: str
-    action: str
-    detail: str
-
-
-class ChartIntelligenceScorecard(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    rows: list[ChartIntelligenceScoreRow] = Field(default_factory=list)
-    thesis: ChartIntelligenceThesis
-    priority_order: list[str] = Field(
-        default_factory=list, serialization_alias="priorityOrder"
+    outlook: ChartAnalystOutlook
+    key_level: ChartAnalystKeyLevel = Field(serialization_alias="keyLevel")
+    why_this_outlook: list[ChartAnalystEvidenceBullet] = Field(
+        serialization_alias="whyThisOutlook"
     )
-
-
-class ChartIntelligenceNarrative(BaseModel):
-    summary: str
-    action: str
-    headline: str
+    thesis: str
     disclaimer: str
-
-
-class ChartIntelligenceQualificationCheck(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    label: str
-    passed: bool
 
 
 class ChartIntelligencePatternMetadata(BaseModel):
@@ -425,10 +365,6 @@ class ChartIntelligencePatternMetadata(BaseModel):
     )
     start_date: str = Field(default="", serialization_alias="startDate")
     end_date: str = Field(default="", serialization_alias="endDate")
-    qualification_checks: list[ChartIntelligenceQualificationCheck] = Field(
-        default_factory=list, serialization_alias="qualificationChecks"
-    )
-    explanation: str = ""
 
 
 class ChartIntelligence(BaseModel):
@@ -452,19 +388,7 @@ class ChartIntelligence(BaseModel):
     pattern_metadata: list[ChartIntelligencePatternMetadata] = Field(
         default_factory=list, serialization_alias="patternMetadata"
     )
-    structure: dict[str, Any] = Field(default_factory=dict)
-    moving_averages: dict[str, Any] = Field(
-        default_factory=dict, serialization_alias="movingAverages"
-    )
-    volume: dict[str, Any] = Field(default_factory=dict)
-    support_resistance_summary: str = Field(
-        default="", serialization_alias="supportResistanceSummary"
-    )
-    relative_strength: dict[str, Any] = Field(
-        default_factory=dict, serialization_alias="relativeStrength"
-    )
-    narrative: ChartIntelligenceNarrative
-    scorecard: ChartIntelligenceScorecard
+    summary: ChartAnalystSummary
 
 
 class PatternIntelligence(BaseModel):
@@ -488,7 +412,6 @@ class PatternIntelligence(BaseModel):
     )
     core_model: dict | None = Field(default=None, serialization_alias="coreModel")
     explanation: PatternExplanation
-    interpretation: PatternInterpretation
     chart_intelligence: ChartIntelligence = Field(serialization_alias="chartIntelligence")
     is_benchmark: bool = Field(default=False, serialization_alias="isBenchmark")
 

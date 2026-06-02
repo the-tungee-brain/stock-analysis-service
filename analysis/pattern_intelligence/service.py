@@ -21,7 +21,6 @@ from analysis.pattern_intelligence.historical_analytics import (
     compute_setup_outcome_stats,
 )
 from analysis.pattern_intelligence.chart_intelligence import build_chart_intelligence
-from analysis.pattern_intelligence.interpretation import build_pattern_interpretation
 from analysis.pattern_intelligence.scoring import PatternScoreBreakdown, build_pattern_scores
 from analysis.pattern_intelligence.trend_context import TrendContext, build_trend_context
 from models.prediction_service import LoadedModel, predict_for_symbol
@@ -40,7 +39,6 @@ class PatternIntelligenceResult:
     setup_outcome: dict[str, Any] | None
     core_model: dict[str, Any] | None
     explanation: dict[str, str]
-    interpretation: dict[str, Any]
     chart_intelligence: dict[str, Any]
     is_benchmark: bool = False
 
@@ -99,16 +97,6 @@ def build_pattern_intelligence(
         model_prediction=(core or {}).get("prediction"),
         ranking_score=(core or {}).get("ranking_score"),
     )
-    interpretation = build_pattern_interpretation(
-        symbol=symbol_upper,
-        pattern=primary,
-        context=context,
-        scores=scores,
-        setup_outcome=setup_outcome,
-        history=history,
-        model_prediction=(core or {}).get("prediction") if core else None,
-        ranking_score=(core or {}).get("ranking_score") if core else None,
-    )
     chart_intel = build_chart_intelligence(
         symbol=symbol_upper,
         ohlcv=ohlcv,
@@ -131,7 +119,6 @@ def build_pattern_intelligence(
         setup_outcome=_setup_outcome_dict(setup_outcome),
         core_model=core,
         explanation=explanation,
-        interpretation=interpretation,
         chart_intelligence=chart_intel,
         is_benchmark=is_model_benchmark_symbol(symbol_upper),
     )

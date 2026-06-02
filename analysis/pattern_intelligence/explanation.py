@@ -8,7 +8,6 @@ from analysis.pattern_intelligence.historical_analytics import (
     PatternHistoricalStats,
     SetupOutcomeStats,
 )
-from analysis.pattern_intelligence.interpretation import build_pattern_interpretation
 from analysis.pattern_intelligence.scoring import PatternScoreBreakdown
 from analysis.pattern_intelligence.trend_context import TrendContext
 
@@ -32,22 +31,19 @@ def build_pattern_explanation(
     ranking_score: float | None,
 ) -> dict[str, str]:
     """Return structured NL fields for API clients."""
-    interpretation = build_pattern_interpretation(
-        symbol=symbol,
-        pattern=pattern,
-        context=context,
-        scores=scores,
-        setup_outcome=setup_outcome,
-        history=history,
-        model_prediction=model_prediction,
-        ranking_score=ranking_score,
-    )
     core_line = _core_model_line(
         symbol,
         model_label,
         model_prediction,
         ranking_score,
     )
+    historical_text = _historical_context_text(
+        history=history,
+        setup_outcome=setup_outcome,
+        pattern=pattern,
+    )
+    confidence = _confidence_text(scores)
+
     if pattern is None:
         return {
             "headline": f"No recent candlestick pattern on {symbol.upper()}",
@@ -55,9 +51,9 @@ def build_pattern_explanation(
                 "No classic candlestick formation was detected in the last few sessions."
             ),
             "trend_context": _trend_context_text(context),
-            "historical_context": interpretation["evidence"]["summary"],
+            "historical_context": historical_text,
             "model_context": core_line,
-            "confidence_explanation": interpretation["verdict"],
+            "confidence_explanation": confidence,
             "disclaimer": _disclaimer(),
         }
 
@@ -67,18 +63,40 @@ def build_pattern_explanation(
         f"formation quality {pattern.strength:.0%}."
     )
     trend_text = _trend_context_text(context)
-    history_text = interpretation["evidence"]["summary"]
     alignment = _alignment_text(pattern, model_prediction, scores.model_alignment)
 
     return {
         "headline": headline,
         "pattern_summary": pattern_summary,
         "trend_context": trend_text,
-        "historical_context": history_text,
+        "historical_context": historical_text,
         "model_context": f"{core_line} {alignment}".strip(),
-        "confidence_explanation": interpretation["verdict"],
+        "confidence_explanation": confidence,
         "disclaimer": _disclaimer(),
     }
+
+
+def _historical_context_text(
+    *,
+    history: PatternHistoricalStats | None,
+    setup_outcome: SetupOutcomeStats | None,
+    pattern: CandlestickPatternHit | None,
+) -> str:
+    if setup_outcome is not None and setup_outcome.occurrence_count >= 3:
+        return (
+            f"In similar setups ({setup_outcome.label}), this pattern occurred "
+            f"{setup_outcome.occurrence_count} times with average 5-day return "
+            f"{_pct(setup_outcome.avg_return_5d)} and win rate "
+            f"{_pct(setup_outcome.win_rate_5d)}."
+        )
+    if pattern is not None and history is not None:
+        return _historical_text(history, pattern)
+    if pattern is not None:
+        return (
+            f"Insufficient {pattern.label.lower()} history on this symbol for robust "
+            "forward-return statistics."
+        )
+    return "No pattern-specific historical statistics available for this symbol."
 
 
 def _core_model_line(
