@@ -317,9 +317,39 @@ class PatternSignalSummary(BaseModel):
     pattern_warning: bool = Field(default=False, serialization_alias="patternWarning")
 
 
+class PatternSignalState(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    label: str
+    probability: float | None = None
+    probability_text: str = Field(serialization_alias="probabilityText")
+    tone: str
+
+
+class PatternTimeframeSlice(BaseModel):
+    label: str
+    caption: str
+
+
+class PatternTimeframeInterpretation(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    short_term: PatternTimeframeSlice = Field(serialization_alias="shortTerm")
+    long_term_trend: PatternTimeframeSlice = Field(serialization_alias="longTermTrend")
+    relative_strength: PatternTimeframeSlice = Field(serialization_alias="relativeStrength")
+
+
+class PatternAlignmentBlock(BaseModel):
+    state: str
+    headline: str
+    explanation: str
+
+
 class PatternEvidence(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    framing: str
+    stats_note: str | None = Field(default=None, serialization_alias="statsNote")
     insight: str
     conditional_note: str | None = Field(default=None, serialization_alias="conditionalNote")
     summary: str
@@ -333,6 +363,9 @@ class PatternEvidence(BaseModel):
 class PatternInterpretation(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    signal_state: PatternSignalState = Field(serialization_alias="signalState")
+    timeframe: PatternTimeframeInterpretation
+    alignment: PatternAlignmentBlock | None = None
     signal_summary: PatternSignalSummary = Field(serialization_alias="signalSummary")
     verdict: str
     evidence: PatternEvidence

@@ -53,7 +53,52 @@ def _evening_star() -> CandlestickPatternHit:
     )
 
 
-def test_three_layer_structure():
+def _bearish_engulfing() -> CandlestickPatternHit:
+    return CandlestickPatternHit(
+        pattern_id="bearish_engulfing",
+        label="Bearish Engulfing",
+        direction="bearish",
+        strength=0.75,
+        as_of_date="2024-06-01",
+        bar_index=0,
+    )
+
+
+def test_signal_state_and_timeframe_layers():
+    interpretation = build_pattern_interpretation(
+        pattern=_evening_star(),
+        context=_context(),
+        scores=_scores(),
+        setup_outcome=None,
+        history=None,
+        model_prediction=0,
+        ranking_score=0.453,
+    )
+    assert interpretation["signal_state"]["label"] == "Slight Bearish"
+    assert interpretation["signal_state"]["probability"] == 0.453
+    assert "outperforming SPY" in interpretation["signal_state"]["probability_text"]
+    assert interpretation["timeframe"]["short_term"]["label"] == "Slight Bearish"
+    assert interpretation["timeframe"]["long_term_trend"]["label"] == "Bullish"
+    assert interpretation["timeframe"]["relative_strength"]["label"] == "Moderately Positive"
+
+
+def test_verdict_model_bearish_trend_bullish():
+    interpretation = build_pattern_interpretation(
+        pattern=_bearish_engulfing(),
+        context=_context(),
+        scores=_scores(),
+        setup_outcome=None,
+        history=None,
+        model_prediction=0,
+        ranking_score=0.453,
+    )
+    assert interpretation["verdict"] == "Near-term weakness inside a longer-term uptrend."
+    assert interpretation["alignment"] is not None
+    assert interpretation["alignment"]["headline"] == "Signal Conflict"
+    assert "5-day model is slight bearish" in interpretation["alignment"]["explanation"].lower()
+
+
+def test_verdict_bullish_continuation():
     interpretation = build_pattern_interpretation(
         pattern=_evening_star(),
         context=_context(),
@@ -61,17 +106,10 @@ def test_three_layer_structure():
         setup_outcome=None,
         history=None,
         model_prediction=1,
-        ranking_score=0.506,
+        ranking_score=0.62,
     )
-    assert "signal_summary" in interpretation
-    assert "verdict" in interpretation
-    assert "evidence" in interpretation
-    assert "Bullish" in interpretation["signal_summary"]["model_c"]
-    assert "50.6%" in interpretation["signal_summary"]["model_c"]
-    assert "Evening Star" in interpretation["signal_summary"]["pattern"]
-    assert "dominates bearish pattern" in interpretation["verdict"]
-    assert "trader_summary" not in interpretation
-    assert "confidence_contributors" not in interpretation
+    assert interpretation["verdict"] == "Bullish continuation setup."
+    assert interpretation["signal_state"]["label"] == "Bullish"
 
 
 def test_model_only_signal_summary():
@@ -89,35 +127,35 @@ def test_model_only_signal_summary():
         ranking_score=0.62,
     )
     assert interpretation["signal_summary"]["pattern"] is None
-    assert "follow Model C" in interpretation["verdict"]
+    assert "Bullish continuation" in interpretation["verdict"]
 
 
-def test_evidence_summary_compressed():
+def test_evidence_framing_when_history_disagrees_with_model():
     setup = SetupOutcomeStats(
-        label="Evening Star · Above SMA200 · RS leading SPY",
-        pattern_label="Evening Star",
+        label="Bearish Engulfing · Above SMA200 · RS leading SPY",
+        pattern_label="Bearish Engulfing",
         trend_label="Above SMA200",
         rs_label="RS leading SPY",
-        occurrence_count=16,
+        occurrence_count=26,
         pattern_only_count=40,
-        avg_return_5d=0.006,
-        avg_return_20d=0.008,
-        win_rate_5d=0.533,
-        win_rate_20d=0.5,
+        avg_return_5d=0.012,
+        avg_return_20d=0.018,
+        win_rate_5d=0.76,
+        win_rate_20d=0.7,
         max_drawdown_20d=-0.04,
     )
     interpretation = build_pattern_interpretation(
-        pattern=_evening_star(),
+        pattern=_bearish_engulfing(),
         context=_context(),
         scores=_scores(),
         setup_outcome=setup,
         history=None,
-        model_prediction=1,
+        model_prediction=0,
+        ranking_score=0.453,
     )
     evidence = interpretation["evidence"]
-    assert evidence["occurrence_count"] == 16
-    assert evidence["avg_return_5d"] == 0.006
-    assert "insight" in evidence
-    assert "NOT been reliable reversal" in evidence["insight"] or "unreliable" in evidence["insight"].lower()
+    assert evidence["occurrence_count"] == 26
+    assert "positive returns despite" in evidence["framing"].lower()
+    assert evidence["stats_note"]
+    assert "may disagree" in evidence["stats_note"].lower()
     assert evidence.get("conditional_note")
-    assert "not a predictive guarantee" in evidence["conditional_note"].lower()
