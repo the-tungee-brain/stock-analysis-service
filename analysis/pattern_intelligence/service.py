@@ -19,6 +19,7 @@ from analysis.pattern_intelligence.historical_analytics import (
     compute_pattern_historical_stats,
     compute_setup_outcome_stats,
 )
+from analysis.pattern_intelligence.interpretation import build_pattern_interpretation
 from analysis.pattern_intelligence.scoring import PatternScoreBreakdown, build_pattern_scores
 from analysis.pattern_intelligence.trend_context import TrendContext, build_trend_context
 from models.prediction_service import LoadedModel, predict_for_symbol
@@ -37,6 +38,7 @@ class PatternIntelligenceResult:
     setup_outcome: dict[str, Any] | None
     core_model: dict[str, Any] | None
     explanation: dict[str, str]
+    interpretation: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -88,9 +90,18 @@ def build_pattern_intelligence(
         context=context,
         scores=scores,
         history=history,
+        setup_outcome=setup_outcome,
         model_label=(core or {}).get("model_label"),
         model_prediction=(core or {}).get("prediction"),
         ranking_score=(core or {}).get("ranking_score"),
+    )
+    interpretation = build_pattern_interpretation(
+        pattern=primary,
+        context=context,
+        scores=scores,
+        setup_outcome=setup_outcome,
+        history=history,
+        model_prediction=(core or {}).get("prediction") if core else None,
     )
 
     return PatternIntelligenceResult(
@@ -104,6 +115,7 @@ def build_pattern_intelligence(
         setup_outcome=_setup_outcome_dict(setup_outcome),
         core_model=core,
         explanation=explanation,
+        interpretation=interpretation,
     )
 
 

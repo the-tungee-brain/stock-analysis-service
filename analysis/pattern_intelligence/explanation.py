@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from analysis.pattern_intelligence.candlestick_engine import CandlestickPatternHit
-from analysis.pattern_intelligence.historical_analytics import PatternHistoricalStats
+from analysis.pattern_intelligence.historical_analytics import (
+    PatternHistoricalStats,
+    SetupOutcomeStats,
+)
+from analysis.pattern_intelligence.interpretation import build_pattern_interpretation
 from analysis.pattern_intelligence.scoring import PatternScoreBreakdown
 from analysis.pattern_intelligence.trend_context import TrendContext
 
@@ -21,11 +25,20 @@ def build_pattern_explanation(
     context: TrendContext,
     scores: PatternScoreBreakdown,
     history: PatternHistoricalStats | None,
+    setup_outcome: SetupOutcomeStats | None = None,
     model_label: str | None,
     model_prediction: int | None,
     ranking_score: float | None,
 ) -> dict[str, str]:
     """Return structured NL fields for API clients."""
+    interpretation = build_pattern_interpretation(
+        pattern=pattern,
+        context=context,
+        scores=scores,
+        setup_outcome=setup_outcome,
+        history=history,
+        model_prediction=model_prediction,
+    )
     core_line = _core_model_line(model_label, model_prediction, ranking_score)
     if pattern is None:
         return {
@@ -34,12 +47,10 @@ def build_pattern_explanation(
                 "No classic candlestick formation was detected in the last few sessions."
             ),
             "trend_context": _trend_context_text(context),
-            "historical_context": "No pattern-specific history to cite.",
+            "historical_context": interpretation.get("historical_read")
+            or "No pattern-specific history to cite.",
             "model_context": core_line,
-            "confidence_explanation": (
-                "Confidence reflects the core Relative Strength + Trend model only; "
-                "patterns are absent and do not override the ranking signal."
-            ),
+            "confidence_explanation": interpretation["actionable_verdict"],
             "disclaimer": _disclaimer(),
         }
 
@@ -49,9 +60,8 @@ def build_pattern_explanation(
         f"formation quality {pattern.strength:.0%}."
     )
     trend_text = _trend_context_text(context)
-    history_text = _historical_text(history, pattern)
+    history_text = interpretation.get("historical_read") or _historical_text(history, pattern)
     alignment = _alignment_text(pattern, model_prediction, scores.model_alignment)
-    confidence_text = _confidence_text(scores)
 
     return {
         "headline": headline,
@@ -59,7 +69,7 @@ def build_pattern_explanation(
         "trend_context": trend_text,
         "historical_context": history_text,
         "model_context": f"{core_line} {alignment}".strip(),
-        "confidence_explanation": confidence_text,
+        "confidence_explanation": interpretation["actionable_verdict"],
         "disclaimer": _disclaimer(),
     }
 

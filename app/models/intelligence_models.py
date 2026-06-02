@@ -307,6 +307,44 @@ class PatternExplanation(BaseModel):
     disclaimer: str
 
 
+class PatternVerdictBullet(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    tone: str
+    text: str
+
+
+class PatternFinalVerdict(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    title: str
+    bullets: list[PatternVerdictBullet]
+    conclusion: str
+
+
+class PatternConfidenceContributor(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    key: str
+    label: str
+    weight_pct: int = Field(serialization_alias="weightPct")
+    qualitative: str
+    emphasized: bool
+    score: float
+
+
+class PatternInterpretation(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    actionable_verdict: str = Field(serialization_alias="actionableVerdict")
+    trader_summary: str = Field(serialization_alias="traderSummary")
+    final_verdict: PatternFinalVerdict = Field(serialization_alias="finalVerdict")
+    confidence_contributors: list[PatternConfidenceContributor] = Field(
+        serialization_alias="confidenceContributors"
+    )
+    historical_read: str | None = Field(default=None, serialization_alias="historicalRead")
+
+
 class PatternIntelligence(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -328,6 +366,7 @@ class PatternIntelligence(BaseModel):
     )
     core_model: dict | None = Field(default=None, serialization_alias="coreModel")
     explanation: PatternExplanation
+    interpretation: PatternInterpretation
 
 
 class PatternTrendForecast(BaseModel):
