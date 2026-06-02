@@ -503,3 +503,235 @@ def _dist_pct(close: float, sma: float | None) -> float | None:
     if sma is None or sma == 0:
         return None
     return round((close / sma - 1.0) * 100.0, 1)
+
+
+BreakoutKind = Literal[
+    "failed_breakout",
+    "failed_breakdown",
+    "confirmed_breakout",
+    "confirmed_breakdown",
+]
+
+FIB_CHANNEL_RATIOS = (0.0, 0.382, 0.5, 0.618, 1.0)
+
+
+@dataclass(frozen=True)
+class BreakoutEvent:
+    kind: BreakoutKind
+    bar_index: int
+    date: str
+    price: float
+    zone_label: str
+    label: str
+    volume_ratio: float | None
+
+
+def detect_breakout_events(
+    ohlcv: pd.DataFrame,
+    supports: list[PriceZone],
+    resistances: list[PriceZone],
+    *,
+    lookback_bars: int = 60,
+    follow_through_bars: int = 5,
+    recent_only_bars: int = 25,
+) -> list[BreakoutEvent]:
+    """Detect confirmed and failed breaks of nearby support/resistance zones."""
+    if len(ohlcv) < 25:
+        return []
+
+    high = ohlcv["high"].to_numpy(dtype=float)
+    low = ohlcv["low"].to_numpy(dtype=float)
+    close = ohlcv["close"].to_numpy(dtype=float)
+    volume = ohlcv["volume"].astype(float)
+    vol_ma20 = volume.rolling(20).mean()
+    start = max(0, len(ohlcv) - lookback_bars)
+    min_bar = max(0, len(ohlcv) - recent_only_bars)
+    events: list[BreakoutEvent] = []
+
+    def volume_ratio_at(bar_index: int) -> float | None:
+        baseline = vol_ma20.iloc[bar_index]
+        if baseline is None or pd.isna(baseline) or baseline <= 0:
+            return None
+        return float(volume.iloc[bar_index] / baseline)
+
+    def scan_resistance(zone: PriceZone) -> BreakoutEvent | None:
+        level = zone.price_high
+        for pierce_idx in range(len(ohlcv) - 2, start, -1):
+            if high[pierce_idx] <= level * 1.001:
+                continue
+            end_idx = min(pierce_idx + follow_through_bars, len(ohlcv) - 1)
+            for check_idx in range(pierce_idx + 1, end_idx + 1):
+                if close[check_idx] < level:
+                    if check_idx < min_bar:
+                        return None
+                    return BreakoutEvent(
+                        kind="failed_breakout",
+                        bar_index=check_idx,
+                        date=_date_str(ohlcv.index, check_idx),
+                        price=round(float(close[check_idx]), 2),
+                        zone_label=zone.label,
+                        label="Failed breakout",
+                        volume_ratio=volume_ratio_at(check_idx),
+                    )
+            if close[end_idx] > level * 1.002:
+                if end_idx < min_bar:
+                    return None
+                return BreakoutEvent(
+                    kind="confirmed_breakout",
+                    bar_index=end_idx,
+                    date=_date_str(ohlcv.index, end_idx),
+                    price=round(float(close[end_idx]), 2),
+                    zone_label=zone.label,
+                    label="Breakout",
+                    volume_ratio=volume_ratio_at(end_idx),
+                )
+        return None
+
+    def scan_support(zone: PriceZone) -> BreakoutEvent | None:
+        level = zone.price_low
+        for pierce_idx in range(len(ohlcv) - 2, start, -1):
+            if low[pierce_idx] >= level * 0.999:
+                continue
+            end_idx = min(pierce_idx + follow_through_bars, len(ohlcv) - 1)
+            for check_idx in range(pierce_idx + 1, end_idx + 1):
+                if close[check_idx] > level:
+                    if check_idx < min_bar:
+                        return None
+                    return BreakoutEvent(
+                        kind="failed_breakdown",
+                        bar_index=check_idx,
+                        date=_date_str(ohlcv.index, check_idx),
+                        price=round(float(close[check_idx]), 2),
+                        zone_label=zone.label,
+                        label="Failed breakdown",
+                        volume_ratio=volume_ratio_at(check_idx),
+                    )
+            if close[end_idx] < level * 0.998:
+                if end_idx < min_bar:
+                    return None
+                return BreakoutEvent(
+                    kind="confirmed_breakdown",
+                    bar_index=end_idx,
+                    date=_date_str(ohlcv.index, end_idx),
+                    price=round(float(close[end_idx]), 2),
+                    zone_label=zone.label,
+                    label="Breakdown",
+                    volume_ratio=volume_ratio_at(end_idx),
+                )
+        return None
+
+    for zone in resistances[:2]:
+        event = scan_resistance(zone)
+        if event:
+            events.append(event)
+    for zone in supports[:2]:
+        event = scan_support(zone)
+        if event:
+            events.append(event)
+
+    return events
+
+
+def build_fib_channel(
+    ohlcv: pd.DataFrame,
+    structure: TrendStructure,
+) -> dict[str, Any] | None:
+    """Build parallel fib-style channel rails from recent swing structure."""
+    swings = list(structure.swing_points)
+    lows = [s for s in swings if s.kind == "low"]
+    highs = [s for s in swings if s.kind == "high"]
+    if len(lows) < 2 and len(highs) < 2:
+        return None
+
+    end_idx = len(ohlcv) - 1
+    use_downtrend = structure.bias == "downtrend" and len(highs) >= 2
+
+    if use_downtrend:
+        base_a, base_b = highs[-2], highs[-1]
+        anchor_candidates = [
+            low for low in lows if base_a.bar_index <= low.bar_index <= end_idx
+        ]
+        if not anchor_candidates:
+            return None
+        anchor = min(anchor_candidates, key=lambda point: point.price)
+    else:
+        if len(lows) < 2:
+            return None
+        base_a, base_b = lows[-2], lows[-1]
+        anchor_candidates = [
+            high for high in highs if base_a.bar_index <= high.bar_index <= end_idx
+        ]
+        if not anchor_candidates:
+            return None
+        anchor = max(anchor_candidates, key=lambda point: point.price)
+
+    if base_b.bar_index <= base_a.bar_index:
+        return None
+
+    slope = (base_b.price - base_a.price) / (base_b.bar_index - base_a.bar_index)
+
+    def rail_price(bar_index: int) -> float:
+        return base_a.price + slope * (bar_index - base_a.bar_index)
+
+    if use_downtrend:
+        width = rail_price(anchor.bar_index) - anchor.price
+        if width <= 0:
+            return None
+    else:
+        width = anchor.price - rail_price(anchor.bar_index)
+        if width <= 0:
+            return None
+
+    start_idx = base_a.bar_index
+    sample_indexes = sorted(
+        {
+            start_idx,
+            end_idx,
+            *range(start_idx, end_idx + 1, max(1, (end_idx - start_idx) // 40)),
+        }
+    )
+
+    lines: list[dict[str, Any]] = []
+    for ratio in FIB_CHANNEL_RATIOS:
+        points: list[dict[str, Any]] = []
+        for bar_index in sample_indexes:
+            base = rail_price(bar_index)
+            price = base - width * ratio if use_downtrend else base + width * ratio
+            points.append(
+                {
+                    "date": _date_str(ohlcv.index, bar_index),
+                    "price": round(price, 2),
+                }
+            )
+        pct_label = "100%" if ratio >= 1 else f"{ratio * 100:.1f}".rstrip("0").rstrip(".") + "%"
+        lines.append(
+            {
+                "label": f"Fib {pct_label}",
+                "style": "fib_channel",
+                "ratio": ratio,
+                "points": points,
+            }
+        )
+
+    summary = (
+        "Parallel fib channel anchored to swing highs — price testing upper rail."
+        if use_downtrend
+        else "Parallel fib channel anchored to higher lows — watch mid-channel support."
+    )
+    return {
+        "bias": structure.bias,
+        "summary": summary,
+        "lines": lines,
+    }
+
+
+def breakout_event_dict(event: BreakoutEvent) -> dict[str, Any]:
+    return {
+        "kind": event.kind,
+        "bar_index": event.bar_index,
+        "date": event.date,
+        "price": event.price,
+        "zone_label": event.zone_label,
+        "label": event.label,
+        "volume_ratio": event.volume_ratio,
+    }

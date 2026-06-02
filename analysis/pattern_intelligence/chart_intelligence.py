@@ -14,6 +14,9 @@ from analysis.pattern_intelligence.chart_analysis import (
     analyze_moving_averages,
     analyze_trend_structure,
     analyze_volume,
+    breakout_event_dict,
+    build_fib_channel,
+    detect_breakout_events,
     find_support_resistance_zones,
 )
 from analysis.pattern_intelligence.chart_pattern_meta import build_pattern_metadata
@@ -81,12 +84,44 @@ def build_chart_intelligence(
         pattern_metadata=pattern_metadata,
     )
 
+    fib_channel = build_fib_channel(ohlcv, structure)
+    fib_lines = (fib_channel or {}).get("lines") or []
+    if fib_lines:
+        trendlines = list(overlays["trendlines"])
+        trendlines.extend(fib_lines)
+        overlays = {**overlays, "trendlines": trendlines}
+
+    breakout_events = detect_breakout_events(ohlcv, supports, resistances)
+    annotations = list(overlays["annotations"])
+    for event in breakout_events:
+        direction = (
+            "bearish"
+            if event.kind in {"failed_breakout", "confirmed_breakdown"}
+            else "bullish"
+        )
+        annotations.append(
+            {
+                "type": "breakout",
+                "breakout_kind": event.kind,
+                "bar_index": event.bar_index,
+                "date": event.date,
+                "price": event.price,
+                "label": event.label,
+                "direction": direction,
+                "position": "aboveBar"
+                if event.kind in {"failed_breakout", "confirmed_breakout"}
+                else "belowBar",
+            }
+        )
+
     return {
         "trendlines": overlays["trendlines"],
         "support_zones": overlays["support_zones"],
         "resistance_zones": overlays["resistance_zones"],
-        "annotations": overlays["annotations"],
+        "annotations": annotations,
         "highlighted_candles": overlays["highlighted_candles"],
+        "breakout_events": [breakout_event_dict(event) for event in breakout_events],
+        "fib_channel": fib_channel,
         "pattern_metadata": pattern_metadata,
         "structure": _structure_dict(structure),
         "moving_averages": _ma_dict(ma_ctx),

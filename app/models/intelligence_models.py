@@ -445,6 +445,10 @@ class ChartIntelligence(BaseModel):
     highlighted_candles: list[dict[str, Any]] = Field(
         default_factory=list, serialization_alias="highlightedCandles"
     )
+    breakout_events: list[dict[str, Any]] = Field(
+        default_factory=list, serialization_alias="breakoutEvents"
+    )
+    fib_channel: dict[str, Any] | None = Field(default=None, serialization_alias="fibChannel")
     pattern_metadata: list[ChartIntelligencePatternMetadata] = Field(
         default_factory=list, serialization_alias="patternMetadata"
     )
