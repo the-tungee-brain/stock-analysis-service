@@ -1,0 +1,115 @@
+"""Tests for Chart Intelligence overlays and narrative."""
+
+from __future__ import annotations
+
+import pandas as pd
+
+from analysis.pattern_intelligence.candlestick_engine import (
+    active_patterns_on_date,
+    scan_candlestick_patterns,
+)
+from analysis.pattern_intelligence.chart_analysis import (
+    analyze_moving_averages,
+    analyze_trend_structure,
+    find_support_resistance_zones,
+)
+from analysis.pattern_intelligence.chart_intelligence import build_chart_intelligence
+from analysis.pattern_intelligence.scoring import build_pattern_scores
+from analysis.pattern_intelligence.service import build_pattern_intelligence
+from analysis.pattern_intelligence.trend_context import build_trend_context
+from tests.test_pattern_intelligence import build_trend_context_from_frame
+from tests.test_pattern_train_and_save import _synthetic_ohlcv
+
+
+def test_trend_structure_detects_swings():
+    ohlcv = _synthetic_ohlcv(rows=400)
+    structure = analyze_trend_structure(ohlcv)
+    assert structure.bias in {"uptrend", "downtrend", "mixed"}
+    assert structure.summary
+    assert len(structure.swing_points) >= 1
+
+
+def test_support_resistance_zones_return_levels():
+    ohlcv = _synthetic_ohlcv(rows=400)
+    supports, resistances = find_support_resistance_zones(ohlcv)
+    assert isinstance(supports, list)
+    assert isinstance(resistances, list)
+
+
+def test_moving_average_context_includes_sma20():
+    ohlcv = _synthetic_ohlcv(rows=400)
+    ma = analyze_moving_averages(ohlcv)
+    assert ma.sma_20 is not None
+    assert ma.sma_50 is not None
+    assert ma.sma_200 is not None
+    assert "sma20" in ma.sma_series
+
+
+def test_chart_intelligence_payload_shape():
+    ohlcv = _synthetic_ohlcv(rows=400)
+    as_of = pd.Timestamp(ohlcv.index[-1])
+    scan = scan_candlestick_patterns(ohlcv)
+    active = active_patterns_on_date(scan, as_of)
+    primary = active[0] if active else None
+    context = build_trend_context_from_frame(ohlcv)
+    scores = build_pattern_scores(
+        pattern=primary,
+        context=context,
+        model_prediction=1,
+        ranking_score=0.62,
+    )
+
+    payload = build_chart_intelligence(
+        symbol="MSFT",
+        ohlcv=ohlcv,
+        pattern=primary,
+        active_patterns=active,
+        context=context,
+        scores=scores,
+        model_prediction=1,
+        ranking_score=0.62,
+    )
+
+    assert "trendlines" in payload
+    assert "support_zones" in payload
+    assert "resistance_zones" in payload
+    assert "annotations" in payload
+    assert "highlighted_candles" in payload
+    assert "pattern_metadata" in payload
+    assert payload["narrative"]["summary"]
+    assert payload["scorecard"]["rows"]
+    assert payload["scorecard"]["thesis"]["headline"]
+
+
+def test_service_includes_chart_intelligence():
+    ohlcv = _synthetic_ohlcv(rows=400)
+    result = build_pattern_intelligence("MSFT", raw=ohlcv)
+    assert result.chart_intelligence
+    assert result.chart_intelligence["narrative"]["summary"]
+    assert "scorecard" in result.chart_intelligence
+
+
+def test_pattern_metadata_includes_quality_and_checks():
+    ohlcv = _synthetic_ohlcv(rows=400)
+    as_of = pd.Timestamp(ohlcv.index[-1])
+    scan = scan_candlestick_patterns(ohlcv)
+    active = active_patterns_on_date(scan, as_of)
+    if not active:
+        return
+    context = build_trend_context_from_frame(ohlcv)
+    scores = build_pattern_scores(pattern=active[0], context=context, model_prediction=1)
+    payload = build_chart_intelligence(
+        symbol="MSFT",
+        ohlcv=ohlcv,
+        pattern=active[0],
+        active_patterns=active,
+        context=context,
+        scores=scores,
+        model_prediction=1,
+        ranking_score=0.62,
+    )
+    meta = payload["pattern_metadata"][0]
+    assert "quality_score" in meta
+    assert meta["quality_score"] >= 0
+    assert meta["qualification_checks"]
+    assert meta["candle_indexes"]

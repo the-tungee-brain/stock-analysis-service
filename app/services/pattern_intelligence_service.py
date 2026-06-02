@@ -23,6 +23,7 @@ def build_pattern_intelligence_payload(
 
 def pattern_intelligence_from_dict(payload: dict[str, Any]) -> PatternIntelligence:
     from app.models.intelligence_models import (
+        ChartIntelligence,
         PatternExplanation,
         PatternHistoricalStats,
         PatternIntelligenceScores,
@@ -73,6 +74,7 @@ def pattern_intelligence_from_dict(payload: dict[str, Any]) -> PatternIntelligen
         core_model=payload.get("core_model"),
         explanation=PatternExplanation(**explanation_snake),
         interpretation=PatternInterpretation(**payload["interpretation"]),
+        chart_intelligence=ChartIntelligence(**payload["chart_intelligence"]),
         is_benchmark=bool(payload.get("is_benchmark", False)),
     )
 

@@ -20,6 +20,7 @@ from analysis.pattern_intelligence.historical_analytics import (
     compute_pattern_historical_stats,
     compute_setup_outcome_stats,
 )
+from analysis.pattern_intelligence.chart_intelligence import build_chart_intelligence
 from analysis.pattern_intelligence.interpretation import build_pattern_interpretation
 from analysis.pattern_intelligence.scoring import PatternScoreBreakdown, build_pattern_scores
 from analysis.pattern_intelligence.trend_context import TrendContext, build_trend_context
@@ -40,6 +41,7 @@ class PatternIntelligenceResult:
     core_model: dict[str, Any] | None
     explanation: dict[str, str]
     interpretation: dict[str, Any]
+    chart_intelligence: dict[str, Any]
     is_benchmark: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -107,6 +109,16 @@ def build_pattern_intelligence(
         model_prediction=(core or {}).get("prediction") if core else None,
         ranking_score=(core or {}).get("ranking_score") if core else None,
     )
+    chart_intel = build_chart_intelligence(
+        symbol=symbol_upper,
+        ohlcv=ohlcv,
+        pattern=primary,
+        active_patterns=active,
+        context=context,
+        scores=scores,
+        model_prediction=(core or {}).get("prediction") if core else None,
+        ranking_score=(core or {}).get("ranking_score") if core else None,
+    )
 
     return PatternIntelligenceResult(
         symbol=symbol_upper,
@@ -120,6 +132,7 @@ def build_pattern_intelligence(
         core_model=core,
         explanation=explanation,
         interpretation=interpretation,
+        chart_intelligence=chart_intel,
         is_benchmark=is_model_benchmark_symbol(symbol_upper),
     )
 
@@ -150,6 +163,7 @@ def _pattern_dict(pattern: CandlestickPatternHit | None) -> dict[str, Any] | Non
         "direction": pattern.direction,
         "strength": pattern.strength,
         "as_of_date": pattern.as_of_date,
+        "bar_index": pattern.bar_index,
     }
 
 

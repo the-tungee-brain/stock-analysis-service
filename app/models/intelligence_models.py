@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -230,6 +230,7 @@ class PrimaryCandlestickPattern(BaseModel):
     direction: str
     strength: float
     as_of_date: str = Field(serialization_alias="asOfDate")
+    bar_index: int | None = Field(default=None, serialization_alias="barIndex")
 
 
 class PatternTrendContext(BaseModel):
@@ -373,6 +374,69 @@ class PatternInterpretation(BaseModel):
     evidence: PatternEvidence
 
 
+class ChartIntelligenceScoreRow(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str
+    bias: str
+    detail: str
+
+
+class ChartIntelligenceThesis(BaseModel):
+    headline: str
+    action: str
+    detail: str
+
+
+class ChartIntelligenceScorecard(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    rows: list[ChartIntelligenceScoreRow] = Field(default_factory=list)
+    thesis: ChartIntelligenceThesis
+    priority_order: list[str] = Field(
+        default_factory=list, serialization_alias="priorityOrder"
+    )
+
+
+class ChartIntelligenceNarrative(BaseModel):
+    summary: str
+    action: str
+    headline: str
+    disclaimer: str
+
+
+class ChartIntelligence(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    trendlines: list[dict[str, Any]] = Field(default_factory=list)
+    support_zones: list[dict[str, Any]] = Field(
+        default_factory=list, serialization_alias="supportZones"
+    )
+    resistance_zones: list[dict[str, Any]] = Field(
+        default_factory=list, serialization_alias="resistanceZones"
+    )
+    annotations: list[dict[str, Any]] = Field(default_factory=list)
+    highlighted_candles: list[dict[str, Any]] = Field(
+        default_factory=list, serialization_alias="highlightedCandles"
+    )
+    pattern_metadata: list[dict[str, Any]] = Field(
+        default_factory=list, serialization_alias="patternMetadata"
+    )
+    structure: dict[str, Any] = Field(default_factory=dict)
+    moving_averages: dict[str, Any] = Field(
+        default_factory=dict, serialization_alias="movingAverages"
+    )
+    volume: dict[str, Any] = Field(default_factory=dict)
+    support_resistance_summary: str = Field(
+        default="", serialization_alias="supportResistanceSummary"
+    )
+    relative_strength: dict[str, Any] = Field(
+        default_factory=dict, serialization_alias="relativeStrength"
+    )
+    narrative: ChartIntelligenceNarrative
+    scorecard: ChartIntelligenceScorecard
+
+
 class PatternIntelligence(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -395,6 +459,7 @@ class PatternIntelligence(BaseModel):
     core_model: dict | None = Field(default=None, serialization_alias="coreModel")
     explanation: PatternExplanation
     interpretation: PatternInterpretation
+    chart_intelligence: ChartIntelligence = Field(serialization_alias="chartIntelligence")
     is_benchmark: bool = Field(default=False, serialization_alias="isBenchmark")
 
 
