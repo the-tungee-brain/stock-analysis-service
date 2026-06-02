@@ -4,8 +4,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.prompts import AnalysisAction
-from app.models.research_decision_models import ResearchDecision
-from app.models.productization_models import PredictionLedgerSummary, ResearchBrief
 
 SignalSeverity = Literal["info", "watch", "warning", "critical"]
 EventKind = Literal[
@@ -407,22 +405,6 @@ class ChartIntelligenceNarrative(BaseModel):
     disclaimer: str
 
 
-class ChartIntelligenceTradeThesis(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    headline: str = ""
-    bull_case: list[str] = Field(default_factory=list, serialization_alias="bullCase")
-    bear_case: list[str] = Field(default_factory=list, serialization_alias="bearCase")
-    final_thesis: str = Field(default="", serialization_alias="finalThesis")
-    pattern_proof: dict[str, Any] | None = Field(
-        default=None, serialization_alias="patternProof"
-    )
-    pattern_replay: dict[str, Any] | None = Field(
-        default=None, serialization_alias="patternReplay"
-    )
-    replay_note: str | None = Field(default=None, serialization_alias="replayNote")
-
-
 class ChartIntelligence(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -437,15 +419,8 @@ class ChartIntelligence(BaseModel):
     highlighted_candles: list[dict[str, Any]] = Field(
         default_factory=list, serialization_alias="highlightedCandles"
     )
-    structure_labels: list[dict[str, Any]] = Field(
-        default_factory=list, serialization_alias="structureLabels"
-    )
     pattern_metadata: list[dict[str, Any]] = Field(
         default_factory=list, serialization_alias="patternMetadata"
-    )
-    breakouts: list[dict[str, Any]] = Field(default_factory=list)
-    volume_markers: list[dict[str, Any]] = Field(
-        default_factory=list, serialization_alias="volumeMarkers"
     )
     structure: dict[str, Any] = Field(default_factory=dict)
     moving_averages: dict[str, Any] = Field(
@@ -460,18 +435,6 @@ class ChartIntelligence(BaseModel):
     )
     narrative: ChartIntelligenceNarrative
     scorecard: ChartIntelligenceScorecard
-    trade_thesis: ChartIntelligenceTradeThesis | None = Field(
-        default=None, serialization_alias="tradeThesis"
-    )
-    decision_hierarchy: dict[str, Any] | None = Field(
-        default=None, serialization_alias="decisionHierarchy"
-    )
-    chart_intelligence_score: dict[str, Any] | None = Field(
-        default=None, serialization_alias="chartIntelligenceScore"
-    )
-    pattern_replay: dict[str, Any] | None = Field(
-        default=None, serialization_alias="patternReplay"
-    )
 
 
 class PatternIntelligence(BaseModel):
@@ -589,15 +552,6 @@ class SymbolIntelligence(BaseModel):
     )
     pattern_intelligence: PatternIntelligence | None = Field(
         default=None, serialization_alias="patternIntelligence"
-    )
-    research_decision: ResearchDecision | None = Field(
-        default=None, serialization_alias="researchDecision"
-    )
-    research_brief: ResearchBrief | None = Field(
-        default=None, serialization_alias="researchBrief"
-    )
-    prediction_ledger: PredictionLedgerSummary | None = Field(
-        default=None, serialization_alias="predictionLedger"
     )
     data_gaps: list[str] = Field(default_factory=list, serialization_alias="dataGaps")
     partial: bool = False

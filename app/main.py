@@ -57,8 +57,6 @@ from app.api.get_account_plan_route import router as get_account_plan_router
 from app.api.watchlist_routes import router as watchlist_router
 from app.api.delete_account_route import router as delete_account_router
 from app.api.pattern_prediction_route import router as pattern_prediction_router
-from app.api.research_decision_route import router as research_decision_router
-from app.api.productization_route import router as productization_router
 
 API_PREFIX = "/api/v1"
 AUTH_SCHWAB_PREFIX = f"{API_PREFIX}/auth/schwab"
@@ -144,7 +142,5 @@ protected_api.include_router(search_symbols_route)
 protected_api.include_router(research_chat_router)
 protected_api.include_router(chat_sessions_router)
 protected_api.include_router(pattern_prediction_router)
-protected_api.include_router(research_decision_router)
-protected_api.include_router(productization_router)
 
 app.include_router(protected_api)

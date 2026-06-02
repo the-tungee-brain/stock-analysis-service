@@ -42,7 +42,6 @@ class TrendStructure:
     acceleration: bool
     swing_points: tuple[SwingPoint, ...]
     trendline: dict[str, Any] | None
-    structure_labels: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -53,19 +52,6 @@ class PriceZone:
     zone_type: Literal["support", "resistance"]
     touches: int
     strength: float
-    strength_score: int
-    is_major: bool
-
-
-@dataclass(frozen=True)
-class BreakoutEvent:
-    event_type: str
-    bar_index: int
-    date: str
-    price: float
-    label: str
-    volume_confirmed: bool
-    zone_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -79,9 +65,6 @@ class VolumeContext:
     distribution: bool
     breakout_confirmed: bool
     weak_move: bool
-    pattern_volume_confirmed: bool | None = None
-    pattern_volume_absent: bool = False
-    pattern_volume_note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -178,8 +161,7 @@ def analyze_trend_structure(
     elif lh + ll > hh + hl:
         bias = "downtrend"
 
-    trendline = _build_validated_trendline(ohlcv, bias=bias, lows=lows, highs=highs)
-    structure_labels = build_structure_labels(highs, lows)
+    trendline = _build_trendline(ohlcv, bias=bias, lows=lows, highs=highs)
     trend_break = _detect_trend_break(bias, trendline, close)
     exhaustion = _detect_exhaustion(ohlcv, bias, highs, lows)
     acceleration = _detect_acceleration(ohlcv, bias)
@@ -221,125 +203,7 @@ def analyze_trend_structure(
         acceleration=acceleration,
         swing_points=tuple(swings),
         trendline=trendline,
-        structure_labels=tuple(structure_labels),
     )
-
-
-def build_structure_labels(
-    highs: list[SwingPoint],
-    lows: list[SwingPoint],
-) -> list[dict[str, Any]]:
-    labels: list[dict[str, Any]] = []
-
-    for prev, curr in zip(highs, highs[1:]):
-        if curr.price > prev.price:
-            tag = "HH"
-        elif curr.price < prev.price:
-            tag = "LH"
-        else:
-            tag = "H"
-        labels.append(
-            {
-                "label": tag,
-                "kind": "high",
-                "bar_index": curr.bar_index,
-                "date": curr.date,
-                "price": round(curr.price, 2),
-            }
-        )
-
-    for prev, curr in zip(lows, lows[1:]):
-        if curr.price > prev.price:
-            tag = "HL"
-        elif curr.price < prev.price:
-            tag = "LL"
-        else:
-            tag = "L"
-        labels.append(
-            {
-                "label": tag,
-                "kind": "low",
-                "bar_index": curr.bar_index,
-                "date": curr.date,
-                "price": round(curr.price, 2),
-            }
-        )
-
-    labels.sort(key=lambda item: item["bar_index"])
-    return labels[-10:]
-
-
-def _build_validated_trendline(
-    ohlcv: pd.DataFrame,
-    *,
-    bias: str,
-    lows: list[SwingPoint],
-    highs: list[SwingPoint],
-) -> dict[str, Any] | None:
-    anchor_points = lows if bias in {"uptrend", "mixed"} else highs
-    label = "Trendline support"
-    if bias == "downtrend":
-        anchor_points = highs
-        label = "Trendline resistance"
-    if len(anchor_points) < 2:
-        return None
-
-    candidate = anchor_points[-3:] if len(anchor_points) >= 3 else anchor_points[-2:]
-    start = candidate[0]
-    end = candidate[-1]
-    span = max(end.bar_index - start.bar_index, 1)
-    slope = (end.price - start.price) / span
-    end_index = len(ohlcv) - 1
-    end_price = end.price + slope * (end_index - end.bar_index)
-
-    touches = _count_trendline_touches(
-        anchor_points,
-        start_bar=start.bar_index,
-        start_price=start.price,
-        slope=slope,
-        tolerance_pct=0.015,
-    )
-    age_bars = end_index - start.bar_index
-    age_weeks = max(1, age_bars // 5)
-    confidence = int(
-        np.clip(touches * 18 + min(age_bars, 80) * 0.35 + abs(slope) * 120, 0, 100)
-    )
-
-    if touches < 2 or confidence < 50:
-        return None
-
-    return {
-        "label": label,
-        "start_bar_index": start.bar_index,
-        "end_bar_index": end_index,
-        "start_date": start.date,
-        "end_date": _date_str(ohlcv.index, end_index),
-        "start_price": round(start.price, 2),
-        "end_price": round(float(end_price), 2),
-        "style": "trendline",
-        "touches": touches,
-        "age_bars": age_bars,
-        "age_weeks": age_weeks,
-        "confidence": confidence,
-    }
-
-
-def _count_trendline_touches(
-    points: list[SwingPoint],
-    *,
-    start_bar: int,
-    start_price: float,
-    slope: float,
-    tolerance_pct: float,
-) -> int:
-    touches = 0
-    for point in points:
-        expected = start_price + slope * (point.bar_index - start_bar)
-        if expected <= 0:
-            continue
-        if abs(point.price - expected) / expected <= tolerance_pct:
-            touches += 1
-    return touches
 
 
 def _build_trendline(
@@ -469,146 +333,23 @@ def _cluster_zones(
         low = min(prices)
         high = max(prices)
         pad = max((high - low) * 0.15, low * 0.002)
-        touches = len(cluster)
-        strength_raw = min(1.0, 0.35 + 0.15 * touches)
-        is_major = touches >= 3 or strength_raw >= 0.65
-        strength_score = int(np.clip(30 + touches * 15 + (20 if is_major else 0), 0, 100))
-        label_prefix = "Major support" if zone_type == "support" and is_major else (
-            "Major resistance" if zone_type == "resistance" and is_major else (
-                "Support" if zone_type == "support" else "Resistance"
-            )
-        )
+        label_prefix = "Support" if zone_type == "support" else "Resistance"
         zones.append(
             PriceZone(
                 price_low=round(low - pad, 2),
                 price_high=round(high + pad, 2),
-                label=f"{label_prefix}: ${low:.2f} · {touches} touches",
+                label=f"{label_prefix}: ${low:.2f}",
                 zone_type=zone_type,
-                touches=touches,
-                strength=strength_raw,
-                strength_score=strength_score,
-                is_major=is_major,
+                touches=len(cluster),
+                strength=min(1.0, 0.35 + 0.15 * len(cluster)),
             )
         )
 
-    zones.sort(key=lambda z: z.strength_score, reverse=True)
+    zones.sort(key=lambda z: z.strength, reverse=True)
     return zones[:max_zones]
 
 
-def detect_breakout_events(
-    ohlcv: pd.DataFrame,
-    supports: list[PriceZone],
-    resistances: list[PriceZone],
-    *,
-    lookback_bars: int = 25,
-) -> list[BreakoutEvent]:
-    if len(ohlcv) < lookback_bars + 5:
-        return []
-
-    events: list[BreakoutEvent] = []
-    volume = ohlcv["volume"].astype(float)
-    vol_ma20 = volume.rolling(20).mean()
-    start = max(0, len(ohlcv) - lookback_bars)
-
-    primary_resistance = resistances[0] if resistances else None
-    primary_support = supports[0] if supports else None
-
-    for i in range(start, len(ohlcv)):
-        high = float(ohlcv["high"].iloc[i])
-        low = float(ohlcv["low"].iloc[i])
-        close = float(ohlcv["close"].iloc[i])
-        date = _date_str(ohlcv.index, i)
-        vol_ratio = (
-            float(volume.iloc[i] / vol_ma20.iloc[i])
-            if vol_ma20.iloc[i]
-            else 1.0
-        )
-        vol_confirmed = vol_ratio >= 1.3
-
-        if primary_resistance is not None:
-            level = primary_resistance.price_high
-            prev_close = float(ohlcv["close"].iloc[i - 1]) if i > 0 else close
-            if prev_close <= level and close > level and vol_confirmed:
-                events.append(
-                    BreakoutEvent(
-                        event_type="resistance_breakout",
-                        bar_index=i,
-                        date=date,
-                        price=close,
-                        label="Resistance breakout on elevated volume.",
-                        volume_confirmed=True,
-                        zone_label=primary_resistance.label,
-                    )
-                )
-            elif high > level and close < level:
-                note = (
-                    "Failed breakout above resistance on high volume."
-                    if vol_ratio >= 1.5
-                    else "Failed breakout above resistance."
-                )
-                events.append(
-                    BreakoutEvent(
-                        event_type="failed_breakout",
-                        bar_index=i,
-                        date=date,
-                        price=high,
-                        label=note,
-                        volume_confirmed=vol_ratio >= 1.5,
-                        zone_label=primary_resistance.label,
-                    )
-                )
-
-        if primary_support is not None:
-            level = primary_support.price_low
-            prev_close = float(ohlcv["close"].iloc[i - 1]) if i > 0 else close
-            if prev_close >= level and close < level and vol_confirmed:
-                events.append(
-                    BreakoutEvent(
-                        event_type="support_breakdown",
-                        bar_index=i,
-                        date=date,
-                        price=close,
-                        label="Support breakdown on elevated volume.",
-                        volume_confirmed=True,
-                        zone_label=primary_support.label,
-                    )
-                )
-            elif low < level and close > level:
-                note = (
-                    "Failed breakdown below support on high volume."
-                    if vol_ratio >= 1.5
-                    else "Failed breakdown below support."
-                )
-                events.append(
-                    BreakoutEvent(
-                        event_type="failed_breakdown",
-                        bar_index=i,
-                        date=date,
-                        price=low,
-                        label=note,
-                        volume_confirmed=vol_ratio >= 1.5,
-                        zone_label=primary_support.label,
-                    )
-                )
-
-    deduped: list[BreakoutEvent] = []
-    seen: set[tuple[str, str]] = set()
-    for event in reversed(events):
-        key = (event.event_type, event.date)
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(event)
-    deduped.reverse()
-    return deduped[-4:]
-
-
-def analyze_volume(
-    ohlcv: pd.DataFrame,
-    structure: TrendStructure,
-    *,
-    pattern_bar_index: int | None = None,
-) -> VolumeContext:
+def analyze_volume(ohlcv: pd.DataFrame, structure: TrendStructure) -> VolumeContext:
     volume = ohlcv["volume"].astype(float)
     vol_ma20 = volume.rolling(20).mean()
     vol_std20 = volume.rolling(20).std()
@@ -662,23 +403,6 @@ def analyze_volume(
         summary = "Volume profile is unremarkable relative to the last 20 sessions."
         label = "Normal volume"
 
-    pattern_volume_confirmed = None
-    pattern_volume_absent = False
-    pattern_volume_note = None
-    if pattern_bar_index is not None and 0 <= pattern_bar_index < len(ohlcv):
-        pat_vol = float(volume.iloc[pattern_bar_index])
-        pat_ma = float(vol_ma20.iloc[pattern_bar_index]) if vol_ma20.iloc[pattern_bar_index] else None
-        if pat_ma:
-            pat_ratio = pat_vol / pat_ma
-            pattern_volume_confirmed = pat_ratio >= 1.15
-            pattern_volume_absent = pat_ratio <= 0.85
-            if pattern_volume_confirmed:
-                pattern_volume_note = "Pattern bar volume confirms participation."
-            elif pattern_volume_absent:
-                pattern_volume_note = (
-                    "Pattern detected but volume confirmation absent."
-                )
-
     return VolumeContext(
         label=label,
         summary=summary,
@@ -689,9 +413,6 @@ def analyze_volume(
         distribution=distribution,
         breakout_confirmed=breakout_confirmed,
         weak_move=weak_move,
-        pattern_volume_confirmed=pattern_volume_confirmed,
-        pattern_volume_absent=pattern_volume_absent,
-        pattern_volume_note=pattern_volume_note,
     )
 
 

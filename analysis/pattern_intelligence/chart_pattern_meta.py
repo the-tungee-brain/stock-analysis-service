@@ -27,8 +27,6 @@ def build_pattern_metadata(
     pattern: CandlestickPatternHit,
     *,
     structure_bias: str,
-    volume_note: str | None = None,
-    volume_confirmed: bool | None = None,
 ) -> dict[str, Any]:
     span = PATTERN_BAR_SPAN.get(pattern.pattern_id, 1)
     end_index = pattern.bar_index
@@ -40,11 +38,6 @@ def build_pattern_metadata(
     quality = _quality_score(pattern.strength, checks)
 
     annotations = _pattern_annotations(ohlcv, pattern, candle_indexes)
-    proof_checks = list(checks)
-    if volume_confirmed is True:
-        proof_checks.append(_check("Volume confirms pattern", True))
-    elif volume_confirmed is False:
-        proof_checks.append(_check("Volume confirmation absent", False))
 
     return {
         "pattern_id": pattern.pattern_id,
@@ -57,16 +50,6 @@ def build_pattern_metadata(
         "end_date": dates[-1],
         "qualification_checks": checks,
         "explanation": _pattern_explanation(pattern, checks, quality),
-        "proof_mode": {
-            "title": pattern.label,
-            "checks": proof_checks,
-            "quality_score": quality,
-            "volume_confirmed": volume_confirmed,
-            "volume_note": volume_note,
-            "tooltip_lines": _proof_tooltip_lines(
-                pattern.label, proof_checks, quality, volume_note
-            ),
-        },
         "annotations": annotations,
         "highlighted_candles": [
             {
@@ -123,7 +106,6 @@ def _qualification_checks(
     checks: list[dict[str, Any]] = []
 
     if pattern.pattern_id == "bearish_engulfing":
-        rng = max(h - l, 1e-9)
         checks = [
             _check("Previous candle bullish", prev_bull),
             _check("Current candle bearish", c < o),
@@ -134,24 +116,18 @@ def _qualification_checks(
                 and o >= float(ohlcv["close"].iloc[idx - 1]),
             ),
             _check("Occurred after an advance", ret_20 > 0.02 or structure_bias == "uptrend"),
-            _check("Close near session low", (h - c) / rng > 0.25),
         ]
     elif pattern.pattern_id == "bullish_engulfing":
-        rng = max(h - l, 1e-9)
         checks = [
             _check("Previous candle bearish", prev_bear),
             _check("Current candle bullish", c > o),
             _check(
-                "Body engulfs prior body",
+                "Current body fully engulfs prior body",
                 idx > 0
                 and c >= float(ohlcv["open"].iloc[idx - 1])
                 and o <= float(ohlcv["close"].iloc[idx - 1]),
             ),
-            _check(
-                "Downtrend before pattern",
-                ret_20 < -0.02 or structure_bias == "downtrend",
-            ),
-            _check("Close near high", (h - c) / rng <= 0.25),
+            _check("Occurred after a decline", ret_20 < -0.02 or structure_bias == "downtrend"),
         ]
     elif pattern.pattern_id == "hammer":
         body = abs(c - o)
@@ -221,22 +197,6 @@ def _check(label: str, passed: bool) -> dict[str, Any]:
     return {"label": label, "passed": bool(passed)}
 
 
-def _proof_tooltip_lines(
-    title: str,
-    checks: list[dict[str, Any]],
-    quality: int,
-    volume_note: str | None,
-) -> list[str]:
-    lines = [title]
-    for check in checks:
-        prefix = "✓" if check["passed"] else "○"
-        lines.append(f"{prefix} {check['label']}")
-    lines.append(f"Quality score {quality}/100")
-    if volume_note:
-        lines.append(volume_note)
-    return lines
-
-
 def _pattern_annotations(
     ohlcv: pd.DataFrame,
     pattern: CandlestickPatternHit,
@@ -255,31 +215,27 @@ def _pattern_annotations(
         key_price = float(ohlcv["close"].iloc[key_index])
         position = "aboveBar"
 
-    for idx in candle_indexes:
-        bar_high = float(ohlcv["high"].iloc[idx])
-        bar_low = float(ohlcv["low"].iloc[idx])
-        if pattern.direction == "bearish":
-            arrow_price = bar_high * 1.003
-            position = "aboveBar"
-            shape = "arrowDown"
-        elif pattern.direction == "bullish":
-            arrow_price = bar_low * 0.997
-            position = "belowBar"
-            shape = "arrowUp"
-        else:
-            arrow_price = float(ohlcv["close"].iloc[idx])
-            position = "aboveBar"
-            shape = "circle"
+    annotations.append(
+        {
+            "type": "arrow",
+            "bar_index": key_index,
+            "date": pd.Timestamp(ohlcv.index[key_index]).strftime("%Y-%m-%d"),
+            "price": round(key_price, 2),
+            "label": pattern.label,
+            "direction": pattern.direction,
+            "position": position,
+        }
+    )
+
+    for idx in candle_indexes[:-1]:
         annotations.append(
             {
-                "type": "arrow",
+                "type": "marker",
                 "bar_index": idx,
                 "date": pd.Timestamp(ohlcv.index[idx]).strftime("%Y-%m-%d"),
-                "price": round(arrow_price, 2),
-                "label": pattern.label if idx == key_index else "Pattern candle",
-                "direction": pattern.direction,
-                "position": position,
-                "shape": shape,
+                "price": round(float(ohlcv["close"].iloc[idx]), 2),
+                "label": "Pattern leg",
+                "position": "inBar",
             }
         )
     return annotations
