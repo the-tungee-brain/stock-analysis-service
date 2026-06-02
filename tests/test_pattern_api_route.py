@@ -148,6 +148,6 @@ def test_pattern_intelligence_returns_payload(pattern_client, auth_headers):
     assert payload["coreModel"] is not None
     assert payload["scores"]["alignmentState"] in {"confirmed", "conflict", "model_only"}
     assert "primary" in payload["explanation"]["disclaimer"].lower()
-    assert payload["interpretation"]["actionableVerdict"]
-    assert payload["interpretation"]["traderSummary"]
-    assert len(payload["interpretation"]["confidenceContributors"]) == 5
+    assert payload["interpretation"]["verdict"]
+    assert payload["interpretation"]["signalSummary"]["modelC"]
+    assert payload["interpretation"]["evidence"]["summary"]

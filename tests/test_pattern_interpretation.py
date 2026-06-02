@@ -53,7 +53,7 @@ def _evening_star() -> CandlestickPatternHit:
     )
 
 
-def test_bullish_trend_overrides_bearish_pattern():
+def test_three_layer_structure():
     interpretation = build_pattern_interpretation(
         pattern=_evening_star(),
         context=_context(),
@@ -61,20 +61,20 @@ def test_bullish_trend_overrides_bearish_pattern():
         setup_outcome=None,
         history=None,
         model_prediction=1,
+        ranking_score=0.506,
     )
-    assert interpretation["actionable_verdict"] == "Bullish Trend Overrides Bearish Pattern"
-    assert "Trader Summary:" in interpretation["trader_summary"]
-    assert interpretation["final_verdict"]["conclusion"]
-    assert len(interpretation["confidence_contributors"]) == 5
-    pattern_row = next(r for r in interpretation["confidence_contributors"] if r["key"] == "pattern")
-    assert pattern_row["weight_pct"] == 10
-    assert pattern_row["qualitative"] == "Bearish"
-    trend_row = next(r for r in interpretation["confidence_contributors"] if r["key"] == "trend")
-    assert trend_row["weight_pct"] == 35
-    assert trend_row["emphasized"] is True
+    assert "signal_summary" in interpretation
+    assert "verdict" in interpretation
+    assert "evidence" in interpretation
+    assert "Bullish" in interpretation["signal_summary"]["model_c"]
+    assert "50.6%" in interpretation["signal_summary"]["model_c"]
+    assert "Evening Star" in interpretation["signal_summary"]["pattern"]
+    assert "dominates bearish pattern" in interpretation["verdict"]
+    assert "trader_summary" not in interpretation
+    assert "confidence_contributors" not in interpretation
 
 
-def test_model_only_verdict():
+def test_model_only_signal_summary():
     interpretation = build_pattern_interpretation(
         pattern=None,
         context=_context(),
@@ -86,11 +86,13 @@ def test_model_only_verdict():
         setup_outcome=None,
         history=None,
         model_prediction=1,
+        ranking_score=0.62,
     )
-    assert "Model-Only" in interpretation["actionable_verdict"]
+    assert interpretation["signal_summary"]["pattern"] is None
+    assert "follow Model C" in interpretation["verdict"]
 
 
-def test_historical_read_for_setup():
+def test_evidence_summary_compressed():
     setup = SetupOutcomeStats(
         label="Evening Star · Above SMA200 · RS leading SPY",
         pattern_label="Evening Star",
@@ -112,6 +114,7 @@ def test_historical_read_for_setup():
         history=None,
         model_prediction=1,
     )
-    assert interpretation["historical_read"] is not None
-    assert interpretation["historical_read"].startswith("Historical Read:")
-    assert "mildly positive" in interpretation["historical_read"]
+    evidence = interpretation["evidence"]
+    assert evidence["occurrence_count"] == 16
+    assert evidence["avg_return_5d"] == 0.006
+    assert len(evidence["summary"]) < 280

@@ -123,7 +123,8 @@ def test_pattern_intelligence_service_roundtrip(tmp_path, monkeypatch):
     assert dumped["scores"]["alignmentState"] in {"confirmed", "conflict", "model_only"}
     assert "setupOutcome" in dumped or dumped.get("setupOutcome") is None
     assert "interpretation" in dumped
-    assert dumped["interpretation"]["actionableVerdict"]
+    assert dumped["interpretation"]["verdict"]
+    assert dumped["interpretation"]["signalSummary"]["modelC"]
 
 
 def test_derive_alignment_state():

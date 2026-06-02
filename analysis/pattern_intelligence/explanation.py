@@ -38,6 +38,7 @@ def build_pattern_explanation(
         setup_outcome=setup_outcome,
         history=history,
         model_prediction=model_prediction,
+        ranking_score=ranking_score,
     )
     core_line = _core_model_line(model_label, model_prediction, ranking_score)
     if pattern is None:
@@ -47,10 +48,9 @@ def build_pattern_explanation(
                 "No classic candlestick formation was detected in the last few sessions."
             ),
             "trend_context": _trend_context_text(context),
-            "historical_context": interpretation.get("historical_read")
-            or "No pattern-specific history to cite.",
+            "historical_context": interpretation["evidence"]["summary"],
             "model_context": core_line,
-            "confidence_explanation": interpretation["actionable_verdict"],
+            "confidence_explanation": interpretation["verdict"],
             "disclaimer": _disclaimer(),
         }
 
@@ -60,7 +60,7 @@ def build_pattern_explanation(
         f"formation quality {pattern.strength:.0%}."
     )
     trend_text = _trend_context_text(context)
-    history_text = interpretation.get("historical_read") or _historical_text(history, pattern)
+    history_text = interpretation["evidence"]["summary"]
     alignment = _alignment_text(pattern, model_prediction, scores.model_alignment)
 
     return {
@@ -69,7 +69,7 @@ def build_pattern_explanation(
         "trend_context": trend_text,
         "historical_context": history_text,
         "model_context": f"{core_line} {alignment}".strip(),
-        "confidence_explanation": interpretation["actionable_verdict"],
+        "confidence_explanation": interpretation["verdict"],
         "disclaimer": _disclaimer(),
     }
 

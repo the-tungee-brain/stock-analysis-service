@@ -307,42 +307,33 @@ class PatternExplanation(BaseModel):
     disclaimer: str
 
 
-class PatternVerdictBullet(BaseModel):
+class PatternSignalSummary(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    tone: str
-    text: str
+    model_c: str = Field(serialization_alias="modelC")
+    trend: str
+    relative_strength: str = Field(serialization_alias="relativeStrength")
+    pattern: str | None = None
+    pattern_warning: bool = Field(default=False, serialization_alias="patternWarning")
 
 
-class PatternFinalVerdict(BaseModel):
+class PatternEvidence(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    title: str
-    bullets: list[PatternVerdictBullet]
-    conclusion: str
-
-
-class PatternConfidenceContributor(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    key: str
-    label: str
-    weight_pct: int = Field(serialization_alias="weightPct")
-    qualitative: str
-    emphasized: bool
-    score: float
+    summary: str
+    setup_label: str | None = Field(default=None, serialization_alias="setupLabel")
+    occurrence_count: int | None = Field(default=None, serialization_alias="occurrenceCount")
+    win_rate_5d: float | None = Field(default=None, serialization_alias="winRate5d")
+    avg_return_5d: float | None = Field(default=None, serialization_alias="avgReturn5d")
+    avg_return_20d: float | None = Field(default=None, serialization_alias="avgReturn20d")
 
 
 class PatternInterpretation(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    actionable_verdict: str = Field(serialization_alias="actionableVerdict")
-    trader_summary: str = Field(serialization_alias="traderSummary")
-    final_verdict: PatternFinalVerdict = Field(serialization_alias="finalVerdict")
-    confidence_contributors: list[PatternConfidenceContributor] = Field(
-        serialization_alias="confidenceContributors"
-    )
-    historical_read: str | None = Field(default=None, serialization_alias="historicalRead")
+    signal_summary: PatternSignalSummary = Field(serialization_alias="signalSummary")
+    verdict: str
+    evidence: PatternEvidence
 
 
 class PatternIntelligence(BaseModel):

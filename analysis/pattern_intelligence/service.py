@@ -102,6 +102,7 @@ def build_pattern_intelligence(
         setup_outcome=setup_outcome,
         history=history,
         model_prediction=(core or {}).get("prediction") if core else None,
+        ranking_score=(core or {}).get("ranking_score") if core else None,
     )
 
     return PatternIntelligenceResult(
