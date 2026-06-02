@@ -1081,6 +1081,22 @@ class PortfolioAnalysisService:
             )
             if pattern_intel is not None:
                 intelligence_payload["pattern_intelligence"] = pattern_intel
+            from app.services.research_decision_service import (
+                build_research_decision_payload,
+            )
+
+            pattern_intel_dict = (
+                pattern_intel.model_dump(by_alias=False)
+                if pattern_intel is not None
+                else None
+            )
+            research_decision = build_research_decision_payload(
+                symbol_upper,
+                self._pattern_loaded_model,
+                pattern_intelligence=pattern_intel_dict,
+            )
+            if research_decision is not None:
+                intelligence_payload["research_decision"] = research_decision
             if intelligence_payload:
                 intelligence = intelligence.model_copy(update=intelligence_payload)
         return intelligence

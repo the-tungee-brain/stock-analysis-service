@@ -21,7 +21,11 @@ from tests.test_pattern_intelligence import build_trend_context_from_frame
 from tests.test_pattern_train_and_save import _synthetic_ohlcv
 
 
-def test_trend_structure_detects_swings():
+def test_structure_labels_include_hh_hl():
+    ohlcv = _synthetic_ohlcv(rows=400)
+    structure = analyze_trend_structure(ohlcv)
+    labels = [item["label"] for item in structure.structure_labels]
+    assert any(tag in {"HH", "HL", "LH", "LL"} for tag in labels)
     ohlcv = _synthetic_ohlcv(rows=400)
     structure = analyze_trend_structure(ohlcv)
     assert structure.bias in {"uptrend", "downtrend", "mixed"}
@@ -78,7 +82,9 @@ def test_chart_intelligence_payload_shape():
     assert "pattern_metadata" in payload
     assert payload["narrative"]["summary"]
     assert payload["scorecard"]["rows"]
-    assert payload["scorecard"]["thesis"]["headline"]
+    assert payload["chart_intelligence_score"]["score"] >= 0
+    assert payload["trade_thesis"]["bull_case"]
+    assert payload["decision_hierarchy"]["layers"]
 
 
 def test_service_includes_chart_intelligence():
