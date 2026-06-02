@@ -7,53 +7,18 @@ from typing import Any
 import pandas as pd
 
 from analysis.research_decision.contributors import contributor_deltas
-from analysis.research_decision.ranking import SCORE_CHANGE_MATERIAL
-from models.labels import resolve_label_scheme
+from analysis.research_decision.predictions import (
+    SCORE_CHANGE_MATERIAL,
+    indicators_from_feature_row,
+    predict_from_feature_row,
+)
 from models.prediction_service import LoadedModel
-from models.xgb_model import predict_xgb
-from models.artifact_store import metadata_class_labels, metadata_label_scheme
 
-
-def _predict_from_row(
-    row: pd.Series,
-    loaded: LoadedModel,
-) -> dict[str, Any]:
-    label_scheme = metadata_label_scheme(loaded.metadata)
-    class_labels = metadata_class_labels(loaded.metadata)
-    feature_row = row[loaded.feature_columns].to_frame().T
-    y_pred, y_proba = predict_xgb(
-        loaded.model,
-        feature_row,
-        label_scheme=label_scheme,
-    )
-    probabilities = {
-        str(label): float(y_proba[0, idx])
-        for idx, label in enumerate(class_labels)
-    }
-    up_prob = probabilities.get("1")
-    if up_prob is None and "1" in [str(label) for label in class_labels]:
-        up_prob = probabilities.get("1")
-    ranking_score = up_prob
-    return {
-        "prediction": int(y_pred[0]),
-        "ranking_score": float(ranking_score) if ranking_score is not None else None,
-        "probabilities": probabilities,
-        "label_scheme": resolve_label_scheme(label_scheme).value,
-    }
-
-
-def _indicators_from_row(row: pd.Series) -> dict[str, float]:
-    from models.prediction_service import KEY_INDICATORS
-
-    return {
-        name: float(row[name])
-        for name in KEY_INDICATORS
-        if name in row.index and pd.notna(row[name])
-    }
-
-
-def predict_from_feature_row(row: pd.Series, loaded: LoadedModel) -> dict[str, Any]:
-    return _predict_from_row(row, loaded)
+__all__ = [
+    "SCORE_CHANGE_MATERIAL",
+    "predict_from_feature_row",
+    "build_signal_change",
+]
 
 
 def build_signal_change(
@@ -64,8 +29,8 @@ def build_signal_change(
     chart_context: dict[str, Any] | None = None,
     prior_chart_context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    today_pred = _predict_from_row(today_row, loaded)
-    prior_pred = _predict_from_row(prior_row, loaded)
+    today_pred = predict_from_feature_row(today_row, loaded)
+    prior_pred = predict_from_feature_row(prior_row, loaded)
 
     today_score = today_pred.get("ranking_score")
     prior_score = prior_pred.get("ranking_score")
@@ -75,8 +40,8 @@ def build_signal_change(
     score_delta = today_score - prior_score
     material = abs(score_delta) >= SCORE_CHANGE_MATERIAL
 
-    today_indicators = _indicators_from_row(today_row)
-    prior_indicators = _indicators_from_row(prior_row)
+    today_indicators = indicators_from_feature_row(today_row)
+    prior_indicators = indicators_from_feature_row(prior_row)
     drivers = contributor_deltas(
         today_indicators,
         prior_indicators,

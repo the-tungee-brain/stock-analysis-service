@@ -9,10 +9,8 @@ import pandas as pd
 from analysis.pattern_intelligence.benchmarks import is_model_benchmark_symbol
 from data.symbols import get_training_universe
 from analysis.research_decision.features import build_feature_history
-from analysis.research_decision.signal_change import predict_from_feature_row
+from analysis.research_decision.predictions import predict_from_feature_row
 from models.prediction_service import KEY_INDICATORS, LoadedModel, predict_for_symbol
-
-SCORE_CHANGE_MATERIAL = 0.05
 
 
 def predict_universe_scores(

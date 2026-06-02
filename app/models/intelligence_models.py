@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.prompts import AnalysisAction
 from app.models.research_decision_models import ResearchDecision
+from app.models.productization_models import PredictionLedgerSummary, ResearchBrief
 
 SignalSeverity = Literal["info", "watch", "warning", "critical"]
 EventKind = Literal[
@@ -575,6 +576,12 @@ class SymbolIntelligence(BaseModel):
     )
     research_decision: ResearchDecision | None = Field(
         default=None, serialization_alias="researchDecision"
+    )
+    research_brief: ResearchBrief | None = Field(
+        default=None, serialization_alias="researchBrief"
+    )
+    prediction_ledger: PredictionLedgerSummary | None = Field(
+        default=None, serialization_alias="predictionLedger"
     )
     data_gaps: list[str] = Field(default_factory=list, serialization_alias="dataGaps")
     partial: bool = False
