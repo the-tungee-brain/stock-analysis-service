@@ -222,6 +222,114 @@ class PatternPortfolioStrategy(BaseModel):
     )
 
 
+class PrimaryCandlestickPattern(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    pattern_id: str = Field(serialization_alias="patternId")
+    label: str
+    direction: str
+    strength: float
+    as_of_date: str = Field(serialization_alias="asOfDate")
+
+
+class PatternTrendContext(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    as_of_date: str = Field(serialization_alias="asOfDate")
+    close: float
+    sma50: float | None = None
+    sma200: float | None = None
+    above_sma50: bool | None = Field(default=None, serialization_alias="aboveSma50")
+    above_sma200: bool | None = Field(default=None, serialization_alias="aboveSma200")
+    trend_bias: str = Field(serialization_alias="trendBias")
+    rs_vs_spy_21d: float | None = Field(default=None, serialization_alias="rsVsSpy21d")
+    rs_vs_spy_63d: float | None = Field(default=None, serialization_alias="rsVsSpy63d")
+    rs_vs_spy_126d: float | None = Field(default=None, serialization_alias="rsVsSpy126d")
+    vol_ratio_20d: float | None = Field(default=None, serialization_alias="volRatio20d")
+    vol_zscore_20d: float | None = Field(default=None, serialization_alias="volZscore20d")
+
+
+class PatternIntelligenceScores(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    pattern_strength: float = Field(serialization_alias="patternStrength")
+    trend_strength: float = Field(serialization_alias="trendStrength")
+    relative_strength: float = Field(serialization_alias="relativeStrength")
+    volume_confirmation: float = Field(serialization_alias="volumeConfirmation")
+    model_alignment: float = Field(serialization_alias="modelAlignment")
+    confirmation_score: float = Field(serialization_alias="confirmationScore")
+    confidence: str
+    alignment_state: str = Field(serialization_alias="alignmentState")
+
+
+class PatternSetupOutcome(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    label: str
+    pattern_label: str = Field(serialization_alias="patternLabel")
+    trend_label: str = Field(serialization_alias="trendLabel")
+    rs_label: str = Field(serialization_alias="rsLabel")
+    occurrence_count: int = Field(serialization_alias="occurrenceCount")
+    pattern_only_count: int = Field(serialization_alias="patternOnlyCount")
+    avg_return_5d: float | None = Field(default=None, serialization_alias="avgReturn5d")
+    avg_return_20d: float | None = Field(default=None, serialization_alias="avgReturn20d")
+    win_rate_5d: float | None = Field(default=None, serialization_alias="winRate5d")
+    win_rate_20d: float | None = Field(default=None, serialization_alias="winRate20d")
+    max_drawdown_20d: float | None = Field(
+        default=None, serialization_alias="maxDrawdown20d"
+    )
+
+
+class PatternHistoricalStats(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    pattern_id: str = Field(serialization_alias="patternId")
+    label: str
+    occurrence_count: int = Field(serialization_alias="occurrenceCount")
+    avg_return_5d: float | None = Field(default=None, serialization_alias="avgReturn5d")
+    avg_return_20d: float | None = Field(default=None, serialization_alias="avgReturn20d")
+    win_rate_5d: float | None = Field(default=None, serialization_alias="winRate5d")
+    win_rate_20d: float | None = Field(default=None, serialization_alias="winRate20d")
+    max_drawdown_20d: float | None = Field(
+        default=None, serialization_alias="maxDrawdown20d"
+    )
+
+
+class PatternExplanation(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    headline: str
+    pattern_summary: str = Field(serialization_alias="patternSummary")
+    trend_context: str = Field(serialization_alias="trendContext")
+    historical_context: str = Field(serialization_alias="historicalContext")
+    model_context: str = Field(serialization_alias="modelContext")
+    confidence_explanation: str = Field(serialization_alias="confidenceExplanation")
+    disclaimer: str
+
+
+class PatternIntelligence(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    symbol: str
+    as_of_date: str = Field(serialization_alias="asOfDate")
+    primary_pattern: PrimaryCandlestickPattern | None = Field(
+        default=None, serialization_alias="primaryPattern"
+    )
+    active_patterns: list[PrimaryCandlestickPattern] = Field(
+        default_factory=list, serialization_alias="activePatterns"
+    )
+    trend_context: PatternTrendContext = Field(serialization_alias="trendContext")
+    scores: PatternIntelligenceScores
+    historical_stats: PatternHistoricalStats | None = Field(
+        default=None, serialization_alias="historicalStats"
+    )
+    setup_outcome: PatternSetupOutcome | None = Field(
+        default=None, serialization_alias="setupOutcome"
+    )
+    core_model: dict | None = Field(default=None, serialization_alias="coreModel")
+    explanation: PatternExplanation
+
+
 class PatternTrendForecast(BaseModel):
     model_config = _INTELLIGENCE_MODEL_CONFIG
 
@@ -306,6 +414,9 @@ class SymbolIntelligence(BaseModel):
     )
     pattern_forecast: PatternTrendForecast | None = Field(
         default=None, serialization_alias="patternForecast"
+    )
+    pattern_intelligence: PatternIntelligence | None = Field(
+        default=None, serialization_alias="patternIntelligence"
     )
     data_gaps: list[str] = Field(default_factory=list, serialization_alias="dataGaps")
     partial: bool = False

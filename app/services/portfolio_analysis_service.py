@@ -1063,16 +1063,26 @@ class PortfolioAnalysisService:
             return SymbolIntelligence(symbol=symbol_upper, partial=True)
 
         from app.services.pattern_forecast_service import build_pattern_trend_forecast
+        from app.services.pattern_intelligence_service import (
+            build_pattern_intelligence_payload,
+        )
 
         if is_paid_user(user_id):
             forecast = build_pattern_trend_forecast(
                 symbol_upper,
                 self._pattern_loaded_model,
             )
+            intelligence_payload: dict = {}
             if forecast is not None:
-                intelligence = intelligence.model_copy(
-                    update={"pattern_forecast": forecast}
-                )
+                intelligence_payload["pattern_forecast"] = forecast
+            pattern_intel = build_pattern_intelligence_payload(
+                symbol_upper,
+                self._pattern_loaded_model,
+            )
+            if pattern_intel is not None:
+                intelligence_payload["pattern_intelligence"] = pattern_intel
+            if intelligence_payload:
+                intelligence = intelligence.model_copy(update=intelligence_payload)
         return intelligence
 
     @staticmethod

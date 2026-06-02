@@ -130,3 +130,21 @@ def test_pattern_predict_requires_pro(pattern_client, monkeypatch, auth_headers)
         headers=auth_headers,
     )
     assert response.status_code == 403
+
+
+def test_pattern_intelligence_returns_payload(pattern_client, auth_headers):
+    response = pattern_client.get(
+        "/api/v1/pattern/intelligence",
+        params={"symbol": "AAPL"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "AAPL"
+    assert "trendContext" in payload
+    assert "scores" in payload
+    assert payload["scores"]["confirmationScore"] is not None
+    assert "explanation" in payload
+    assert payload["coreModel"] is not None
+    assert payload["scores"]["alignmentState"] in {"confirmed", "conflict", "model_only"}
+    assert "primary" in payload["explanation"]["disclaimer"].lower()
