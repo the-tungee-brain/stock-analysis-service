@@ -407,6 +407,22 @@ class ChartIntelligenceNarrative(BaseModel):
     disclaimer: str
 
 
+class ChartIntelligenceTradeThesis(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    headline: str = ""
+    bull_case: list[str] = Field(default_factory=list, serialization_alias="bullCase")
+    bear_case: list[str] = Field(default_factory=list, serialization_alias="bearCase")
+    final_thesis: str = Field(default="", serialization_alias="finalThesis")
+    pattern_proof: dict[str, Any] | None = Field(
+        default=None, serialization_alias="patternProof"
+    )
+    pattern_replay: dict[str, Any] | None = Field(
+        default=None, serialization_alias="patternReplay"
+    )
+    replay_note: str | None = Field(default=None, serialization_alias="replayNote")
+
+
 class ChartIntelligence(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -444,7 +460,7 @@ class ChartIntelligence(BaseModel):
     )
     narrative: ChartIntelligenceNarrative
     scorecard: ChartIntelligenceScorecard
-    trade_thesis: dict[str, Any] | None = Field(
+    trade_thesis: ChartIntelligenceTradeThesis | None = Field(
         default=None, serialization_alias="tradeThesis"
     )
     decision_hierarchy: dict[str, Any] | None = Field(
