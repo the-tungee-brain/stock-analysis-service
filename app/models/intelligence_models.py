@@ -405,6 +405,32 @@ class ChartIntelligenceNarrative(BaseModel):
     disclaimer: str
 
 
+class ChartIntelligenceQualificationCheck(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    label: str
+    passed: bool
+
+
+class ChartIntelligencePatternMetadata(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    pattern_id: str = Field(serialization_alias="patternId")
+    label: str
+    direction: str
+    confidence: float = 0.0
+    quality_score: int = Field(default=0, serialization_alias="qualityScore")
+    candle_indexes: list[int] = Field(
+        default_factory=list, serialization_alias="candleIndexes"
+    )
+    start_date: str = Field(default="", serialization_alias="startDate")
+    end_date: str = Field(default="", serialization_alias="endDate")
+    qualification_checks: list[ChartIntelligenceQualificationCheck] = Field(
+        default_factory=list, serialization_alias="qualificationChecks"
+    )
+    explanation: str = ""
+
+
 class ChartIntelligence(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -419,7 +445,7 @@ class ChartIntelligence(BaseModel):
     highlighted_candles: list[dict[str, Any]] = Field(
         default_factory=list, serialization_alias="highlightedCandles"
     )
-    pattern_metadata: list[dict[str, Any]] = Field(
+    pattern_metadata: list[ChartIntelligencePatternMetadata] = Field(
         default_factory=list, serialization_alias="patternMetadata"
     )
     structure: dict[str, Any] = Field(default_factory=dict)
