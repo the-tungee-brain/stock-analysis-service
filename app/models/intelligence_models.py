@@ -324,6 +324,8 @@ class PatternSignalState(BaseModel):
     probability: float | None = None
     probability_text: str = Field(serialization_alias="probabilityText")
     tone: str
+    is_benchmark: bool = Field(default=False, serialization_alias="isBenchmark")
+    benchmark_notice: str | None = Field(default=None, serialization_alias="benchmarkNotice")
 
 
 class PatternTimeframeSlice(BaseModel):
@@ -393,6 +395,7 @@ class PatternIntelligence(BaseModel):
     core_model: dict | None = Field(default=None, serialization_alias="coreModel")
     explanation: PatternExplanation
     interpretation: PatternInterpretation
+    is_benchmark: bool = Field(default=False, serialization_alias="isBenchmark")
 
 
 class PatternTrendForecast(BaseModel):
@@ -421,6 +424,8 @@ class PatternTrendForecast(BaseModel):
     portfolio_strategy: PatternPortfolioStrategy | None = Field(
         default=None, serialization_alias="portfolioStrategy"
     )
+    is_benchmark: bool = Field(default=False, serialization_alias="isBenchmark")
+    benchmark_notice: str | None = Field(default=None, serialization_alias="benchmarkNotice")
 
 
 class CachedResearchSnippet(BaseModel):

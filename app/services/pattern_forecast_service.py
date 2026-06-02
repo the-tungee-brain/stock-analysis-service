@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from analysis.pattern_intelligence.benchmarks import BENCHMARK_NOTICE, is_model_benchmark_symbol
 from app.models.intelligence_models import PatternPortfolioStrategy, PatternTrendForecast
 from models.labels import LABEL_HORIZON_DAYS, LabelScheme, resolve_label_scheme
 from models.prediction_service import LoadedModel, predict_for_symbol
@@ -22,10 +23,14 @@ def build_pattern_trend_forecast(
     except (FileNotFoundError, ValueError):
         return None
 
-    return pattern_forecast_from_prediction(payload)
+    return pattern_forecast_from_prediction(payload, symbol=symbol.strip().upper())
 
 
-def pattern_forecast_from_prediction(payload: dict[str, Any]) -> PatternTrendForecast:
+def pattern_forecast_from_prediction(
+    payload: dict[str, Any],
+    *,
+    symbol: str | None = None,
+) -> PatternTrendForecast:
     scheme = resolve_label_scheme(
         payload.get("label_scheme", LabelScheme.ORIGINAL_3CLASS.value)
     )
@@ -49,6 +54,8 @@ def pattern_forecast_from_prediction(payload: dict[str, Any]) -> PatternTrendFor
             max_position_weight=float(raw_strategy.get("max_position_weight", 0.15)),
         )
 
+    benchmark = is_model_benchmark_symbol(symbol or str(payload.get("symbol", "")))
+
     return PatternTrendForecast(
         as_of_date=str(payload["date"]),
         horizon_days=LABEL_HORIZON_DAYS,
@@ -67,6 +74,8 @@ def pattern_forecast_from_prediction(payload: dict[str, Any]) -> PatternTrendFor
         n_features=payload.get("n_features"),
         feature_groups=list(payload.get("feature_groups") or []),
         portfolio_strategy=portfolio_strategy,
+        is_benchmark=benchmark,
+        benchmark_notice=BENCHMARK_NOTICE if benchmark else None,
     )
 
 

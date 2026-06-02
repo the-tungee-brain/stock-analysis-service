@@ -73,6 +73,7 @@ def pattern_intelligence_from_dict(payload: dict[str, Any]) -> PatternIntelligen
         core_model=payload.get("core_model"),
         explanation=PatternExplanation(**explanation_snake),
         interpretation=PatternInterpretation(**payload["interpretation"]),
+        is_benchmark=bool(payload.get("is_benchmark", False)),
     )
 
 

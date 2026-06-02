@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from analysis.pattern_intelligence.benchmarks import BENCHMARK_NOTICE, is_model_benchmark_symbol
 from analysis.pattern_intelligence.candlestick_engine import CandlestickPatternHit
 from analysis.pattern_intelligence.historical_analytics import (
     PatternHistoricalStats,
@@ -27,6 +28,7 @@ Tone = Literal[
 
 def build_pattern_interpretation(
     *,
+    symbol: str,
     pattern: CandlestickPatternHit | None,
     context: TrendContext,
     scores: PatternScoreBreakdown,
@@ -35,6 +37,15 @@ def build_pattern_interpretation(
     model_prediction: int | None,
     ranking_score: float | None = None,
 ) -> dict[str, Any]:
+    if is_model_benchmark_symbol(symbol):
+        return _build_benchmark_interpretation(
+            pattern=pattern,
+            context=context,
+            scores=scores,
+            setup_outcome=setup_outcome,
+            history=history,
+        )
+
     probability = _resolve_probability(ranking_score, model_prediction)
     signal_state = _signal_state_block(probability)
     timeframe = _timeframe_block(
@@ -366,6 +377,7 @@ def _evidence_block(
     history: PatternHistoricalStats | None,
     model_side: Side,
     signal_state: dict[str, Any],
+    benchmark_mode: bool = False,
 ) -> dict[str, Any]:
     stats = _pick_stats(setup_outcome, history)
     if stats is None:
@@ -399,6 +411,7 @@ def _evidence_block(
         model_side=model_side,
         signal_state=signal_state,
         insight=insight,
+        benchmark_mode=benchmark_mode,
     )
     stats_note = (
         "Historical statistics describe past outcomes and may disagree with "
@@ -432,6 +445,7 @@ def _evidence_framing(
     model_side: Side,
     signal_state: dict[str, Any],
     insight: str,
+    benchmark_mode: bool = False,
 ) -> str:
     win = stats.get("win_rate_5d")
     avg5 = stats.get("avg_return_5d")
@@ -447,10 +461,11 @@ def _evidence_framing(
     model_bullish = model_side == "bullish"
 
     if hist_positive and (model_bearish or pattern_bearish):
-        return (
-            "This setup has historically produced positive returns despite "
-            "the bearish pattern."
-        )
+        if benchmark_mode or pattern_bearish:
+            return (
+                "This setup has historically produced positive returns despite "
+                "the bearish pattern."
+            )
     if hist_positive and model_bullish and pattern_bullish:
         return "Historical outcomes align with the current bullish model and pattern read."
     if hist_positive and model_bullish:
@@ -464,6 +479,11 @@ def _evidence_framing(
         return "Historical outcomes align with the current cautious read."
 
     model_label = signal_state.get("label", "the model")
+    if benchmark_mode:
+        return (
+            "Past matches for this benchmark setup show mixed follow-through — "
+            "use as regime context only."
+        )
     return (
         f"Past matches for this setup show mixed follow-through — "
         f"use as context alongside the {model_label.lower()} model read."
@@ -656,3 +676,158 @@ def _pct(value: float | None) -> str:
     if value is None:
         return "n/a"
     return f"{value * 100:.1f}%"
+
+
+def _build_benchmark_interpretation(
+    *,
+    pattern: CandlestickPatternHit | None,
+    context: TrendContext,
+    scores: PatternScoreBreakdown,
+    setup_outcome: SetupOutcomeStats | None,
+    history: PatternHistoricalStats | None,
+) -> dict[str, Any]:
+    trend_side = _trend_side(context, scores.trend_strength)
+    trend_label, trend_detail = _long_term_trend_label(context, scores.trend_strength)
+    short_label, short_caption = _benchmark_short_term_slice(
+        pattern=pattern,
+        trend_side=trend_side,
+        trend_label=trend_label,
+    )
+    signal_state = {
+        "label": "Benchmark",
+        "probability": None,
+        "probability_text": "Model C excess-return forecast not applicable",
+        "tone": "unavailable",
+        "is_benchmark": True,
+        "benchmark_notice": BENCHMARK_NOTICE,
+    }
+    timeframe = {
+        "short_term": {
+            "label": short_label,
+            "caption": short_caption,
+        },
+        "long_term_trend": {
+            "label": trend_label,
+            "caption": trend_detail,
+        },
+        "relative_strength": {
+            "label": "Market benchmark",
+            "caption": "Reference index for Model C",
+        },
+    }
+    pattern_line, pattern_warning = _pattern_summary_line(pattern)
+    signal_summary = {
+        "model_c": "Not applicable — benchmark index",
+        "trend": _trend_line(context),
+        "relative_strength": "Benchmark reference index",
+        "pattern": pattern_line,
+        "pattern_warning": pattern_warning,
+    }
+    verdict = _verdict_benchmark(
+        pattern=pattern,
+        trend_side=trend_side,
+    )
+    evidence = _evidence_block(
+        pattern=pattern,
+        context=context,
+        setup_outcome=setup_outcome,
+        history=history,
+        model_side="neutral",
+        signal_state=signal_state,
+        benchmark_mode=True,
+    )
+    alignment = _benchmark_alignment_block(
+        pattern=pattern,
+        trend_side=trend_side,
+        trend_label=trend_label,
+        evidence=evidence,
+    )
+    return {
+        "signal_state": signal_state,
+        "timeframe": timeframe,
+        "alignment": alignment,
+        "signal_summary": signal_summary,
+        "verdict": verdict,
+        "evidence": evidence,
+    }
+
+
+def _benchmark_short_term_slice(
+    *,
+    pattern: CandlestickPatternHit | None,
+    trend_side: Side,
+    trend_label: str,
+) -> tuple[str, str]:
+    if pattern is None:
+        return trend_label, "Trend context · no Model C on benchmark"
+
+    if pattern.direction == "bearish" and trend_side == "bullish":
+        return "Tactical caution", f"{pattern.label} · {trend_label.lower()} regime"
+    if pattern.direction == "bullish" and trend_side == "bullish":
+        return "Tactical support", f"{pattern.label} · {trend_label.lower()} regime"
+    if pattern.direction == "bearish" and trend_side == "bearish":
+        return "Risk-off tone", f"{pattern.label} · {trend_label.lower()} regime"
+    if pattern.direction == "bullish" and trend_side == "bearish":
+        return "Counter-trend bounce", f"{pattern.label} · {trend_label.lower()} regime"
+    return trend_label, f"{pattern.label} · pattern + trend context"
+
+
+def _verdict_benchmark(
+    *,
+    pattern: CandlestickPatternHit | None,
+    trend_side: Side,
+) -> str:
+    if pattern is None:
+        if trend_side == "bullish":
+            return "Benchmark uptrend intact — monitor pattern context for tactical shifts."
+        if trend_side == "bearish":
+            return "Benchmark downtrend — defensive posture warranted."
+        return "Mixed benchmark trend — use pattern and regime context."
+
+    pattern_bearish = pattern.direction == "bearish"
+    pattern_bullish = pattern.direction == "bullish"
+
+    if trend_side == "bullish" and pattern_bearish:
+        return "Bearish pattern within a longer-term uptrend — tactical caution only."
+    if trend_side == "bullish" and pattern_bullish:
+        return "Bullish pattern supports the prevailing uptrend."
+    if trend_side == "bearish" and pattern_bearish:
+        return "Bearish pattern aligns with the downtrend."
+    if trend_side == "bearish" and pattern_bullish:
+        return "Bullish pattern against a downtrend — counter-trend bounce risk."
+    return "Pattern and trend mixed — use as regime context only."
+
+
+def _benchmark_alignment_block(
+    *,
+    pattern: CandlestickPatternHit | None,
+    trend_side: Side,
+    trend_label: str,
+    evidence: dict[str, Any],
+) -> dict[str, Any] | None:
+    paragraphs: list[str] = []
+
+    if pattern is not None and pattern.direction not in {None, "neutral"}:
+        pattern_bearish = pattern.direction == "bearish"
+        if pattern_bearish and trend_side == "bullish":
+            paragraphs.append(
+                f"A bearish {pattern.label} sits inside a {trend_label.lower()} benchmark trend."
+            )
+        elif not pattern_bearish and trend_side == "bearish":
+            paragraphs.append(
+                f"A bullish {pattern.label} appears against a {trend_label.lower()} benchmark trend."
+            )
+
+    framing = evidence.get("framing")
+    if framing and paragraphs and "historically" not in " ".join(paragraphs).lower():
+        if "positive returns" in framing.lower() or "despite" in framing.lower():
+            paragraphs.append(framing)
+
+    if not paragraphs:
+        return None
+
+    return {
+        "state": "mixed",
+        "headline": "Pattern vs trend",
+        "explanation": " ".join(paragraphs),
+    }

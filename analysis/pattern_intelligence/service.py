@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from analysis.pattern_intelligence.benchmarks import is_model_benchmark_symbol
 from analysis.pattern_intelligence.candlestick_engine import (
     CandlestickPatternHit,
     active_patterns_on_date,
@@ -39,6 +40,7 @@ class PatternIntelligenceResult:
     core_model: dict[str, Any] | None
     explanation: dict[str, str]
     interpretation: dict[str, Any]
+    is_benchmark: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -96,6 +98,7 @@ def build_pattern_intelligence(
         ranking_score=(core or {}).get("ranking_score"),
     )
     interpretation = build_pattern_interpretation(
+        symbol=symbol_upper,
         pattern=primary,
         context=context,
         scores=scores,
@@ -117,6 +120,7 @@ def build_pattern_intelligence(
         core_model=core,
         explanation=explanation,
         interpretation=interpretation,
+        is_benchmark=is_model_benchmark_symbol(symbol_upper),
     )
 
 

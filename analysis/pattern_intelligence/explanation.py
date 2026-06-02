@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from analysis.pattern_intelligence.benchmarks import BENCHMARK_NOTICE, is_model_benchmark_symbol
 from analysis.pattern_intelligence.candlestick_engine import CandlestickPatternHit
 from analysis.pattern_intelligence.historical_analytics import (
     PatternHistoricalStats,
@@ -32,6 +33,7 @@ def build_pattern_explanation(
 ) -> dict[str, str]:
     """Return structured NL fields for API clients."""
     interpretation = build_pattern_interpretation(
+        symbol=symbol,
         pattern=pattern,
         context=context,
         scores=scores,
@@ -40,7 +42,12 @@ def build_pattern_explanation(
         model_prediction=model_prediction,
         ranking_score=ranking_score,
     )
-    core_line = _core_model_line(model_label, model_prediction, ranking_score)
+    core_line = _core_model_line(
+        symbol,
+        model_label,
+        model_prediction,
+        ranking_score,
+    )
     if pattern is None:
         return {
             "headline": f"No recent candlestick pattern on {symbol.upper()}",
@@ -75,10 +82,13 @@ def build_pattern_explanation(
 
 
 def _core_model_line(
+    symbol: str,
     model_label: str | None,
     model_prediction: int | None,
     ranking_score: float | None,
 ) -> str:
+    if is_model_benchmark_symbol(symbol):
+        return BENCHMARK_NOTICE
     label = model_label or "Relative strength + trend"
     if model_prediction is None:
         return f"The core Model C signal ({label}) is unavailable for this symbol."

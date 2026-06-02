@@ -66,6 +66,7 @@ def _bearish_engulfing() -> CandlestickPatternHit:
 
 def test_signal_state_and_timeframe_layers():
     interpretation = build_pattern_interpretation(
+        symbol="MSFT",
         pattern=_evening_star(),
         context=_context(),
         scores=_scores(),
@@ -84,6 +85,7 @@ def test_signal_state_and_timeframe_layers():
 
 def test_verdict_model_bearish_trend_bullish():
     interpretation = build_pattern_interpretation(
+        symbol="MSFT",
         pattern=_bearish_engulfing(),
         context=_context(),
         scores=_scores(),
@@ -100,6 +102,7 @@ def test_verdict_model_bearish_trend_bullish():
 
 def test_verdict_bullish_continuation():
     interpretation = build_pattern_interpretation(
+        symbol="MSFT",
         pattern=_evening_star(),
         context=_context(),
         scores=_scores(),
@@ -114,6 +117,7 @@ def test_verdict_bullish_continuation():
 
 def test_model_only_signal_summary():
     interpretation = build_pattern_interpretation(
+        symbol="MSFT",
         pattern=None,
         context=_context(),
         scores=_scores(
@@ -145,6 +149,7 @@ def test_evidence_framing_when_history_disagrees_with_model():
         max_drawdown_20d=-0.04,
     )
     interpretation = build_pattern_interpretation(
+        symbol="MSFT",
         pattern=_bearish_engulfing(),
         context=_context(),
         scores=_scores(),
@@ -159,3 +164,23 @@ def test_evidence_framing_when_history_disagrees_with_model():
     assert evidence["stats_note"]
     assert "may disagree" in evidence["stats_note"].lower()
     assert evidence.get("conditional_note")
+
+
+def test_benchmark_symbol_skips_model_c_layers():
+    interpretation = build_pattern_interpretation(
+        symbol="SPY",
+        pattern=_bearish_engulfing(),
+        context=_context(),
+        scores=_scores(),
+        setup_outcome=None,
+        history=None,
+        model_prediction=0,
+        ranking_score=0.453,
+    )
+    signal_state = interpretation["signal_state"]
+    assert signal_state["is_benchmark"] is True
+    assert signal_state["probability"] is None
+    assert "outperforming SPY" not in signal_state["probability_text"].lower()
+    assert interpretation["signal_summary"]["model_c"].startswith("Not applicable")
+    assert interpretation["timeframe"]["relative_strength"]["label"] == "Market benchmark"
+    assert "Model C" in interpretation["verdict"] or "pattern" in interpretation["verdict"].lower()
