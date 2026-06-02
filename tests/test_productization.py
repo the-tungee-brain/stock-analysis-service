@@ -75,3 +75,43 @@ def test_ledger_upsert(tmp_path, monkeypatch):
     frame = load_ledger(tmp_path / "predictions.parquet")
     assert len(frame) == 1
     assert frame.iloc[0]["symbol"] == "MSFT"
+
+
+def test_entry_dict_sanitizes_nan_strings():
+    import pandas as pd
+
+    from analysis.prediction_ledger.ledger import _entry_dict
+    from app.models.productization_models import PredictionLedgerEntry, PredictionLedgerSummary
+
+    row = pd.Series(
+        {
+            "symbol": "AAPL",
+            "as_of_date": pd.Timestamp("2024-06-01"),
+            "rank": 5,
+            "percentile": 70,
+            "ranking_score": 0.62,
+            "regime_label": float("nan"),
+            "model_version": "2024-05-31",
+            "expected_outcome": float("nan"),
+            "resolved": False,
+            "return_5d": float("nan"),
+            "excess_return_5d": float("nan"),
+            "correct": float("nan"),
+            "alpha_captured": float("nan"),
+        }
+    )
+    payload = _entry_dict(row)
+    entry = PredictionLedgerEntry.model_validate(payload)
+    assert entry.expected_outcome is None
+    assert entry.regime_label is None
+
+    summary = PredictionLedgerSummary.model_validate(
+        {
+            "days": 30,
+            "n_predictions": 1,
+            "n_resolved": 0,
+            "n_pending": 1,
+            "entries": [payload],
+        }
+    )
+    assert summary.entries[0].expected_outcome is None

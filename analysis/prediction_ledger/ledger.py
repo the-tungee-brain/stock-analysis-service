@@ -238,6 +238,10 @@ def ledger_summary(
     avg_alpha = (
         float(resolved["alpha_captured"].mean()) if not resolved.empty else None
     )
+    if hit_rate is not None and pd.isna(hit_rate):
+        hit_rate = None
+    if avg_alpha is not None and pd.isna(avg_alpha):
+        avg_alpha = None
 
     best = _format_call(resolved, ascending=False)
     worst = _format_call(resolved, ascending=True)
@@ -263,20 +267,28 @@ def ledger_summary(
 
 def _entry_dict(row: pd.Series) -> dict[str, Any]:
     return {
-        "symbol": row["symbol"],
+        "symbol": str(row["symbol"]),
         "as_of_date": pd.Timestamp(row["as_of_date"]).strftime("%Y-%m-%d"),
         "rank": int(row["rank"]) if pd.notna(row["rank"]) else None,
         "percentile": int(row["percentile"]) if pd.notna(row["percentile"]) else None,
         "ranking_score": float(row["ranking_score"]) if pd.notna(row["ranking_score"]) else None,
-        "regime_label": row.get("regime_label"),
-        "model_version": row.get("model_version"),
-        "expected_outcome": row.get("expected_outcome"),
-        "resolved": bool(row.get("resolved")),
+        "regime_label": _optional_str(row, "regime_label"),
+        "model_version": _optional_str(row, "model_version"),
+        "expected_outcome": _optional_str(row, "expected_outcome"),
+        "resolved": bool(row["resolved"]) if pd.notna(row.get("resolved")) else False,
         "return_5d": _optional_float(row, "return_5d"),
         "excess_return_5d": _optional_float(row, "excess_return_5d"),
         "correct": bool(row["correct"]) if pd.notna(row.get("correct")) else None,
         "alpha_captured": _optional_float(row, "alpha_captured"),
     }
+
+
+def _optional_str(row: pd.Series, key: str) -> str | None:
+    value = row.get(key)
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _optional_float(row: pd.Series, key: str) -> float | None:
