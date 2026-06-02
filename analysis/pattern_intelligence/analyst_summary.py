@@ -7,7 +7,6 @@ from typing import Any, Literal
 from analysis.pattern_intelligence.benchmarks import BENCHMARK_NOTICE, is_model_benchmark_symbol
 from analysis.pattern_intelligence.candlestick_engine import CandlestickPatternHit
 from analysis.pattern_intelligence.chart_analysis import (
-    MovingAverageContext,
     PriceZone,
     TrendStructure,
     VolumeContext,
@@ -17,6 +16,10 @@ from analysis.pattern_intelligence.trend_context import TrendContext
 
 ThesisSide = Literal["bullish", "bearish", "neutral"]
 BulletTone = Literal["support", "caution"]
+
+# Max distance from current price for an actionable key level (fraction of spot).
+KEY_LEVEL_MAX_DISTANCE_PCT = 0.15
+EVIDENCE_MAX_BULLETS = 5
 
 
 def build_analyst_summary(
@@ -28,7 +31,6 @@ def build_analyst_summary(
     resistances: list[PriceZone],
     context: TrendContext,
     volume_ctx: VolumeContext,
-    ma_ctx: MovingAverageContext,
     scores: PatternScoreBreakdown,
     model_prediction: int | None,
     ranking_score: float | None,
@@ -46,6 +48,13 @@ def build_analyst_summary(
         is_benchmark=is_benchmark,
     )
 
+    key_level = _key_level_block(
+        thesis_side=thesis_side,
+        supports=supports,
+        resistances=resistances,
+        close=context.close,
+    )
+
     return {
         "outlook": _outlook_block(
             label=outlook_label,
@@ -56,35 +65,23 @@ def build_analyst_summary(
             pattern=pattern,
             is_benchmark=is_benchmark,
         ),
-        "key_level": _key_level_block(
-            thesis_side=thesis_side,
-            supports=supports,
-            resistances=resistances,
-            close=context.close,
-        ),
+        "key_level": key_level,
         "why_this_outlook": _evidence_bullets(
-            symbol=symbol,
             pattern=pattern,
             structure=structure,
             context=context,
             volume_ctx=volume_ctx,
-            ma_ctx=ma_ctx,
             scores=scores,
-            supports=supports,
-            resistances=resistances,
             thesis_side=thesis_side,
             is_benchmark=is_benchmark,
         ),
         "thesis": _thesis_narrative(
-            symbol=symbol,
             pattern=pattern,
             structure=structure,
-            context=context,
             volume_ctx=volume_ctx,
             thesis_side=thesis_side,
             outlook_label=outlook_label,
-            supports=supports,
-            resistances=resistances,
+            key_level=key_level,
             is_benchmark=is_benchmark,
         ),
         "disclaimer": (
@@ -197,11 +194,8 @@ def _outlook_block(
         structure=structure,
         pattern=pattern,
         is_benchmark=is_benchmark,
+        probability=probability,
     )
-    model_line = None
-    if not is_benchmark and probability is not None:
-        edge = _model_edge_phrase(label, probability)
-        model_line = f"Model C suggests {edge} over the next 5 sessions."
 
     return {
         "label": label,
@@ -211,7 +205,7 @@ def _outlook_block(
             f"{int(round(probability * 100))}%" if probability is not None else None
         ),
         "expectation": expectation,
-        "model_context": model_line,
+        "model_context": None,
         "is_benchmark": is_benchmark,
         "benchmark_notice": BENCHMARK_NOTICE if is_benchmark else None,
     }
@@ -224,6 +218,7 @@ def _expectation_sentence(
     structure: TrendStructure,
     pattern: CandlestickPatternHit | None,
     is_benchmark: bool,
+    probability: float | None = None,
 ) -> str:
     if is_benchmark:
         if structure.bias == "uptrend":
@@ -241,79 +236,137 @@ def _expectation_sentence(
             "structure resolves more clearly."
         )
 
+    model_clause = ""
+    if probability is not None:
+        model_clause = f" Model C ({int(round(probability * 100))}%) leans {_model_lean_word(label)}."
+
     label_lower = label.lower()
     if "bullish" in label_lower:
         if structure.bias == "uptrend" and structure.trend_break:
             return (
-                "Expect modest upside or sideways trading over the next 5 sessions. "
-                "The broader uptrend remains intact, but nearby resistance may limit gains."
+                "Expect modest upside or sideways trade over the next 5 sessions; "
+                "nearby resistance may cap gains."
+                + model_clause
             )
         if structure.bias == "uptrend":
             return (
-                "Expect modest upside over the next 5 sessions as the uptrend stays intact, "
-                "though nearby resistance could slow progress."
+                "Expect modest upside over the next 5 sessions while the uptrend holds."
+                + model_clause
             )
         if pattern is not None and pattern.direction == "bullish":
             return (
-                "Expect a constructive near-term bounce over the next 5 sessions, "
-                "though the longer-term trend still needs confirmation."
+                "Expect a constructive bounce over the next 5 sessions pending trend confirmation."
+                + model_clause
             )
         return (
-            "Expect a mildly positive bias over the next 5 sessions, with upside "
-            "dependent on follow-through above nearby levels."
+            "Expect a mildly positive 5-day bias; follow-through above nearby levels matters."
+            + model_clause
         )
 
     if "bearish" in label_lower:
         if structure.bias == "downtrend":
             return (
-                "Expect continued pressure over the next 5 sessions as the downtrend "
-                "remains in control; rallies may struggle near overhead resistance."
+                "Expect continued pressure over the next 5 sessions while the downtrend persists."
+                + model_clause
             )
         if structure.bias == "uptrend":
             return (
-                "Expect near-term softness or consolidation over the next 5 sessions "
-                "inside an otherwise intact longer-term uptrend."
+                "Expect near-term softness or consolidation inside a longer uptrend."
+                + model_clause
             )
         return (
-            "Expect downside risk or choppy trade over the next 5 sessions until "
-            "price stabilizes above support."
+            "Expect downside risk or choppy trade until price reclaims support."
+            + model_clause
         )
 
     if thesis_side == "bullish":
         return (
-            "Expect range-bound to slightly higher trade over the next 5 sessions; "
-            "confirmation above resistance would improve the outlook."
+            "Expect range-bound to slightly higher trade over the next 5 sessions."
+            + model_clause
         )
     if thesis_side == "bearish":
         return (
-            "Expect range-bound to slightly lower trade over the next 5 sessions; "
-            "a break below support would increase downside risk."
+            "Expect range-bound to slightly lower trade over the next 5 sessions."
+            + model_clause
         )
     return (
-        "Expect sideways trading over the next 5 sessions until price commits "
-        "to a clear break above resistance or below support."
+        "Expect sideways trade until price breaks a nearby level decisively."
+        + model_clause
     )
 
 
-def _model_edge_phrase(label: str, probability: float) -> str:
+def _model_lean_word(label: str) -> str:
     label_lower = label.lower()
-    if "strong bullish" in label_lower:
-        return "a strong bullish edge"
-    if "slight bullish" in label_lower:
-        return "a modest bullish edge"
     if "bullish" in label_lower:
-        return "a bullish edge"
-    if "strong bearish" in label_lower:
-        return "a strong bearish edge"
-    if "slight bearish" in label_lower:
-        return "a modest bearish edge"
+        return "bullish"
     if "bearish" in label_lower:
-        return "a bearish edge"
-    if probability >= 0.52:
-        return "a slight bullish edge"
-    if probability <= 0.48:
-        return "a slight bearish edge"
-    return "no clear directional edge"
+        return "bearish"
+    return "neutral"
+
+
+def _nearby_resistances(
+    close: float,
+    zones: list[PriceZone],
+    *,
+    max_distance_pct: float = KEY_LEVEL_MAX_DISTANCE_PCT,
+) -> list[PriceZone]:
+    nearby: list[PriceZone] = []
+    for zone in zones:
+        if zone.price_low <= close * 1.002:
+            continue
+        distance_pct = (zone.price_low - close) / max(close, 1e-9)
+        if distance_pct <= max_distance_pct:
+            nearby.append(zone)
+    nearby.sort(key=lambda z: z.price_low - close)
+    return nearby
+
+
+def _nearby_supports(
+    close: float,
+    zones: list[PriceZone],
+    *,
+    max_distance_pct: float = KEY_LEVEL_MAX_DISTANCE_PCT,
+) -> list[PriceZone]:
+    nearby: list[PriceZone] = []
+    for zone in zones:
+        if zone.price_high >= close * 0.998:
+            continue
+        distance_pct = (close - zone.price_high) / max(close, 1e-9)
+        if distance_pct <= max_distance_pct:
+            nearby.append(zone)
+    nearby.sort(key=lambda z: close - z.price_high)
+    return nearby
+
+
+def _unavailable_key_level(close: float) -> dict[str, Any]:
+    return {
+        "label": "No nearby level",
+        "price": None,
+        "level_type": None,
+        "display": "No actionable level near current price",
+        "implication": (
+            f"No support or resistance sits within a reasonable distance of ${close:,.2f} — "
+            "watch trend and Model C for the next move."
+        ),
+        "available": False,
+    }
+
+
+def _key_level_from_zone(
+    *,
+    zone: PriceZone,
+    level_type: Literal["support", "resistance"],
+    watch_price: float,
+    implication: str,
+) -> dict[str, Any]:
+    return {
+        "label": f"${watch_price:.2f} {level_type.title()}",
+        "price": round(watch_price, 2),
+        "level_type": level_type,
+        "display": f"Key Level: ${watch_price:.2f} {level_type.title()}",
+        "implication": implication,
+        "available": True,
+    }
 
 
 def _key_level_block(
@@ -323,254 +376,259 @@ def _key_level_block(
     resistances: list[PriceZone],
     close: float,
 ) -> dict[str, Any]:
-    if thesis_side == "bullish" and resistances:
-        zone = resistances[0]
-        price = zone.price_high
-        level_type = "resistance"
+    nearby_res = _nearby_resistances(close, resistances)
+    nearby_sup = _nearby_supports(close, supports)
+
+    if thesis_side == "bullish":
+        if nearby_res:
+            zone = nearby_res[0]
+            watch = zone.price_low
+            return _key_level_from_zone(
+                zone=zone,
+                level_type="resistance",
+                watch_price=watch,
+                implication=(
+                    f"Watch ${watch:,.2f} resistance above current price — a breakout would "
+                    "likely extend the bullish move; repeated rejection may signal consolidation."
+                ),
+            )
+        return _unavailable_key_level(close)
+
+    if thesis_side == "bearish":
+        if nearby_sup:
+            zone = nearby_sup[0]
+            watch = zone.price_high
+            return _key_level_from_zone(
+                zone=zone,
+                level_type="support",
+                watch_price=watch,
+                implication=(
+                    f"Watch ${watch:,.2f} support below current price — a break would "
+                    "likely accelerate downside; holding the level keeps the bear case contained."
+                ),
+            )
+        return _unavailable_key_level(close)
+
+    candidates: list[tuple[float, PriceZone, Literal["support", "resistance"], float]] = []
+    for zone in nearby_res:
+        watch = zone.price_low
+        dist = watch - close
+        candidates.append((dist, zone, "resistance", watch))
+    for zone in nearby_sup:
+        watch = zone.price_high
+        dist = close - watch
+        candidates.append((dist, zone, "support", watch))
+
+    if not candidates:
+        return _unavailable_key_level(close)
+
+    _, zone, level_type, watch = min(candidates, key=lambda item: item[0])
+    if level_type == "resistance":
         implication = (
-            "If price breaks above this level, bullish momentum is likely to strengthen. "
-            "Failure near resistance may lead to consolidation."
-        )
-    elif thesis_side == "bearish" and supports:
-        zone = supports[0]
-        price = zone.price_low
-        level_type = "support"
-        implication = (
-            "If price breaks below this level, bearish pressure is likely to accelerate. "
-            "Holding above support would keep the downside thesis in check."
-        )
-    elif resistances and supports:
-        dist_res = abs(resistances[0].price_low - close)
-        dist_sup = abs(close - supports[0].price_high)
-        if dist_res <= dist_sup:
-            zone = resistances[0]
-            price = zone.price_high
-            level_type = "resistance"
-        else:
-            zone = supports[0]
-            price = zone.price_low
-            level_type = "support"
-        implication = (
-            f"This {level_type} is the nearest major level — a decisive break would set "
-            "the next directional move for the 5-day outlook."
-        )
-    elif resistances:
-        zone = resistances[0]
-        price = zone.price_high
-        level_type = "resistance"
-        implication = (
-            "A sustained move above this resistance would shift the outlook more constructive; "
-            "rejection here favors consolidation."
-        )
-    elif supports:
-        zone = supports[0]
-        price = zone.price_low
-        level_type = "support"
-        implication = (
-            "Holding this support keeps the current thesis intact; "
-            "a break below would increase near-term downside risk."
+            f"Nearest overhead level at ${watch:,.2f} — clearing it would favor upside; "
+            "failure there keeps the range intact."
         )
     else:
-        return {
-            "label": "Key level unavailable",
-            "price": None,
-            "level_type": None,
-            "display": "No dominant support or resistance identified.",
-            "implication": (
-                "Without a clear nearby level, focus on trend direction and Model C "
-                "for the 5-day read."
-            ),
-        }
+        implication = (
+            f"Nearest support at ${watch:,.2f} — losing it would open downside; "
+            "holding it preserves the neutral-to-firm bias."
+        )
 
-    return {
-        "label": f"${price:.2f} {level_type.title()}",
-        "price": round(price, 2),
-        "level_type": level_type,
-        "display": f"Key Level: ${price:.2f} {level_type.title()}",
-        "implication": implication,
-    }
+    return _key_level_from_zone(
+        zone=zone,
+        level_type=level_type,
+        watch_price=watch,
+        implication=implication,
+    )
 
 
 def _evidence_bullets(
     *,
-    symbol: str,
     pattern: CandlestickPatternHit | None,
     structure: TrendStructure,
     context: TrendContext,
     volume_ctx: VolumeContext,
-    ma_ctx: MovingAverageContext,
     scores: PatternScoreBreakdown,
-    supports: list[PriceZone],
-    resistances: list[PriceZone],
     thesis_side: ThesisSide,
     is_benchmark: bool,
 ) -> list[dict[str, Any]]:
-    bullets: list[tuple[str, BulletTone]] = []
+    """At most one bullet per factor; avoid overlap with key level and outlook."""
+    slots: dict[str, tuple[str, BulletTone]] = {}
 
     if structure.bias == "uptrend" and not structure.trend_break:
-        bullets.append(("Long-term uptrend intact", "support"))
+        slots["trend"] = ("Uptrend intact", "support")
     elif structure.bias == "downtrend" and not structure.trend_break:
-        bullets.append(("Downtrend structure remains in control", "support"))
+        slots["trend"] = ("Downtrend in control", "support")
     elif structure.trend_break:
-        bullets.append(("Recent trend break — structure is in transition", "caution"))
+        slots["trend"] = ("Trend structure recently broke", "caution")
     else:
-        bullets.append(("Mixed market structure — no dominant trend", "caution"))
+        slots["trend"] = ("No dominant trend — range conditions", "caution")
 
     if not is_benchmark:
         rs = context.rs_vs_spy_63d
         if rs is not None and rs > 0.02:
-            bullets.append(("Outperforming the broader market", "support"))
+            slots["rs"] = ("Outperforming SPY", "support")
         elif rs is not None and rs < -0.02:
-            bullets.append(("Lagging the broader market", "caution"))
+            slots["rs"] = ("Lagging SPY", "caution")
         elif scores.relative_strength >= 0.55:
-            bullets.append(("Relative strength remains supportive", "support"))
+            slots["rs"] = ("Relative strength supportive", "support")
+        elif scores.relative_strength <= 0.4:
+            slots["rs"] = ("Relative strength soft", "caution")
 
     if volume_ctx.accumulation or volume_ctx.breakout_confirmed:
-        bullets.append(("Volume supports accumulation", "support"))
+        slots["volume"] = ("Volume confirms demand", "support")
     elif volume_ctx.distribution:
-        bullets.append(("Volume suggests distribution", "caution"))
+        slots["volume"] = ("Volume points to distribution", "caution")
     elif volume_ctx.weak_move:
-        bullets.append(("Recent move lacks volume confirmation", "caution"))
+        slots["volume"] = ("Move lacks volume confirmation", "caution")
 
     if pattern is not None and pattern.direction != "neutral":
         if pattern.direction == "bullish":
-            bullets.append((f"{pattern.label} confirms buyer interest", "support"))
+            slots["pattern"] = (f"{pattern.label} (bullish)", "support")
         else:
-            bullets.append((f"{pattern.label} signals near-term selling pressure", "caution"))
-
-    if ma_ctx.above_sma_200 is True and ma_ctx.dist_sma_200_pct is not None:
-        if ma_ctx.dist_sma_200_pct > 0.15:
-            bullets.append(("Price remains far above its long-term trend", "support"))
-        elif ma_ctx.above_sma_200:
-            bullets.append(("Price holds above its long-term trend", "support"))
-    elif ma_ctx.above_sma_200 is False:
-        bullets.append(("Price trades below its long-term trend", "caution"))
-
-    if thesis_side == "bullish" and resistances:
-        bullets.append(("Resistance overhead", "caution"))
-    elif thesis_side == "bearish" and supports:
-        bullets.append(("Support nearby — watch for a breakdown", "caution"))
-    elif thesis_side == "neutral" and supports and resistances:
-        bullets.append(("Trading between support and resistance", "caution"))
+            slots["pattern"] = (f"{pattern.label} (bearish)", "caution")
 
     if structure.exhaustion:
-        bullets.append(("Signs of trend exhaustion", "caution"))
-    if structure.acceleration and structure.bias == "uptrend":
-        bullets.append(("Uptrend showing acceleration", "support"))
+        slots["exhaustion"] = ("Trend showing exhaustion", "caution")
+    elif structure.acceleration and structure.bias == "uptrend" and thesis_side == "bullish":
+        slots["momentum"] = ("Momentum accelerating", "support")
 
-    deduped: list[tuple[str, BulletTone]] = []
-    seen: set[str] = set()
-    for text, tone in bullets:
-        key = text.lower()
-        if key in seen:
+    order = ["trend", "rs", "volume", "pattern", "momentum", "exhaustion"]
+    bullets: list[dict[str, Any]] = []
+    for key in order:
+        if key not in slots:
             continue
-        seen.add(key)
-        deduped.append((text, tone))
+        text, tone = slots[key]
+        bullets.append({"text": text, "tone": tone})
+        if len(bullets) >= EVIDENCE_MAX_BULLETS:
+            break
 
-    return [
-        {"text": text, "tone": tone}
-        for text, tone in deduped[:6]
-    ]
+    return bullets
 
 
 def _thesis_narrative(
     *,
-    symbol: str,
     pattern: CandlestickPatternHit | None,
     structure: TrendStructure,
-    context: TrendContext,
     volume_ctx: VolumeContext,
     thesis_side: ThesisSide,
     outlook_label: str,
-    supports: list[PriceZone],
-    resistances: list[PriceZone],
+    key_level: dict[str, Any],
     is_benchmark: bool,
 ) -> str:
-    sym = symbol.upper()
-    sentences: list[str] = []
-
     if is_benchmark:
         if structure.bias == "uptrend":
-            sentences.append(
-                f"{sym} remains in an uptrend as the market benchmark."
-            )
+            likely = "The benchmark will likely grind higher or hold firm over the next several sessions."
         elif structure.bias == "downtrend":
-            sentences.append(
-                f"{sym} remains under pressure as the benchmark trends lower."
-            )
+            likely = "The benchmark will likely stay under pressure over the next several sessions."
         else:
-            sentences.append(
-                f"{sym} shows mixed benchmark structure without a clear directional edge."
+            likely = "The benchmark will likely chop sideways until structure resolves."
+        strengthen = "Sustained strength in breadth and trend would confirm the bullish regime."
+        weaken = "A sharp risk-off leg would weaken the constructive read."
+        if pattern is not None and pattern.direction == "bearish":
+            weaken = (
+                f"A follow-through {pattern.label.lower()} would add tactical caution "
+                "without necessarily reversing the primary trend."
             )
-        if pattern is not None:
-            sentences.append(
-                f"A recent {pattern.label.lower()} adds tactical context but does not "
-                "override the prevailing benchmark trend."
-            )
-        else:
-            sentences.append(
-                "No active candlestick pattern — lean on trend and regime for positioning context."
-            )
-        return " ".join(sentences[:3])
+        return f"{likely} {strengthen} {weaken}"
 
-    if structure.bias == "uptrend":
-        lead = f"{sym} remains in a strong uptrend"
-        rs = context.rs_vs_spy_63d
-        if rs is not None and rs > 0.02:
-            lead += " and continues to outperform the broader market"
-        sentences.append(f"{lead}.")
-    elif structure.bias == "downtrend":
-        sentences.append(
-            f"{sym} remains in a bearish structure with lower highs and lower lows."
-        )
-    else:
-        sentences.append(
-            f"{sym} is consolidating without a dominant trend sequence."
-        )
+    control = _control_phrase(structure, volume_ctx, thesis_side, outlook_label)
+    likely = _likely_path_phrase(outlook_label, thesis_side, structure)
+    strengthen, weaken = _scenario_branches(key_level, thesis_side, pattern, structure)
 
-    outlook_fragment = _outlook_fragment(outlook_label, thesis_side)
-    vol_fragment = ""
-    if volume_ctx.accumulation or volume_ctx.breakout_confirmed:
-        vol_fragment = " Recent buying pressure supports"
-    elif volume_ctx.distribution:
-        vol_fragment = " Distribution volume weighs on"
-    elif volume_ctx.weak_move:
-        vol_fragment = " Thin volume limits conviction in"
-
-    if outlook_fragment:
-        if vol_fragment:
-            sentences.append(
-                f"{vol_fragment.strip()} {outlook_fragment}."
-            )
-        else:
-            sentences.append(f"{outlook_fragment.capitalize()}.")
-
-    if thesis_side == "bullish" and resistances:
-        sentences.append(
-            "A breakout above nearby resistance would strengthen the continuation thesis; "
-            "failure there may lead to consolidation."
-        )
-    elif thesis_side == "bearish" and supports:
-        sentences.append(
-            "A break below nearby support would confirm further downside; "
-            "holding the level would keep the bear case in check."
-        )
-    elif pattern is not None and pattern.direction == "bearish" and structure.bias == "uptrend":
-        sentences.append(
-            f"The {pattern.label.lower()} flags near-term pullback risk inside the broader uptrend."
-        )
-
-    return " ".join(sentences[:3])
+    return f"{control} {likely} {strengthen} {weaken}"
 
 
-def _outlook_fragment(label: str, thesis_side: ThesisSide) -> str:
-    label_lower = label.lower()
-    if "bullish" in label_lower:
-        return "a mildly bullish 5-day outlook, although nearby resistance could slow upside progress"
-    if "bearish" in label_lower:
-        return "a cautious 5-day outlook with downside risk if support fails"
+def _control_phrase(
+    structure: TrendStructure,
+    volume_ctx: VolumeContext,
+    thesis_side: ThesisSide,
+    outlook_label: str,
+) -> str:
     if thesis_side == "bullish":
-        return "the setup favors modest upside if resistance gives way"
+        if volume_ctx.accumulation or volume_ctx.breakout_confirmed:
+            return "Buyers remain in control and volume backs the bid."
+        if structure.bias == "uptrend":
+            return "Buyers remain in control as the uptrend persists."
+        return f"Bulls still have the edge on the {outlook_label.lower()} setup."
+
     if thesis_side == "bearish":
-        return "the setup favors caution until support is reclaimed"
-    return "the 5-day outlook is balanced until price commits directionally"
+        if volume_ctx.distribution:
+            return "Sellers are pressing and distribution volume weighs on price."
+        if structure.bias == "downtrend":
+            return "Sellers remain in control within a downtrend."
+        return f"Bears have the edge on the {outlook_label.lower()} setup."
+
+    return "Neither side has a decisive edge — expect two-way trade."
+
+
+def _likely_path_phrase(
+    outlook_label: str,
+    thesis_side: ThesisSide,
+    structure: TrendStructure,
+) -> str:
+    label_lower = outlook_label.lower()
+    if "bullish" in label_lower:
+        if structure.bias == "uptrend":
+            return (
+                "Expect modest upside over the next 5 sessions, though gains may be gradual."
+            )
+        return "Expect a constructive drift higher over the next 5 sessions."
+    if "bearish" in label_lower:
+        return "Expect softness or lower highs over the next 5 sessions."
+    if thesis_side == "bullish":
+        return "Expect a slight upward bias over the next 5 sessions."
+    if thesis_side == "bearish":
+        return "Expect a slight downward bias over the next 5 sessions."
+    return "Expect sideways trade over the next 5 sessions."
+
+
+def _scenario_branches(
+    key_level: dict[str, Any],
+    thesis_side: ThesisSide,
+    pattern: CandlestickPatternHit | None,
+    structure: TrendStructure,
+) -> tuple[str, str]:
+    price = key_level.get("price")
+    level_type = key_level.get("level_type")
+    available = key_level.get("available", price is not None)
+
+    if available and price is not None and level_type == "resistance":
+        strengthen = (
+            f"A breakout above ${price:,.2f} resistance would strengthen the bullish continuation case."
+        )
+        weaken = (
+            f"Repeated rejection below ${price:,.2f} would weaken the outlook and favor consolidation."
+        )
+        return strengthen, weaken
+
+    if available and price is not None and level_type == "support":
+        strengthen = (
+            f"Holding ${price:,.2f} support would keep the bearish thesis contained or invite a bounce."
+        )
+        weaken = (
+            f"A decisive break below ${price:,.2f} would strengthen the downside scenario."
+        )
+        return strengthen, weaken
+
+    if pattern is not None and pattern.direction == "bearish" and structure.bias == "uptrend":
+        strengthen = "Clearing recent highs would restore the bullish path."
+        weaken = (
+            f"Follow-through on the {pattern.label.lower()} would weaken the near-term bullish case."
+        )
+        return strengthen, weaken
+
+    if thesis_side == "bullish":
+        return (
+            "A push through recent highs would strengthen the bullish case.",
+            "Loss of momentum and lower highs would weaken it.",
+        )
+    if thesis_side == "bearish":
+        return (
+            "A rebound that fails quickly would reinforce the bearish case.",
+            "A sustained reclaim of recent highs would weaken it.",
+        )
+    return (
+        "A decisive breakout would set the next directional leg.",
+        "A failed breakout would keep the range intact.",
+    )

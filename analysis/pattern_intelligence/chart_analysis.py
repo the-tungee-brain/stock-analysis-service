@@ -284,8 +284,14 @@ def find_support_resistance_zones(
     lookback: int = 5,
     tolerance_pct: float = 0.012,
     max_zones: int = 4,
+    recent_swing_bars: int = 252,
 ) -> tuple[list[PriceZone], list[PriceZone]]:
+    """Cluster swing levels; return supports below price and resistances above price."""
     swings = find_swing_points(ohlcv, lookback=lookback, max_points=20)
+    if recent_swing_bars > 0 and len(ohlcv) > recent_swing_bars:
+        min_index = len(ohlcv) - recent_swing_bars
+        swings = [s for s in swings if s.bar_index >= min_index]
+
     close = float(ohlcv["close"].iloc[-1])
     supports = _cluster_zones(
         [s for s in swings if s.kind == "low"],
@@ -300,8 +306,11 @@ def find_support_resistance_zones(
         max_zones=max_zones,
     )
 
-    supports.sort(key=lambda z: abs(close - z.price_low))
-    resistances.sort(key=lambda z: abs(close - z.price_high))
+    supports = [z for z in supports if z.price_high < close * 1.005]
+    resistances = [z for z in resistances if z.price_low > close * 0.995]
+
+    supports.sort(key=lambda z: close - z.price_high)
+    resistances.sort(key=lambda z: z.price_low - close)
     return supports[:max_zones], resistances[:max_zones]
 
 

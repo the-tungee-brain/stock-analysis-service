@@ -49,7 +49,6 @@ def build_chart_intelligence(
         resistances=resistances,
         context=context,
         volume_ctx=volume_ctx,
-        ma_ctx=ma_ctx,
         scores=scores,
         model_prediction=model_prediction,
         ranking_score=ranking_score,

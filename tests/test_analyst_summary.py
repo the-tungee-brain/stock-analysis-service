@@ -7,7 +7,6 @@ import pandas as pd
 from analysis.pattern_intelligence.analyst_summary import build_analyst_summary
 from analysis.pattern_intelligence.candlestick_engine import CandlestickPatternHit
 from analysis.pattern_intelligence.chart_analysis import (
-    analyze_moving_averages,
     analyze_trend_structure,
     analyze_volume,
     find_support_resistance_zones,
@@ -27,7 +26,6 @@ def _build_summary(**kwargs):
     structure = analyze_trend_structure(ohlcv)
     supports, resistances = find_support_resistance_zones(ohlcv)
     volume_ctx = analyze_volume(ohlcv, structure)
-    ma_ctx = analyze_moving_averages(ohlcv)
     context = build_trend_context_from_frame(ohlcv)
     scores = build_pattern_scores(
         pattern=pattern,
@@ -44,7 +42,6 @@ def _build_summary(**kwargs):
         resistances=resistances,
         context=context,
         volume_ctx=volume_ctx,
-        ma_ctx=ma_ctx,
         scores=scores,
         model_prediction=model_prediction,
         ranking_score=ranking_score,
@@ -66,7 +63,8 @@ def test_outlook_includes_probability_display():
     summary = _build_summary(ranking_score=0.55)
     assert summary["outlook"]["probability"] == 0.55
     assert summary["outlook"]["probability_display"] == "55%"
-    assert "modest bullish edge" in (summary["outlook"]["model_context"] or "").lower()
+    assert "model c" in summary["outlook"]["expectation"].lower()
+    assert summary["outlook"]["model_context"] is None
 
 
 def test_slight_bearish_inside_uptrend_expectation():
@@ -100,6 +98,53 @@ def test_evidence_bullets_use_plain_language():
     joined = " ".join(texts)
     assert "sma200" not in joined
     assert "%" not in joined
+    assert len(summary["why_this_outlook"]) <= 5
+
+
+def test_evidence_avoids_duplicate_trend_wording():
+    summary = _build_summary(ranking_score=0.62)
+    texts = [b["text"].lower() for b in summary["why_this_outlook"]]
+    assert not any("long-term" in t and "trend" in t for t in texts)
+    assert not any("far above" in t for t in texts)
+
+
+def test_key_level_rejects_stale_resistance_far_below_price():
+    from analysis.pattern_intelligence.analyst_summary import _key_level_block
+    from analysis.pattern_intelligence.chart_analysis import PriceZone
+
+    close = 200.0
+    key = _key_level_block(
+        thesis_side="bullish",
+        supports=[],
+        resistances=[
+            PriceZone(
+                price_low=48.0,
+                price_high=52.0,
+                label="Resistance: $50.00",
+                zone_type="resistance",
+                touches=3,
+                strength=0.8,
+            ),
+            PriceZone(
+                price_low=205.0,
+                price_high=210.0,
+                label="Resistance: $207.00",
+                zone_type="resistance",
+                touches=2,
+                strength=0.6,
+            ),
+        ],
+        close=close,
+    )
+    assert key.get("available") is True
+    assert key["price"] == 205.0
+    assert "50" not in key["display"]
+
+
+def test_thesis_mentions_breakout_scenario():
+    summary = _build_summary(ranking_score=0.62)
+    thesis = summary["thesis"].lower()
+    assert "break" in thesis or "weaken" in thesis or "strengthen" in thesis
 
 
 def test_benchmark_summary():

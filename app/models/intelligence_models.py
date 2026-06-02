@@ -331,6 +331,7 @@ class ChartAnalystKeyLevel(BaseModel):
     level_type: str | None = Field(default=None, serialization_alias="levelType")
     display: str
     implication: str
+    available: bool = True
 
 
 class ChartAnalystEvidenceBullet(BaseModel):
