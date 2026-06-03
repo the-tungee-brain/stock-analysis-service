@@ -33,5 +33,7 @@ class EmergingLeadersResponse(BaseModel):
     as_of_date: str | None = Field(default=None, alias="asOfDate")
     timestamp: str
     universe_scanned: int = Field(alias="universeScanned")
+    symbols_with_data: int = Field(alias="symbolsWithData")
+    evaluations_computed: int = Field(alias="evaluationsComputed")
     excluded_top_movers: int = Field(alias="excludedTopMovers")
     items: list[EmergingLeaderItem]
