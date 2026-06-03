@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from ranking_pipeline.config import default_config
+from ranking_pipeline.datetime_utils import to_naive_utc_timestamp
 from ranking_pipeline.features.parquet_store import load_ranking_features
 from ranking_pipeline.portfolio.config import PortfolioConfig, default_portfolio_config
 from ranking_pipeline.portfolio.constraints import apply_all_constraints
@@ -21,7 +22,8 @@ from ranking_pipeline.storage.sqlite import RankingStore, open_store
 def _load_atr(symbol: str, as_of: pd.Timestamp) -> float | None:
     try:
         df = load_ranking_features(symbol)
-        df = df[df.index <= as_of]
+        cutoff = to_naive_utc_timestamp(as_of)
+        df = df[df.index <= cutoff]
         if df.empty or "atr_14" not in df.columns:
             return None
         val = df["atr_14"].iloc[-1]

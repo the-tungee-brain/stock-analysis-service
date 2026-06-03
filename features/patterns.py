@@ -28,8 +28,16 @@ def _talib_available() -> bool:
     return importlib.util.find_spec("talib") is not None
 
 
-def _normalize_pattern_column(name: str, series: pd.Series) -> pd.Series:
-    values = series.fillna(0)
+def _normalize_pattern_column(
+    name: str,
+    series: pd.Series | None,
+    *,
+    index: pd.Index,
+) -> pd.Series:
+    """pandas-ta sometimes returns None on thin or bad OHLCV; treat as no signal."""
+    if series is None:
+        return pd.Series(0.0, index=index, dtype="float64", name=f"pat_{name}")
+    values = series.reindex(index).fillna(0)
     # pandas-ta / TA-Lib use {-100, 0, 100}; store signed direction as float.
     return values.astype("float64").rename(f"pat_{name}")
 
@@ -45,9 +53,11 @@ def compute_patterns(df: pd.DataFrame) -> pd.DataFrame:
 
     for pattern_name, func_name in NATIVE_PATTERN_FUNCS.items():
         func = getattr(ta, func_name)
+        raw = func(open_, high, low, close)
         columns[f"pat_{pattern_name}"] = _normalize_pattern_column(
             pattern_name,
-            func(open_, high, low, close),
+            raw if isinstance(raw, pd.Series) else None,
+            index=df.index,
         )
 
     talib_patterns = [name for name in PATTERN_NAMES if name not in NATIVE_PATTERN_FUNCS]
@@ -59,6 +69,7 @@ def compute_patterns(df: pd.DataFrame) -> pd.DataFrame:
                 columns[f"pat_{pattern_key}"] = _normalize_pattern_column(
                     pattern_key,
                     detected[col],
+                    index=df.index,
                 )
 
     if not columns:

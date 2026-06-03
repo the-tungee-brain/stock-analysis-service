@@ -10,6 +10,7 @@ import pandas as pd
 
 from data.store import load_raw
 from ranking_pipeline.config import ModelBackend, RankingPipelineConfig
+from ranking_pipeline.datetime_utils import to_naive_utc_timestamp
 from ranking_pipeline.regime.detector import compute_spy_regime_series, regime_for_date
 from ranking_pipeline.features.parquet_store import load_ranking_features
 from ranking_pipeline.features.ranking_features import all_ranking_feature_columns
@@ -24,7 +25,8 @@ def _latest_feature_row(symbol: str, as_of: pd.Timestamp) -> pd.Series | None:
         df = load_ranking_features(symbol)
     except FileNotFoundError:
         return None
-    df = df[df.index <= as_of]
+    cutoff = to_naive_utc_timestamp(as_of)
+    df = df[df.index <= cutoff]
     if df.empty:
         return None
     return df.iloc[-1]
@@ -53,7 +55,7 @@ def run_ranking(
     *,
     as_of: pd.Timestamp | None = None,
 ) -> tuple[str, list[dict]]:
-    as_of_date = as_of or pd.Timestamp.now("UTC").normalize()
+    as_of_date = to_naive_utc_timestamp(as_of or pd.Timestamp.now("UTC"))
     regime_snapshot = _regime_at(store, config, as_of_date)
     regime_multiplier = regime_snapshot.regime_multiplier if regime_snapshot else 1.0
     regime_id = regime_snapshot.regime_id if regime_snapshot else None

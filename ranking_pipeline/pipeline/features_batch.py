@@ -34,23 +34,28 @@ def update_symbol_features(
     include_labels: bool = True,
     decay_halflife_days: float = 10.0,
 ) -> tuple[str, int]:
-    ohlcv = load_raw(symbol)
-    if tail_bars > 0 and len(ohlcv) > tail_bars:
-        ohlcv = ohlcv.iloc[-tail_bars:]
-    features = compute_ranking_features(
-        ohlcv,
-        spy_close,
-        include_labels=include_labels,
-        decay_halflife_days=decay_halflife_days,
-    )
-    if features.empty:
-        return symbol, 0
+    sym = symbol.strip().upper()
+    try:
+        ohlcv = load_raw(sym)
+        if tail_bars > 0 and len(ohlcv) > tail_bars:
+            ohlcv = ohlcv.iloc[-tail_bars:]
+        features = compute_ranking_features(
+            ohlcv,
+            spy_close,
+            include_labels=include_labels,
+            decay_halflife_days=decay_halflife_days,
+        )
+        if features.empty:
+            return sym, 0
 
-    if ranking_features_exists(symbol):
-        existing = load_ranking_features(symbol)
-        features = merge_ranking_features(existing, features)
-    save_ranking_features(features, symbol)
-    return symbol, len(features)
+        if ranking_features_exists(sym):
+            existing = load_ranking_features(sym)
+            features = merge_ranking_features(existing, features)
+        save_ranking_features(features, sym)
+        return sym, len(features)
+    except Exception as exc:
+        logger.warning("Feature update failed for %s: %s", sym, exc)
+        return sym, 0
 
 
 def batch_update_features(

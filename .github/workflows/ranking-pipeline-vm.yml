@@ -17,6 +17,7 @@ on:
           - daily
           - weekly
           - bootstrap
+          - bootstrap-resume
 
 concurrency:
   group: ranking-pipeline-vm

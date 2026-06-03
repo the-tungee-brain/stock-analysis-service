@@ -102,9 +102,12 @@ def compute_spy_regime_series(spy_ohlcv: pd.DataFrame) -> pd.DataFrame:
 
 def regime_for_date(regime_df: pd.DataFrame, as_of: pd.Timestamp) -> RegimeSnapshot | None:
     """Return regime snapshot for the latest row on or before ``as_of``."""
+    from ranking_pipeline.datetime_utils import to_naive_utc_timestamp
+
     if regime_df.empty:
         return None
-    subset = regime_df[regime_df.index <= as_of]
+    cutoff = to_naive_utc_timestamp(as_of)
+    subset = regime_df[regime_df.index <= cutoff]
     if subset.empty:
         return None
     row = subset.iloc[-1]
