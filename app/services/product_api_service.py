@@ -13,6 +13,7 @@ from app.api.product.models import (
     HoldingScoreContributionV1,
     PortfolioLatestResponseV1,
     PortfolioMetricsV1,
+    PortfolioTopContributorV1,
     RankingItemV1,
     RankingsTopResponseV1,
     RiskLayerV1,
@@ -25,6 +26,33 @@ from ranking_pipeline.storage.sqlite import open_store
 
 def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_top_contributors_v1(
+    raw: list | None,
+) -> list[PortfolioTopContributorV1]:
+    """Map persisted metrics_json contributors to v1 contract."""
+    if not raw:
+        return []
+    out: list[PortfolioTopContributorV1] = []
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        symbol = row.get("symbol")
+        if not symbol:
+            continue
+        try:
+            out.append(
+                PortfolioTopContributorV1(
+                    symbol=str(symbol),
+                    weight=float(row.get("weight") or 0.0),
+                    expected_excess_return=float(row.get("expected_excess_return") or 0.0),
+                    contribution=float(row.get("contribution") or 0.0),
+                )
+            )
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def get_rankings_top_v1(*, limit: int = 20, run_id: str | None = None) -> RankingsTopResponseV1:
@@ -141,7 +169,7 @@ def get_portfolio_latest_v1() -> PortfolioLatestResponseV1:
             concentration_hhi=metrics_row.get("concentration_hhi"),
         ),
         risk_layer=risk_layer,
-        top_contributors=metrics_json.get("top_contributors") or [],
+        top_contributors=_parse_top_contributors_v1(metrics_json.get("top_contributors")),
     )
 
 

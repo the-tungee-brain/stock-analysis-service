@@ -61,6 +61,13 @@ class RiskLayerV1(BaseModel):
     vol_scale_factor: float | None = None
 
 
+class PortfolioTopContributorV1(BaseModel):
+    symbol: str
+    weight: float
+    expected_excess_return: float
+    contribution: float
+
+
 class PortfolioLatestResponseV1(ApiEnvelope):
     timestamp: str
     portfolio_id: str
@@ -70,7 +77,7 @@ class PortfolioLatestResponseV1(ApiEnvelope):
     holdings: list[HoldingScoreContributionV1]
     metrics: PortfolioMetricsV1
     risk_layer: RiskLayerV1 | None = None
-    top_contributors: list[dict[str, float]] = Field(default_factory=list)
+    top_contributors: list[PortfolioTopContributorV1] = Field(default_factory=list)
 
 
 # --- Health ---

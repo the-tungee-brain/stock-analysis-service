@@ -18,7 +18,7 @@ class PortfolioRiskMetrics:
     portfolio_volatility_proxy: float
     turnover: float
     concentration_hhi: float
-    top_contributors: list[dict[str, float]]
+    top_contributors: list[dict[str, float | str]]
 
 
 def _hhi(weights: pd.Series) -> float:
@@ -34,7 +34,7 @@ def compute_portfolio_metrics(
     exp_ret = 0.0
     exp_excess = 0.0
     vol_proxy = 0.0
-    contributors: list[dict[str, float]] = []
+    contributors: list[dict[str, float | str]] = []
 
     for sym, w in weights.items():
         c = by_symbol.get(sym)
