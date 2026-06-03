@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from typing import Any, Literal
+from typing import Any
 
 import pandas as pd
 import yfinance as yf
 
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.adapters.market.yfinance_bootstrap import yfinance_fetch_lock
+from app.builders.financial_overview_generator import (
+    FinancialOverviewGenerator,
+    build_metrics_snapshot,
+)
 from app.models.company_research_models import (
     FinancialLineItem,
     FinancialStatementsSnapshot,
@@ -17,8 +21,6 @@ from app.models.company_research_models import (
 )
 
 logger = logging.getLogger(__name__)
-
-StrengthRating = Literal["strong", "solid", "mixed", "weak"]
 
 INCOME_LINE_CANDIDATES: list[tuple[str, tuple[str, ...]]] = [
     ("Total revenue", ("TotalRevenue", "OperatingRevenue")),
@@ -179,144 +181,24 @@ class YFinanceFinancialsBuilder:
         info: dict[str, Any],
     ) -> FinancialStrength:
         snapshot = annual or quarterly
-        revenue = self._line_values(snapshot, "Total revenue") if snapshot else {}
-        net_income = self._line_values(snapshot, "Net income") if snapshot else {}
-        fcf = self._line_values(snapshot, "Free cash flow") if snapshot else {}
-        dividends = self._line_values(snapshot, "Dividends paid") if snapshot else {}
         periods = snapshot.periods if snapshot else []
-
-        score = 50
-        strengths: list[str] = []
-        risks: list[str] = []
-        highlights: list[str] = []
-
-        rev_growth = self._yoy_change(revenue, periods)
-        if rev_growth is not None:
-            highlights.append(f"Revenue {'increased' if rev_growth >= 0 else 'declined'} {abs(rev_growth):.1f}% year over year.")
-            if rev_growth >= 20:
-                score += 15
-                strengths.append("Strong revenue growth versus the prior year.")
-            elif rev_growth >= 5:
-                score += 8
-                strengths.append("Revenue is still growing year over year.")
-            elif rev_growth >= 0:
-                score += 3
-            else:
-                score -= 12
-                risks.append("Revenue is shrinking year over year.")
-
-        latest_period = periods[0] if periods else None
-        if latest_period and revenue.get(latest_period) and net_income.get(latest_period):
-            rev = revenue[latest_period]
-            ni = net_income[latest_period]
-            if rev and ni is not None:
-                margin = (ni / rev) * 100
-                highlights.append(f"Net margin about {margin:.1f}% on the latest period.")
-                if margin >= 20:
-                    score += 12
-                    strengths.append("High net profit margins suggest strong pricing power or efficiency.")
-                elif margin >= 10:
-                    score += 6
-                elif margin >= 0:
-                    score += 1
-                else:
-                    score -= 18
-                    risks.append("The latest period shows negative net income.")
-
-        fcf_trend = self._yoy_change(fcf, periods)
-        latest_fcf = fcf.get(latest_period) if latest_period else None
-        if latest_fcf is not None:
-            highlights.append(
-                f"Free cash flow {'$' + self._fmt_compact(latest_fcf) if latest_fcf >= 0 else '-' + self._fmt_compact(abs(latest_fcf))} in the latest period."
-            )
-            if latest_fcf > 0:
-                score += 8
-                strengths.append("Positive free cash flow supports buybacks, dividends, and reinvestment.")
-            else:
-                score -= 10
-                risks.append("Negative free cash flow — cash burn or heavy reinvestment phase.")
-            if fcf_trend is not None and fcf_trend > 10:
-                score += 5
-
-        payout_ratio = info.get("payoutRatio")
-        if isinstance(payout_ratio, (int, float)):
-            payout_pct = payout_ratio * 100 if abs(payout_ratio) <= 1.5 else payout_ratio
-            highlights.append(f"Payout ratio about {payout_pct:.0f}%.")
-            if payout_pct <= 60:
-                score += 4
-                strengths.append("Dividend payout ratio looks conservative versus earnings.")
-            elif payout_pct <= 80:
-                score += 1
-            elif payout_pct > 100:
-                score -= 6
-                risks.append("Payout ratio above 100% — dividend may depend on balance sheet or non-earnings cash.")
-
-        latest_dividends = dividends.get(latest_period) if latest_period else None
-        if latest_fcf is not None and latest_fcf > 0 and latest_dividends is not None:
-            dividends_paid = abs(latest_dividends)
-            if dividends_paid > 0:
-                coverage = latest_fcf / dividends_paid
-                fcf_payout_pct = (dividends_paid / latest_fcf) * 100
-                highlights.append(
-                    f"Free cash flow covers dividends about {coverage:.1f}x "
-                    f"({fcf_payout_pct:.0f}% of FCF paid out)."
-                )
-                if coverage >= 1.5:
-                    score += 6
-                    strengths.append("Free cash flow comfortably covers dividend payments.")
-                elif coverage >= 1.0:
-                    score += 2
-                else:
-                    score -= 8
-                    risks.append("Dividends exceed free cash flow — watch payout sustainability.")
-
-        debt_equity = info.get("debtToEquity")
-        if isinstance(debt_equity, (int, float)):
-            highlights.append(f"Debt-to-equity (market data) about {debt_equity:.2f}.")
-            if debt_equity < 50:
-                score += 8
-                strengths.append("Balance sheet leverage looks moderate by debt-to-equity.")
-            elif debt_equity < 100:
-                score += 2
-            else:
-                score -= 8
-                risks.append("Elevated leverage — gains and losses are amplified.")
-
-        current_ratio = info.get("currentRatio")
-        if isinstance(current_ratio, (int, float)):
-            if current_ratio >= 1.5:
-                score += 5
-                strengths.append("Current ratio suggests comfortable short-term liquidity.")
-            elif current_ratio < 1.0:
-                score -= 8
-                risks.append("Current ratio below 1.0 — watch near-term liquidity.")
-
-        roe = info.get("returnOnEquity")
-        if isinstance(roe, (int, float)):
-            roe_pct = roe * 100 if abs(roe) <= 1.5 else roe
-            highlights.append(f"Return on equity about {roe_pct:.1f}%.")
-            if roe_pct >= 15:
-                score += 6
-                strengths.append("Strong return on equity.")
-            elif roe_pct < 5:
-                score -= 4
-
-        score = max(0, min(100, score))
-        rating = self._rating_from_score(score)
-        headline = self._headline_for_rating(symbol, rating)
-
-        if not strengths:
-            strengths.append("Review the statement tables for margin and cash-flow trends.")
-        if not risks:
-            risks.append("Compare leverage and growth assumptions to your portfolio risk tolerance.")
-
+        metrics = build_metrics_snapshot(
+            info=info,
+            revenue_by_period=self._line_values(snapshot, "Total revenue"),
+            net_income_by_period=self._line_values(snapshot, "Net income"),
+            gross_profit_by_period=self._line_values(snapshot, "Gross profit"),
+            free_cash_flow_by_period=self._line_values(snapshot, "Free cash flow"),
+            dividends_by_period=self._line_values(snapshot, "Dividends paid"),
+            periods=periods,
+        )
+        overview = FinancialOverviewGenerator().generate(symbol, metrics)
         return FinancialStrength(
-            rating=rating,
-            score=score,
-            headline=headline,
-            strengths=strengths[:4],
-            risks=risks[:4],
-            highlights=highlights[:7],
+            rating=overview.rating,
+            score=overview.score,
+            headline=overview.headline,
+            strengths=overview.strengths,
+            risks=overview.risks,
+            highlights=overview.highlights,
         )
 
     @staticmethod
@@ -335,44 +217,3 @@ class YFinanceFinancialsBuilder:
                 if row.label.lower() == label.lower():
                     return dict(row.values)
         return {}
-
-    @staticmethod
-    def _yoy_change(values: dict[str, float | None], periods: list[str]) -> float | None:
-        if len(periods) < 2:
-            return None
-        latest = values.get(periods[0])
-        prior = values.get(periods[1])
-        if latest is None or prior is None or prior == 0:
-            return None
-        return ((latest - prior) / abs(prior)) * 100
-
-    @staticmethod
-    def _rating_from_score(score: int) -> StrengthRating:
-        if score >= 75:
-            return "strong"
-        if score >= 55:
-            return "solid"
-        if score >= 35:
-            return "mixed"
-        return "weak"
-
-    @staticmethod
-    def _headline_for_rating(symbol: str, rating: StrengthRating) -> str:
-        labels = {
-            "strong": "Financial profile looks strong",
-            "solid": "Financial profile looks solid",
-            "mixed": "Financial profile is mixed",
-            "weak": "Financial profile looks weak",
-        }
-        return f"{labels[rating]} for {symbol.upper()}."
-
-    @staticmethod
-    def _fmt_compact(value: float) -> str:
-        abs_val = abs(value)
-        if abs_val >= 1_000_000_000_000:
-            return f"{abs_val / 1_000_000_000_000:.1f}T"
-        if abs_val >= 1_000_000_000:
-            return f"{abs_val / 1_000_000_000:.1f}B"
-        if abs_val >= 1_000_000:
-            return f"{abs_val / 1_000_000:.1f}M"
-        return f"{abs_val:,.0f}"

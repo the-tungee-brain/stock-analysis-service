@@ -113,8 +113,10 @@ def test_build_financials_package(mock_ticker_cls):
     assert revenue.values["2026-04-30"] == 44_000_000_000
     assert package.strength.rating in {"strong", "solid", "mixed", "weak"}
     assert package.strength.score >= 0
-    assert any("Payout ratio" in item for item in package.strength.highlights)
-    assert any("covers dividends" in item for item in package.strength.highlights)
+    assert package.strength.headline.endswith(".") or "—" in package.strength.headline
+    assert len(package.strength.strengths) <= 3
+    assert len(package.strength.risks) <= 3
+    assert any("Gross margin" in item or "Net margin" in item for item in package.strength.highlights)
     dividends = next(
         row for row in package.quarterly.cash_flow if row.label == "Dividends paid"
     )
