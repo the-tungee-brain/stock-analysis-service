@@ -7,6 +7,7 @@ from app.models.trade_decision_models import (
     ScoreBucket,
     TradeAction,
     TradeDecision,
+    TradeDecisionReasonBreakdown,
     TradeDecisionRegime,
     TradeEnvironment,
     TradeVerdict,
@@ -26,13 +27,14 @@ WEIGHT_BREAKOUT = 0.25
 WEIGHT_SR = 0.15
 WEIGHT_PATTERN = 0.10
 
-REJECTION_REGIME = "Neutral or unfavorable regime"
-REJECTION_BREAKOUT = "Weak breakout quality"
-REJECTION_RS = "Weak relative strength"
-REJECTION_SR = "Poor S/R structure"
-REJECTION_PATTERN = "Low pattern reliability"
-REJECTION_EARLY = "Weak early-mover / trend inflection signals"
-REJECTION_SCORE = "Trade quality below actionable threshold"
+TrendStage = Literal["early", "mid", "late", "unknown"]
+
+
+@dataclass(frozen=True)
+class _ExecutionFactor:
+    factor_id: str
+    weighted_gap: float
+    line: str
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,8 @@ class _ScoreComponents:
 def evaluate_trade_decision(inputs: TradeDecisionInputs) -> TradeDecision:
     regime = _regime_gate(inputs.regime_id, inputs.market_breadth_pct)
     symbol = inputs.symbol.upper()
+    rs_pct = _resolve_rs_percentile(inputs)
+    components = _score_components(inputs, rs_pct)
 
     if regime.trade_environment == "AVOID":
         return _compile(
@@ -75,13 +79,11 @@ def evaluate_trade_decision(inputs: TradeDecisionInputs) -> TradeDecision:
             as_of_date=inputs.as_of_date,
             regime=regime,
             score=0,
-            components=None,
+            components=components,
             inputs=inputs,
-            rs_pct=None,
+            rs_pct=rs_pct,
         )
 
-    rs_pct = _resolve_rs_percentile(inputs)
-    components = _score_components(inputs, rs_pct)
     score = _compute_trade_quality_score(components)
     return _compile(
         symbol=symbol,
@@ -112,13 +114,14 @@ def _compile(
         score = 0
 
     action = _action_from_verdict(verdict)
-    rejection = _primary_rejection_reason(
+    if components is None:
+        components = _score_components(inputs, rs_pct)
+    reason_breakdown = _build_reason_breakdown(
         regime=regime,
-        verdict=verdict,
+        score=score,
+        components=components,
         inputs=inputs,
         rs_pct=rs_pct,
-        components=components,
-        score=score,
     )
 
     return TradeDecision(
@@ -129,7 +132,7 @@ def _compile(
         score_bucket=bucket,
         verdict=verdict,
         action=action,
-        primary_rejection_reason=rejection,
+        reason_breakdown=reason_breakdown,
     )
 
 
@@ -252,56 +255,199 @@ def _action_from_verdict(verdict: TradeVerdict) -> TradeAction:
     return "AVOID"
 
 
-def _primary_rejection_reason(
-    *,
-    regime: TradeDecisionRegime,
-    verdict: TradeVerdict,
+def _regime_label(regime_id: str | None) -> str:
+    mapping = {
+        REGIME_RISK_ON_TREND: "risk_on_trend",
+        REGIME_RISK_ON_CHOP: "risk_on_chop",
+        REGIME_RISK_OFF: "risk_off",
+        REGIME_HIGH_VOL_CHOP: "high_vol_chop",
+    }
+    return mapping.get(regime_id or "", regime_id or "unknown")
+
+
+def _trend_stage(inputs: TradeDecisionInputs, rs_pct: float | None) -> TrendStage:
+    early = _early_mover_score(inputs) >= 0.45
+    at_highs = (inputs.dist_52w_high_pct is not None and inputs.dist_52w_high_pct <= 0.02) or (
+        inputs.near_52w_high and not early
+    )
+    if early and rs_pct is not None and rs_pct < 80:
+        return "early"
+    if at_highs or (rs_pct is not None and rs_pct >= 85):
+        return "late"
+    if rs_pct is not None and rs_pct >= 55:
+        return "mid"
+    return "unknown"
+
+
+def _execution_factors(
+    components: _ScoreComponents,
     inputs: TradeDecisionInputs,
     rs_pct: float | None,
-    components: _ScoreComponents | None,
-    score: int,
-) -> str | None:
-    if verdict == "TRADE":
-        return None
+) -> list[_ExecutionFactor]:
+    rs_val = rs_pct if rs_pct is not None else components.rs
+    factors: list[_ExecutionFactor] = []
 
+    breakout = components.breakout
+    breakout_adj = "Weak" if breakout < 55 else "Moderate"
+    factors.append(
+        _ExecutionFactor(
+            "breakout",
+            WEIGHT_BREAKOUT * (100.0 - breakout),
+            f"{breakout_adj} breakout quality ({int(round(breakout))}/100)",
+        )
+    )
+
+    rs_adj = "Weak" if rs_val < 50 else "Moderate"
+    if rs_pct is not None:
+        rs_line = f"{rs_adj} relative strength ({rs_pct:.0f}th percentile)"
+    else:
+        rs_line = f"{rs_adj} relative strength (score {rs_val:.0f}/100)"
+    factors.append(
+        _ExecutionFactor("rs", WEIGHT_RS * (100.0 - rs_val), rs_line),
+    )
+
+    sr = components.support_resistance
+    sr_adj = "Low" if sr < 50 else "Moderate"
+    factors.append(
+        _ExecutionFactor(
+            "sr",
+            WEIGHT_SR * (100.0 - sr),
+            f"{sr_adj} support/resistance strength ({int(round(sr))}/100)",
+        )
+    )
+
+    pattern = components.pattern
+    reliability = inputs.pattern_reliability
+    pattern_adj = "Poor" if reliability == "low" else "Moderate"
+    factors.append(
+        _ExecutionFactor(
+            "pattern",
+            WEIGHT_PATTERN * (100.0 - pattern),
+            f"{pattern_adj} pattern reliability ({reliability})",
+        )
+    )
+
+    early = components.early_mover
+    early_adj = "Weak" if early < 45 else "Moderate"
+    factors.append(
+        _ExecutionFactor(
+            "early_mover",
+            WEIGHT_EARLY_MOVER * (100.0 - early),
+            f"{early_adj} early-mover / trend inflection ({int(round(early))}/100)",
+        )
+    )
+
+    return factors
+
+
+def _primary_weakness(
+    components: _ScoreComponents,
+    inputs: TradeDecisionInputs,
+    rs_pct: float | None,
+) -> str:
+    factors = _execution_factors(components, inputs, rs_pct)
+    core = [f for f in factors if f.factor_id in {"breakout", "rs", "sr", "pattern"}]
+    return max(core, key=lambda item: item.weighted_gap).line
+
+
+def _hard_blockers(regime: TradeDecisionRegime, score: int) -> list[str]:
+    blockers: list[str] = []
     if regime.trade_environment == "AVOID":
-        return REJECTION_REGIME
+        blockers.append(
+            f"Unfavorable regime gate ({_regime_label(regime.regime_id)})"
+        )
+    if score < 40:
+        blockers.append(f"Trade quality score below threshold ({score}/100)")
+    return blockers
 
-    candidates: list[tuple[float, str]] = []
 
-    breakout = float(max(0, min(100, inputs.breakout_quality_score)))
-    if breakout < 45:
-        gap = (45.0 - breakout) * WEIGHT_BREAKOUT
-        candidates.append((gap, REJECTION_BREAKOUT))
-
-    rs_val = rs_pct if rs_pct is not None else (components.rs if components else 50.0)
-    if rs_val < 55:
-        gap = (55.0 - rs_val) * WEIGHT_RS
-        candidates.append((gap, REJECTION_RS))
-
-    sr = float(max(0, min(100, inputs.support_resistance_confidence)))
-    if sr < 50:
-        gap = (50.0 - sr) * WEIGHT_SR
-        candidates.append((gap, REJECTION_SR))
-
-    if inputs.pattern_reliability == "low":
-        candidates.append((8.0, REJECTION_PATTERN))
-
-    early = components.early_mover if components else _early_mover_score(inputs) * 100.0
-    if early < 45:
-        gap = (45.0 - early) * WEIGHT_EARLY_MOVER
-        candidates.append((gap, REJECTION_EARLY))
+def _secondary_factors(
+    *,
+    regime: TradeDecisionRegime,
+    primary_id: str,
+    components: _ScoreComponents,
+    inputs: TradeDecisionInputs,
+    rs_pct: float | None,
+    score: int,
+) -> list[str]:
+    secondary: list[str] = []
 
     if regime.trade_environment == "NEUTRAL":
-        candidates.append((6.0, REJECTION_REGIME))
+        secondary.append(f"Neutral regime ({_regime_label(regime.regime_id)})")
+    elif regime.trade_environment == "FAVORABLE":
+        secondary.append(f"Favorable regime ({_regime_label(regime.regime_id)})")
 
-    if score < 40 and not candidates:
-        return REJECTION_SCORE
+    stage = _trend_stage(inputs, rs_pct)
+    stage_lines = {
+        "early": "Early-trend / inflection structure",
+        "mid": "Mid-trend structure",
+        "late": "Late-stage extension structure",
+    }
+    if stage in stage_lines and primary_id not in {"early_mover", "rs"}:
+        secondary.append(stage_lines[stage])
+    elif stage == "mid" and primary_id == "rs" and stage_lines["mid"] not in secondary:
+        secondary.append(stage_lines["mid"])
 
-    if candidates:
-        return max(candidates, key=lambda item: item[0])[1]
+    if rs_pct is not None and primary_id != "rs":
+        if rs_pct >= 70:
+            secondary.append(f"Strong RS percentile ({rs_pct:.0f}th)")
+        elif rs_pct >= 55:
+            secondary.append(f"Mid-trend RS strength ({rs_pct:.0f}th percentile)")
+        elif rs_pct >= 45:
+            secondary.append(f"Moderate RS percentile ({rs_pct:.0f}th)")
 
-    return REJECTION_SCORE
+    if primary_id != "pattern" and inputs.pattern_reliability == "medium":
+        secondary.append("Moderate pattern reliability")
+
+    if primary_id != "breakout" and 55 <= components.breakout < 70:
+        secondary.append(
+            f"Breakout not yet confirming ({int(round(components.breakout))}/100)"
+        )
+
+    if primary_id != "early_mover" and components.early_mover < 55:
+        secondary.append(
+            f"Limited early-mover signals ({int(round(components.early_mover))}/100)"
+        )
+
+    if primary_id != "sr" and components.support_resistance >= 55:
+        secondary.append(
+            f"Support/resistance acceptable ({int(round(components.support_resistance))}/100)"
+        )
+
+    if score >= 80 and not secondary:
+        secondary.append("Execution factors align across RS, breakout, and structure")
+
+    deduped: list[str] = []
+    for item in secondary:
+        if item not in deduped:
+            deduped.append(item)
+    return deduped[:3]
+
+
+def _build_reason_breakdown(
+    *,
+    regime: TradeDecisionRegime,
+    score: int,
+    components: _ScoreComponents,
+    inputs: TradeDecisionInputs,
+    rs_pct: float | None,
+) -> TradeDecisionReasonBreakdown:
+    factors = _execution_factors(components, inputs, rs_pct)
+    core_factors = [f for f in factors if f.factor_id in {"breakout", "rs", "sr", "pattern"}]
+    primary_factor = max(core_factors, key=lambda item: item.weighted_gap)
+
+    return TradeDecisionReasonBreakdown(
+        hard_blockers=_hard_blockers(regime, score),
+        primary_weakness=_primary_weakness(components, inputs, rs_pct),
+        secondary_factors=_secondary_factors(
+            regime=regime,
+            primary_id=primary_factor.factor_id,
+            components=components,
+            inputs=inputs,
+            rs_pct=rs_pct,
+            score=score,
+        ),
+    )
 
 
 def compute_breakout_quality_score(

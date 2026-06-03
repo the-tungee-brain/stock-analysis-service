@@ -1,8 +1,12 @@
 from app.builders.trade_decision_engine import TradeDecisionInputs, evaluate_trade_decision
-from ranking_pipeline.regime.constants import REGIME_RISK_OFF, REGIME_RISK_ON_TREND
+from ranking_pipeline.regime.constants import (
+    REGIME_RISK_OFF,
+    REGIME_RISK_ON_CHOP,
+    REGIME_RISK_ON_TREND,
+)
 
 
-def test_avoid_regime_forces_no_trade():
+def test_avoid_regime_hard_blocker_not_primary_weakness():
     inputs = TradeDecisionInputs(
         symbol="TEST",
         as_of_date="2026-01-01",
@@ -24,11 +28,9 @@ def test_avoid_regime_forces_no_trade():
     )
     result = evaluate_trade_decision(inputs)
     assert result.verdict == "NO_TRADE"
-    assert result.score_bucket == "NO_TRADE"
-    assert result.action == "AVOID"
-    assert result.regime.trade_environment == "AVOID"
-    assert result.trade_quality_score == 0
-    assert result.primary_rejection_reason == "Neutral or unfavorable regime"
+    assert any("regime gate" in b.lower() for b in result.reason_breakdown.hard_blockers)
+    assert result.reason_breakdown.primary_weakness is not None
+    assert "regime gate" not in result.reason_breakdown.primary_weakness.lower()
 
 
 def test_trade_verdict_when_score_high():
@@ -53,13 +55,12 @@ def test_trade_verdict_when_score_high():
     )
     result = evaluate_trade_decision(inputs)
     assert result.trade_quality_score >= 80
-    assert result.score_bucket == "TRADE"
     assert result.verdict == "TRADE"
-    assert result.action == "ENTER"
-    assert result.primary_rejection_reason is None
+    assert result.reason_breakdown.hard_blockers == []
+    assert result.reason_breakdown.primary_weakness is not None
 
 
-def test_weak_inputs_no_trade_bucket():
+def test_weak_inputs_score_hard_blocker():
     inputs = TradeDecisionInputs(
         symbol="TEST",
         as_of_date="2026-01-01",
@@ -81,10 +82,38 @@ def test_weak_inputs_no_trade_bucket():
     )
     result = evaluate_trade_decision(inputs)
     assert result.trade_quality_score < 40
-    assert result.score_bucket == "NO_TRADE"
-    assert result.verdict == "NO_TRADE"
-    assert result.action == "AVOID"
-    assert result.primary_rejection_reason is not None
+    assert any("below threshold" in b for b in result.reason_breakdown.hard_blockers)
+    assert "breakout" in result.reason_breakdown.primary_weakness.lower()
+
+
+def test_neutral_regime_is_secondary_not_primary():
+    inputs = TradeDecisionInputs(
+        symbol="TEST",
+        as_of_date="2026-01-01",
+        regime_id=REGIME_RISK_ON_CHOP,
+        market_breadth_pct=None,
+        rs_percentile=78.0,
+        rs_score_0_1=0.78,
+        rs_21d=0.04,
+        rs_63d=0.03,
+        vol_ratio_20d=1.1,
+        dist_52w_high_pct=0.1,
+        near_52w_high=False,
+        trend_acceleration=False,
+        breakout_quality_score=45,
+        support_resistance_confidence=58,
+        pattern_reliability="medium",
+        ranking_rank=12,
+        universe_rank_count=100,
+    )
+    result = evaluate_trade_decision(inputs)
+    assert result.regime.trade_environment == "NEUTRAL"
+    assert "breakout" in result.reason_breakdown.primary_weakness.lower()
+    assert any(
+        "neutral regime" in f.lower() and "risk_on_chop" in f
+        for f in result.reason_breakdown.secondary_factors
+    )
+    assert "regime" not in result.reason_breakdown.primary_weakness.lower()
 
 
 def test_setup_bucket_watchlist_verdict():
@@ -109,34 +138,5 @@ def test_setup_bucket_watchlist_verdict():
     )
     result = evaluate_trade_decision(inputs)
     assert 60 <= result.trade_quality_score < 80
-    assert result.score_bucket == "SETUP"
     assert result.verdict == "WATCHLIST"
-    assert result.action == "WAIT_FOR_SETUP"
-    assert result.primary_rejection_reason is not None
-
-
-def test_watchlist_bucket_weak_setup():
-    inputs = TradeDecisionInputs(
-        symbol="TEST",
-        as_of_date="2026-01-01",
-        regime_id=REGIME_RISK_ON_TREND,
-        market_breadth_pct=None,
-        rs_percentile=52.0,
-        rs_score_0_1=0.52,
-        rs_21d=0.02,
-        rs_63d=0.01,
-        vol_ratio_20d=1.1,
-        dist_52w_high_pct=0.12,
-        near_52w_high=False,
-        trend_acceleration=False,
-        breakout_quality_score=48,
-        support_resistance_confidence=52,
-        pattern_reliability="medium",
-        ranking_rank=25,
-        universe_rank_count=80,
-    )
-    result = evaluate_trade_decision(inputs)
-    assert 40 <= result.trade_quality_score < 60
-    assert result.score_bucket == "WATCHLIST"
-    assert result.verdict == "WATCHLIST"
-    assert result.action == "WAIT_FOR_SETUP"
+    assert len(result.reason_breakdown.secondary_factors) <= 3

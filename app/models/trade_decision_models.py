@@ -17,6 +17,16 @@ class TradeDecisionRegime(BaseModel):
     trade_environment: TradeEnvironment = Field(alias="tradeEnvironment")
 
 
+class TradeDecisionReasonBreakdown(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    hard_blockers: list[str] = Field(default_factory=list, alias="hardBlockers")
+    primary_weakness: str | None = Field(default=None, alias="primaryWeakness")
+    secondary_factors: list[str] = Field(
+        default_factory=list, alias="secondaryFactors", max_length=3
+    )
+
+
 class TradeDecision(BaseModel):
     """Single-output trade decision compiled from regime gate → score → bucket → verdict."""
 
@@ -29,6 +39,4 @@ class TradeDecision(BaseModel):
     score_bucket: ScoreBucket = Field(alias="scoreBucket")
     verdict: TradeVerdict
     action: TradeAction
-    primary_rejection_reason: str | None = Field(
-        default=None, alias="primaryRejectionReason"
-    )
+    reason_breakdown: TradeDecisionReasonBreakdown = Field(alias="reasonBreakdown")
