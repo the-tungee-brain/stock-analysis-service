@@ -131,7 +131,7 @@ async def get_fundamentals(
         ),
         strength=(
             financials_package.strength
-            if paid and financials_package is not None
+            if financials_package is not None
             else None
         ),
         street_analysis=street_analysis,
