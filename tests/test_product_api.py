@@ -34,8 +34,12 @@ def test_health_reader_missing_db(tmp_path: Path):
 
 
 def test_health_reader_with_ranking_run(tmp_path: Path):
+    from datetime import datetime, timedelta, timezone
+
     db = tmp_path / "rank.db"
     import sqlite3
+
+    fresh = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
 
     conn = sqlite3.connect(db)
     conn.executescript(
@@ -55,7 +59,7 @@ def test_health_reader_with_ranking_run(tmp_path: Path):
     )
     conn.execute(
         "INSERT INTO ranking_runs VALUES (?,?,?,?,?,?,?)",
-        ("r1", "2026-06-01", "composite", "u1", 100, "2026-06-02T10:00:00+00:00", "risk_on_chop"),
+        ("r1", "2026-06-01", "composite", "u1", 100, fresh, "risk_on_chop"),
     )
     conn.execute(
         "INSERT INTO universe_snapshots VALUES (?,?,?)",
