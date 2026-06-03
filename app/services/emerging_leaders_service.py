@@ -9,6 +9,7 @@ from app.builders.emerging_leaders_engine import (
     STAGE_LABELS,
     EmergingLeaderEvaluation,
     evaluate_emerging_leader,
+    passes_emerging_leader_list,
     ranking_sort_key,
 )
 from app.models.emerging_leaders_models import EmergingLeaderItem, EmergingLeadersResponse
@@ -79,7 +80,7 @@ def build_emerging_leaders(*, limit: int = 20) -> EmergingLeadersResponse:
             futures = {pool.submit(_score_symbol, sym): sym for sym in candidates}
             for future in as_completed(futures):
                 result = future.result()
-                if result is not None:
+                if result is not None and passes_emerging_leader_list(result):
                     evaluations.append(result)
 
     evaluations.sort(key=ranking_sort_key, reverse=True)
