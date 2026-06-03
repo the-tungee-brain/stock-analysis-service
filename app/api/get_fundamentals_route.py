@@ -1,6 +1,6 @@
 import asyncio
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.auth.dependencies import get_current_user_id
 from app.core.paid_access import is_paid_user
@@ -34,6 +34,14 @@ router = APIRouter()
 )
 async def get_fundamentals(
     symbol: str,
+    include_ai_overview: bool = Query(
+        default=False,
+        description="When true, Pro users receive LLM-generated fundamentals overview.",
+    ),
+    include_street_analysis: bool = Query(
+        default=False,
+        description="When true, include Wall Street estimates and ownership snapshot.",
+    ),
     user_id: str = Depends(get_current_user_id),
     company_research_service: CompanyResearchService = Depends(
         get_company_research_service
@@ -72,16 +80,17 @@ async def get_fundamentals(
             yfinance_financials_builder.build,
             symbol=symbol,
         )
-        street_analysis = await asyncio.to_thread(
-            yfinance_analysis_builder.build,
-            symbol=symbol,
-        )
+        if include_street_analysis:
+            street_analysis = await asyncio.to_thread(
+                yfinance_analysis_builder.build,
+                symbol=symbol,
+            )
 
     paid = is_paid_user(user_id)
     overview: FundamentalsOverview | None = None
     overview_note = ""
 
-    if paid:
+    if paid and include_ai_overview:
         prompts = prompt_enrichment_service.build_fundamentals_prompt(
             ctx=ctx,
             metrics=metrics,

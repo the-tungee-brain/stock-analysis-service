@@ -89,7 +89,10 @@ async def get_earnings_detail(
     user_id: str = Depends(get_current_user_id),
     transcript_id: str | None = Query(default=None),
     include_transcript: bool = Query(default=True),
-    include_analysis: bool = Query(default=True),
+    include_analysis: bool = Query(
+        default=False,
+        description="When true, Pro users receive LLM-generated earnings analysis.",
+    ),
     earnings_service: EarningsService = Depends(get_earnings_service),
     prompt_enrichment_service: PromptEnrichmentService = Depends(
         get_prompt_enrichment_service
