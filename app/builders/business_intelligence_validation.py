@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 from app.models.company_research_models import BusinessBlock
 
@@ -23,6 +24,35 @@ _BANNED_PHRASES = (
     "at a glance",
     "in conclusion",
     "overall, the company",
+    "disciplined execution",
+    "strategic positioning",
+    "operational momentum",
+    "enhancing capabilities",
+    "robust ecosystem",
+    "scaling efficiently",
+    "strong market position",
+    "well positioned",
+    "best-in-class",
+    "industry-leading",
+    "commitment to innovation",
+    "focus on innovation",
+    "drive growth",
+    "continue to grow",
+    "favorable macro",
+    "headwinds and tailwinds",
+)
+
+_VAGUE_ONLY_RE = re.compile(
+    r"^(?:strong|robust|solid|leading|innovative|strategic|dynamic|"
+    r"competitive|scalable|efficient)\s+(?:business|model|position|growth|"
+    r"operations|performance|momentum|ecosystem|capabilities)\.?$",
+    re.IGNORECASE,
+)
+
+_GROWTH_IN_MECHANISM_RE = re.compile(
+    r"\b(growth outlook|market expansion|increasing demand|adoption trends|"
+    r"geographic expansion|upside potential)\b",
+    re.IGNORECASE,
 )
 
 
@@ -43,23 +73,54 @@ def normalize_business_intelligence(
             "industry": block.industry.strip(),
             "primary_product": _clean_line(block.primary_product),
             "revenue_model": _clean_line(block.revenue_model),
-            "business_model": _clean_line(block.business_model),
-            "primary_customers": _filter_bullets(block.primary_customers, 5),
-            "how_they_make_money": _filter_bullets(block.how_they_make_money, 3),
+            "primary_customers": _filter_bullets(block.primary_customers, 4),
+            "how_they_make_money": _filter_bullets(
+                block.how_they_make_money,
+                3,
+                extra_check=_reject_growth_commentary,
+            ),
+            "revenue_visibility": _filter_bullets(block.revenue_visibility, 2),
             "advantages": _filter_bullets(block.advantages, 5),
             "challenges": _filter_bullets(block.challenges, 5),
-            "growth_drivers": _filter_bullets(block.growth_drivers, 5),
+            "growth_drivers": _filter_bullets(
+                block.growth_drivers,
+                5,
+                extra_check=_reject_non_revenue_growth,
+            ),
             "business_risks": _filter_bullets(block.business_risks, 5),
             "dependencies": _filter_bullets(block.dependencies, 5),
         }
     )
 
 
-def _filter_bullets(items: list[str], limit: int) -> list[str]:
+def _reject_growth_commentary(line: str) -> bool:
+    return bool(_GROWTH_IN_MECHANISM_RE.search(line))
+
+
+def _reject_non_revenue_growth(line: str) -> bool:
+    lowered = line.lower()
+    non_revenue = (
+        "brand awareness",
+        "employee morale",
+        "corporate culture",
+        "esg",
+        "sustainability initiatives",
+    )
+    return any(phrase in lowered for phrase in non_revenue)
+
+
+def _filter_bullets(
+    items: list[str],
+    limit: int,
+    *,
+    extra_check: Callable[[str], bool] | None = None,
+) -> list[str]:
     cleaned: list[str] = []
     for raw in items:
         line = _clean_line(raw)
         if not line:
+            continue
+        if extra_check and extra_check(line):
             continue
         if _is_disallowed(line):
             continue
@@ -68,49 +129,14 @@ def _filter_bullets(items: list[str], limit: int) -> list[str]:
 
 
 def _is_disallowed(text: str) -> bool:
-    if len(text) > 220:
+    if len(text) > 160:
         return True
     if _BANNED_PATTERN.search(text):
+        return True
+    if _VAGUE_ONLY_RE.match(text.strip()):
         return True
     lowered = text.lower()
     return any(phrase in lowered for phrase in _BANNED_PHRASES)
-
-
-def _all_text_fields(block: BusinessBlock) -> list[str]:
-    return [
-        block.industry,
-        block.primary_product,
-        block.revenue_model,
-        block.business_model,
-        *block.primary_customers,
-        *block.how_they_make_money,
-        *block.advantages,
-        *block.challenges,
-        *block.growth_drivers,
-        *block.business_risks,
-        *block.dependencies,
-    ]
-
-
-def _assert_no_financial_overlap(text: str) -> None:
-    if not text.strip():
-        return
-    if _BANNED_PATTERN.search(text):
-        raise BusinessIntelligenceValidationError(
-            f"Business content must not include financial/valuation metrics: {text!r}",
-        )
-
-
-def _assert_not_banned_prose(text: str) -> None:
-    lowered = text.lower()
-    if len(text) > 220:
-        raise BusinessIntelligenceValidationError(
-            "Business bullets must be short — move detail into separate fields.",
-        )
-    if any(phrase in lowered for phrase in _BANNED_PHRASES):
-        raise BusinessIntelligenceValidationError(
-            f"Generic AI phrasing detected: {text!r}",
-        )
 
 
 def _normalize_bullets(items: list[str], limit: int) -> list[str]:

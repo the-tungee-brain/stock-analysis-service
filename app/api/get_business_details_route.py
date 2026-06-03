@@ -18,7 +18,7 @@ from app.dependencies.service_dependencies import (
 router = APIRouter()
 
 
-BUSINESS_LLM_FINGERPRINT_SUFFIX = ":business-intel-v2"
+BUSINESS_LLM_FINGERPRINT_SUFFIX = ":business-intel-v3"
 
 
 @router.get(

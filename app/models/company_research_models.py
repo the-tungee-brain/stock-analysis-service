@@ -82,10 +82,13 @@ class BusinessBlock(BaseModel):
         default_factory=list,
         alias="primaryCustomers",
     )
-    business_model: str = Field(default="", alias="businessModel")
     how_they_make_money: list[str] = Field(
         default_factory=list,
         alias="howTheyMakeMoney",
+    )
+    revenue_visibility: list[str] = Field(
+        default_factory=list,
+        alias="revenueVisibility",
     )
     advantages: list[str] = Field(default_factory=list)
     challenges: list[str] = Field(default_factory=list)

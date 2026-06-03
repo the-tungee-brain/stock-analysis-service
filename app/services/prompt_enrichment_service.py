@@ -1756,29 +1756,39 @@ class PromptEnrichmentService:
             {RESEARCH_SYSTEM_PREAMBLE}
 
             # Your task
-            Extract structured BUSINESS facts only — not a research essay.
-            Return short bullets and labels a user can scan in under 30 seconds.
+            Extract factual BUSINESS STRUCTURE only — structured research notes, not an essay.
+            Each bullet ≤ 16 words. Name actors, products, contract types, or competitors when known.
 
-            # Forbidden (belongs on other tabs — never mention)
-            - Debt/equity, leverage ratios, current ratio, liquidity ratios
-            - Net margin, gross margin, profitability percentages, P/E, valuation
-            - Analyst ratings, price targets, consensus, upside/downside to target
-            - Long paragraphs, generic phrases ("investors should monitor", "faces challenges")
+            # Never use (filler / essay language)
+            disciplined execution, strategic positioning, operational momentum, enhancing capabilities,
+            robust ecosystem, scaling efficiently, well positioned, best-in-class, industry-leading,
+            commitment to innovation, investors should monitor, overall the company
 
-            # Field rules (each bullet ≤ 18 words; concrete and company-specific)
-            - **industry**: Industry label (e.g. "AI Cloud Infrastructure").
-            - **primaryProduct**: Primary product or service in ≤ 12 words.
-            - **revenueModel**: How the company charges (e.g. "Multi-Year Infrastructure Contracts") ≤ 15 words.
-            - **primaryCustomers**: 2–4 short strings naming customer types (not financial metrics).
-            - **businessModel**: One sentence — what the company does and how it earns (≤ 25 words).
-            - **howTheyMakeMoney**: 1–3 bullets on revenue mechanics (contracts, subscriptions, utilization).
-            - **advantages**: 3–5 competitive advantages (partnerships, scale, IP, contracts).
-            - **challenges**: 3–5 competitive or operational challenges (competition, capex, cycles).
-            - **growthDrivers**: 3–5 business growth drivers (demand, capacity, adoption, geography).
-            - **businessRisks**: 3–5 business risks (concentration, suppliers, regulation, execution) — not balance-sheet ratios.
-            - **dependencies**: 3–5 factors the business depends on (key supplier, demand trend, renewals).
+            # Forbidden (other tabs)
+            - Margins, leverage, liquidity, P/E, valuation, ratios, FCF, ROE
+            - Analyst ratings, price targets, consensus
+            - Vague claims without mechanism ("strong market position", "competitive advantages")
 
-            Do not repeat the same point across fields. No segment lists unless revenue share is known.
+            # Section rules
+            - **industry**: Specific industry label (not just "Technology").
+            - **primaryProduct**: Primary product/service (≤ 12 words).
+            - **revenueModel**: Pricing/charge model (subscriptions, take-rate, contracts, units).
+            - **primaryCustomers**: 2–4 customer types or segments (who pays).
+            - **howTheyMakeMoney**: 1–3 bullets — structural revenue mechanism ONLY (what is sold, how billed).
+              No growth outlook, no "increasing demand" — save that for growthDrivers.
+            - **revenueVisibility**: Exactly 2 bullets:
+              (1) Contract structure and revenue predictability (length, renewals, backlog, recurring % if known).
+              (2) What drives revenue timing/recognition (delivery milestones, usage, shipments, subscriptions).
+            - **advantages**: 3–5 structural, defensible edges (assets, contracts, IP, scale, distribution). Be specific.
+            - **challenges**: 3–5 specific challenges; name competitors or categories (e.g. "AWS, Azure" not "competition").
+            - **growthDrivers**: 3–5 factors that directly increase revenue — demand, new contracts, capacity,
+              utilization, pricing. No culture/ESG/generic macro.
+            - **businessRisks**: 3–5 operational/structural risks (concentration, suppliers, tech disruption,
+              execution constraints, regulation). No balance-sheet ratios.
+            - **dependencies**: 3–5 external/structural dependencies required for the model to work.
+
+            Tailor content to the company's industry (AI cloud vs SaaS vs retail vs bank look different).
+            Do not repeat the same point across fields.
 
             Return a single JSON object with exactly these keys:
             {{
@@ -1786,8 +1796,8 @@ class PromptEnrichmentService:
               "primaryProduct": "...",
               "revenueModel": "...",
               "primaryCustomers": ["..."],
-              "businessModel": "...",
               "howTheyMakeMoney": ["..."],
+              "revenueVisibility": ["...", "..."],
               "advantages": ["..."],
               "challenges": ["..."],
               "growthDrivers": ["..."],
@@ -1805,7 +1815,7 @@ class PromptEnrichmentService:
 
             {context_block}
 
-            Facts only — no financial analysis, no valuation, no analyst opinion.
+            Structured facts only — no essay, no financial metrics, no filler phrases.
             """
         ).strip()
 
