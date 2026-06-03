@@ -81,6 +81,7 @@ Optional ML retrain: `train-pattern-model.yml` or `scripts/train_ranking_model.p
 | `No module named 'data.benchmarks'` (Gunicorn crash) | Whole-volume mount shadowed `/app/data`. Redeploy with split mounts (`raw` + `ranking` only) |
 | Log: `ranking_pipeline not in image` but deploy is new | Log may be **stale** from an old bootstrap. Verify imports (below), then **re-run bootstrap** |
 | Bootstrap stuck | SSH → log file; re-run workflow **bootstrap** |
+| `No data returned for SPY` after universe | Yahoo throttled after ~6k screens. Wait 5–10 min, then `$0 bootstrap-resume` (skips universe) |
 | Ranking fails | API serves last run; fix and run workflow **daily** |
 | Portfolio fails | Previous snapshot remains; run workflow **daily** |
 
