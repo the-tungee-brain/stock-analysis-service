@@ -391,18 +391,33 @@ def archetype_observations(
     return rows
 
 
+def capitalize_sentence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return stripped
+    return stripped[0].upper() + stripped[1:]
+
+
 def build_verdict_phrase(
     positive: list[str],
     negative: list[str],
     ctx: FinancialCompanyContext,
 ) -> str:
     if positive and negative:
-        return f"{_join(positive)} are offset by {_join(negative)}."
+        return capitalize_sentence(
+            f"{_join(positive)} are offset by {_join(negative)}."
+        )
     if positive:
-        return f"{_join(positive)} support {_archetype_quality_phrase(ctx)}."
+        return capitalize_sentence(
+            f"{_join(positive)} support {_archetype_quality_phrase(ctx)}."
+        )
     if negative:
-        return f"{_join(negative)} weigh on {_archetype_quality_phrase(ctx)}."
-    return f"Mixed financial signals across {_archetype_quality_phrase(ctx)}."
+        return capitalize_sentence(
+            f"{_join(negative)} weigh on {_archetype_quality_phrase(ctx)}."
+        )
+    return capitalize_sentence(
+        f"Mixed financial signals across {_archetype_quality_phrase(ctx)}."
+    )
 
 
 def _join(phrases: list[str]) -> str:

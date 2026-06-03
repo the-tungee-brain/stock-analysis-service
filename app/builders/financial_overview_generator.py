@@ -11,6 +11,7 @@ from app.builders.financial_sector_context import (
     _CategorySignals,
     archetype_observations,
     build_verdict_phrase,
+    capitalize_sentence,
     derive_profile,
 )
 from app.models.company_research_models import (
@@ -717,9 +718,9 @@ class FinancialOverviewGenerator:
                 ctx,
             )
         if strengths:
-            return strengths[0]
+            return capitalize_sentence(strengths[0])
         if risks:
-            return risks[0]
+            return capitalize_sentence(risks[0])
         return build_verdict_phrase([], [], ctx)
 
     def _score_drivers(
