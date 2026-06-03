@@ -29,3 +29,12 @@ def test_parse_top_contributors_v1_accepts_symbol_strings():
 def test_parse_top_contributors_v1_skips_invalid_rows():
     parsed = _parse_top_contributors_v1([{"symbol": "AAPL"}, {"no_symbol": 1}])
     assert parsed == []
+
+
+def test_parse_top_contributors_v1_accepts_partial_metrics():
+    parsed = _parse_top_contributors_v1(
+        [{"symbol": "MSFT", "contribution": 0.01, "weight": 0.08}]
+    )
+    assert len(parsed) == 1
+    assert parsed[0].symbol == "MSFT"
+    assert parsed[0].contribution == 0.01

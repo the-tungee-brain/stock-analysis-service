@@ -41,6 +41,9 @@ def _parse_top_contributors_v1(
         symbol = row.get("symbol")
         if not symbol:
             continue
+        metric_keys = ("weight", "expected_excess_return", "contribution")
+        if not any(key in row and row[key] is not None for key in metric_keys):
+            continue
         try:
             out.append(
                 PortfolioTopContributorV1(
