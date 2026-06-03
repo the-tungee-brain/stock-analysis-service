@@ -138,6 +138,10 @@ class FinancialStrength(BaseModel):
     strengths: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     highlights: list[str] = Field(default_factory=list)
+    key_metrics: list[FundamentalMetric] = Field(
+        default_factory=list,
+        serialization_alias="keyMetrics",
+    )
 
 
 class FinancialsPackage(BaseModel):

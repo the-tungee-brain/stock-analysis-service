@@ -9,10 +9,8 @@ import yfinance as yf
 
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.adapters.market.yfinance_bootstrap import yfinance_fetch_lock
-from app.builders.financial_overview_generator import (
-    FinancialOverviewGenerator,
-    build_metrics_snapshot,
-)
+from app.builders.canonical_financial_metrics import build_canonical_metrics
+from app.builders.financial_overview_generator import FinancialOverviewGenerator
 from app.models.company_research_models import (
     FinancialLineItem,
     FinancialStatementsSnapshot,
@@ -181,17 +179,8 @@ class YFinanceFinancialsBuilder:
         info: dict[str, Any],
     ) -> FinancialStrength:
         snapshot = annual or quarterly
-        periods = snapshot.periods if snapshot else []
-        metrics = build_metrics_snapshot(
-            info=info,
-            revenue_by_period=self._line_values(snapshot, "Total revenue"),
-            net_income_by_period=self._line_values(snapshot, "Net income"),
-            gross_profit_by_period=self._line_values(snapshot, "Gross profit"),
-            free_cash_flow_by_period=self._line_values(snapshot, "Free cash flow"),
-            dividends_by_period=self._line_values(snapshot, "Dividends paid"),
-            periods=periods,
-        )
-        overview = FinancialOverviewGenerator().generate(symbol, metrics)
+        canonical = build_canonical_metrics(info=info, snapshot=snapshot)
+        overview = FinancialOverviewGenerator().generate(symbol, canonical)
         return FinancialStrength(
             rating=overview.rating,
             score=overview.score,
@@ -199,6 +188,7 @@ class YFinanceFinancialsBuilder:
             strengths=overview.strengths,
             risks=overview.risks,
             highlights=overview.highlights,
+            key_metrics=canonical.to_key_metrics(),
         )
 
     @staticmethod

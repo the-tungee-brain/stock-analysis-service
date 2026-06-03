@@ -1,17 +1,15 @@
-from app.builders.financial_overview_generator import (
-    FinancialMetricsSnapshot,
-    FinancialOverviewGenerator,
-)
+from app.builders.canonical_financial_metrics import CanonicalFinancialMetrics
+from app.builders.financial_overview_generator import FinancialOverviewGenerator
 
 
-def _generate(metrics: FinancialMetricsSnapshot, symbol: str = "TEST") -> tuple:
+def _generate(metrics: CanonicalFinancialMetrics, symbol: str = "TEST") -> tuple:
     result = FinancialOverviewGenerator().generate(symbol, metrics)
     return result.headline, result.strengths, result.risks, result.rating
 
 
 def test_hypergrowth_ai_profile_differs_from_mature_utility():
     hyper, hyper_strengths, hyper_risks, _ = _generate(
-        FinancialMetricsSnapshot(
+        CanonicalFinancialMetrics(
             revenue_growth_yoy=120,
             gross_margin_pct=78,
             net_margin_pct=8,
@@ -23,7 +21,7 @@ def test_hypergrowth_ai_profile_differs_from_mature_utility():
         symbol="PLTR",
     )
     mature, mature_strengths, mature_risks, mature_rating = _generate(
-        FinancialMetricsSnapshot(
+        CanonicalFinancialMetrics(
             revenue_growth_yoy=3,
             gross_margin_pct=42,
             net_margin_pct=22,
@@ -37,7 +35,7 @@ def test_hypergrowth_ai_profile_differs_from_mature_utility():
         symbol="NEE",
     )
 
-    assert "speculative" in hyper.lower() or "High-growth" in hyper
+    assert "speculative" in hyper.lower() or "high growth" in hyper.lower()
     assert any("exceptional" in s or "strong" in s.lower() for s in hyper_strengths)
     assert any("negative" in r.lower() or "cash" in r.lower() for r in hyper_risks)
     assert "mature" in mature.lower() or "strong" in mature.lower() or "Cash-generative" in mature
@@ -48,7 +46,7 @@ def test_hypergrowth_ai_profile_differs_from_mature_utility():
 
 def test_distressed_profile_prioritizes_margin_and_leverage():
     headline, strengths, risks, rating = _generate(
-        FinancialMetricsSnapshot(
+        CanonicalFinancialMetrics(
             revenue_growth_yoy=-5,
             gross_margin_pct=22,
             net_margin_pct=-62,
@@ -61,7 +59,10 @@ def test_distressed_profile_prioritizes_margin_and_leverage():
     )
 
     assert rating == "weak"
-    assert "strain" in headline.lower() or "loss" in headline.lower() or "leveraged" in headline.lower()
+    assert any(
+        token in headline.lower()
+        for token in ("risk", "loss", "leveraged", "turnaround")
+    )
     assert len(risks) <= 3
     assert risks[0].lower().find("margin") >= 0 or risks[0].lower().find("loss") >= 0
     assert any("leverage" in r.lower() or "balance-sheet" in r.lower() for r in risks)
@@ -71,16 +72,16 @@ def test_distressed_profile_prioritizes_margin_and_leverage():
 
 def test_revenue_growth_conditional_bands():
     exceptional = FinancialOverviewGenerator().generate(
-        "X", FinancialMetricsSnapshot(revenue_growth_yoy=150, net_margin_pct=10)
+        "X", CanonicalFinancialMetrics(revenue_growth_yoy=150, net_margin_pct=10)
     )
     strong = FinancialOverviewGenerator().generate(
-        "X", FinancialMetricsSnapshot(revenue_growth_yoy=35, net_margin_pct=10)
+        "X", CanonicalFinancialMetrics(revenue_growth_yoy=35, net_margin_pct=10)
     )
     modest = FinancialOverviewGenerator().generate(
-        "X", FinancialMetricsSnapshot(revenue_growth_yoy=8, net_margin_pct=10)
+        "X", CanonicalFinancialMetrics(revenue_growth_yoy=8, net_margin_pct=10)
     )
     contracting = FinancialOverviewGenerator().generate(
-        "X", FinancialMetricsSnapshot(revenue_growth_yoy=-12, net_margin_pct=10)
+        "X", CanonicalFinancialMetrics(revenue_growth_yoy=-12, net_margin_pct=10)
     )
 
     assert any("exceptional" in s for s in exceptional.strengths)
@@ -91,7 +92,7 @@ def test_revenue_growth_conditional_bands():
 
 def test_low_leverage_skips_leverage_risk():
     _, strengths, risks, _ = _generate(
-        FinancialMetricsSnapshot(
+        CanonicalFinancialMetrics(
             debt_to_equity=0.25,
             net_margin_pct=18,
             free_cash_flow_latest=1_000_000_000,
@@ -102,7 +103,7 @@ def test_low_leverage_skips_leverage_risk():
 
 
 def test_no_generic_fallback_copy():
-    _, strengths, risks, _ = _generate(FinancialMetricsSnapshot())
+    _, strengths, risks, _ = _generate(CanonicalFinancialMetrics())
     banned = (
         "investors should monitor",
         "review the statement tables",

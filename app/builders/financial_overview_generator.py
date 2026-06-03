@@ -3,8 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from app.builders.canonical_financial_metrics import CanonicalFinancialMetrics
+
 StrengthRating = Literal["strong", "solid", "mixed", "weak"]
 ObservationKind = Literal["strength", "risk"]
+
+
+@dataclass(frozen=True)
+class _CategoryProfile:
+    growth: float = 0.0
+    profitability: float = 0.0
+    balance_sheet: float = 0.0
+    cash_flow: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -53,9 +63,12 @@ class FinancialOverviewGenerator:
         "risk tolerance",
     )
 
-    def generate(self, symbol: str, metrics: FinancialMetricsSnapshot) -> FinancialOverviewResult:
-        observations = self._build_observations(metrics)
-        highlights = self._build_highlights(metrics)
+    def generate(
+        self,
+        symbol: str,
+        canonical: CanonicalFinancialMetrics,
+    ) -> FinancialOverviewResult:
+        observations = self._build_observations(canonical)
 
         strengths = self._top_observations(
             [o for o in observations if o.kind == "strength"],
@@ -69,8 +82,9 @@ class FinancialOverviewGenerator:
         score = 50 + sum(o.score_delta for o in observations)
         score = max(0, min(100, score))
         rating = self._rating_from_score(score)
-        verdict = self._derive_verdict(metrics)
-        headline = self._headline(symbol, verdict, metrics)
+        verdict = self._derive_verdict_weighted(canonical)
+        headline = self._headline(symbol, verdict, canonical)
+        highlights = self._build_highlights(canonical)
 
         return FinancialOverviewResult(
             rating=rating,
@@ -82,33 +96,36 @@ class FinancialOverviewGenerator:
         )
 
     @staticmethod
-    def _is_high_growth_cash_story(m: FinancialMetricsSnapshot) -> bool:
-        high_growth = m.revenue_growth_yoy is not None and m.revenue_growth_yoy > 50
-        cash_pressure = m.free_cash_flow_latest is not None and m.free_cash_flow_latest < 0
+    def _is_high_growth_cash_story(c: CanonicalFinancialMetrics) -> bool:
+        high_growth = c.revenue_growth_yoy is not None and c.revenue_growth_yoy > 50
+        cash_pressure = c.free_cash_flow_latest is not None and c.free_cash_flow_latest < 0
         return high_growth and cash_pressure
 
-    def _build_observations(self, m: FinancialMetricsSnapshot) -> list[ScoredObservation]:
+    def _build_observations(self, c: CanonicalFinancialMetrics) -> list[ScoredObservation]:
         out: list[ScoredObservation] = []
-        out.extend(self._revenue_growth_observations(m))
-        out.extend(self._gross_margin_observations(m))
-        out.extend(self._net_margin_observations(m))
-        out.extend(self._debt_equity_observations(m))
-        out.extend(self._current_ratio_observations(m))
-        out.extend(self._free_cash_flow_observations(m))
-        out.extend(self._roe_observations(m))
-        out.extend(self._payout_observations(m))
+        out.extend(self._revenue_growth_observations(c))
+        out.extend(self._gross_margin_observations(c))
+        out.extend(self._net_margin_observations(c))
+        out.extend(self._debt_equity_observations(c))
+        out.extend(self._current_ratio_observations(c))
+        out.extend(self._free_cash_flow_observations(c))
+        out.extend(self._roe_observations(c))
+        out.extend(self._payout_observations(c))
         return [o for o in out if not self._is_banned(o.text)]
 
-    def _revenue_growth_observations(self, m: FinancialMetricsSnapshot) -> list[ScoredObservation]:
-        growth = m.revenue_growth_yoy
-        if growth is None:
+    def _revenue_growth_observations(
+        self, c: CanonicalFinancialMetrics
+    ) -> list[ScoredObservation]:
+        growth = c.revenue_growth_yoy
+        display = c.format_revenue_growth()
+        if growth is None or display is None:
             return []
 
         if growth > 100:
             return [
                 ScoredObservation(
                     text=(
-                        f"Revenue grew {growth:.0f}% year over year — exceptional growth "
+                        f"Revenue grew {display} year over year — exceptional growth "
                         "that points to rapid commercial adoption."
                     ),
                     kind="strength",
@@ -119,7 +136,7 @@ class FinancialOverviewGenerator:
         if growth >= 20:
             return [
                 ScoredObservation(
-                    text=f"Revenue growth remains strong at {growth:.0f}% year over year.",
+                    text=f"Revenue growth remains strong at {display} year over year.",
                     kind="strength",
                     materiality=72,
                     score_delta=12,
@@ -128,7 +145,7 @@ class FinancialOverviewGenerator:
         if growth >= 0:
             return [
                 ScoredObservation(
-                    text=f"Revenue growth is modest at {growth:.0f}% year over year.",
+                    text=f"Revenue growth is modest at {display} year over year.",
                     kind="strength",
                     materiality=35,
                     score_delta=4,
@@ -136,23 +153,26 @@ class FinancialOverviewGenerator:
             ]
         return [
             ScoredObservation(
-                text=f"Revenue is contracting {abs(growth):.0f}% year over year.",
+                text=f"Revenue is contracting {display} year over year.",
                 kind="risk",
                 materiality=80,
                 score_delta=-14,
             )
         ]
 
-    def _gross_margin_observations(self, m: FinancialMetricsSnapshot) -> list[ScoredObservation]:
-        margin = m.gross_margin_pct
-        if margin is None:
+    def _gross_margin_observations(
+        self, c: CanonicalFinancialMetrics
+    ) -> list[ScoredObservation]:
+        margin = c.gross_margin_pct
+        display = c.format_gross_margin()
+        if margin is None or display is None:
             return []
 
         if margin > 70:
             return [
                 ScoredObservation(
                     text=(
-                        f"Gross margin of {margin:.0f}% reflects premium pricing power "
+                        f"Gross margin of {display} reflects premium pricing power "
                         "and software-like unit economics."
                     ),
                     kind="strength",
@@ -163,7 +183,7 @@ class FinancialOverviewGenerator:
         if margin >= 30:
             return [
                 ScoredObservation(
-                    text=f"Gross margin of {margin:.0f}% indicates healthy economics at the product level.",
+                    text=f"Gross margin of {display} indicates healthy economics at the product level.",
                     kind="strength",
                     materiality=40,
                     score_delta=5,
@@ -172,7 +192,7 @@ class FinancialOverviewGenerator:
         return [
             ScoredObservation(
                 text=(
-                    f"Gross margin of {margin:.0f}% is thin — typical of commodity "
+                    f"Gross margin of {display} is thin — typical of commodity "
                     "or capital-intensive businesses."
                 ),
                 kind="risk",
@@ -181,15 +201,18 @@ class FinancialOverviewGenerator:
             )
         ]
 
-    def _net_margin_observations(self, m: FinancialMetricsSnapshot) -> list[ScoredObservation]:
-        margin = m.net_margin_pct
-        if margin is None:
+    def _net_margin_observations(
+        self, c: CanonicalFinancialMetrics
+    ) -> list[ScoredObservation]:
+        margin = c.net_margin_pct
+        display = c.format_net_margin()
+        if margin is None or display is None:
             return []
 
         if margin > 15:
             return [
                 ScoredObservation(
-                    text=f"Net margin of {margin:.0f}% signals strong bottom-line profitability.",
+                    text=f"Net margin of {display} signals strong bottom-line profitability.",
                     kind="strength",
                     materiality=85,
                     score_delta=14,
@@ -198,7 +221,7 @@ class FinancialOverviewGenerator:
         if margin >= 0:
             return [
                 ScoredObservation(
-                    text=f"Net margin of {margin:.0f}% — profitable, but with limited profit per revenue dollar.",
+                    text=f"Net margin of {display} — profitable, but with limited profit per revenue dollar.",
                     kind="strength",
                     materiality=45,
                     score_delta=5,
@@ -207,7 +230,7 @@ class FinancialOverviewGenerator:
         if margin >= -20:
             return [
                 ScoredObservation(
-                    text=f"Net margin of {margin:.0f}% — the business is unprofitable on a net basis.",
+                    text=f"Net margin of {display} — the business is unprofitable on a net basis.",
                     kind="risk",
                     materiality=92,
                     score_delta=-18,
@@ -216,7 +239,7 @@ class FinancialOverviewGenerator:
         return [
             ScoredObservation(
                 text=(
-                    f"Net margin of {margin:.0f}% — deep losses absorb a large share of each revenue dollar."
+                    f"Net margin of {display} — deep losses absorb a large share of each revenue dollar."
                 ),
                 kind="risk",
                 materiality=98,
@@ -224,15 +247,17 @@ class FinancialOverviewGenerator:
             )
         ]
 
-    def _debt_equity_observations(self, m: FinancialMetricsSnapshot) -> list[ScoredObservation]:
-        ratio = m.debt_to_equity
-        if ratio is None:
+    def _debt_equity_observations(
+        self, c: CanonicalFinancialMetrics
+    ) -> list[ScoredObservation]:
+        ratio = c.debt_to_equity
+        ratio_label = c.format_debt_equity()
+        if ratio is None or ratio_label is None:
             return []
 
-        ratio_label = self._format_debt_equity(ratio)
         if ratio < 0.5:
             materiality = 50
-            if self._is_high_growth_cash_story(m):
+            if self._is_high_growth_cash_story(c):
                 materiality = 18
             return [
                 ScoredObservation(
@@ -272,15 +297,18 @@ class FinancialOverviewGenerator:
             )
         ]
 
-    def _current_ratio_observations(self, m: FinancialMetricsSnapshot) -> list[ScoredObservation]:
-        ratio = m.current_ratio
-        if ratio is None:
+    def _current_ratio_observations(
+        self, c: CanonicalFinancialMetrics
+    ) -> list[ScoredObservation]:
+        ratio = c.current_ratio
+        display = c.format_current_ratio()
+        if ratio is None or display is None:
             return []
 
         if ratio > 2:
             return [
                 ScoredObservation(
-                    text=f"Current ratio of {ratio:.1f} indicates strong near-term liquidity.",
+                    text=f"Current ratio of {display} indicates strong near-term liquidity.",
                     kind="strength",
                     materiality=42,
                     score_delta=6,
@@ -289,7 +317,7 @@ class FinancialOverviewGenerator:
         if ratio >= 1:
             return [
                 ScoredObservation(
-                    text=f"Current ratio of {ratio:.1f} suggests adequate short-term liquidity.",
+                    text=f"Current ratio of {display} suggests adequate short-term liquidity.",
                     kind="strength",
                     materiality=22,
                     score_delta=2,
@@ -297,20 +325,22 @@ class FinancialOverviewGenerator:
             ]
         return [
             ScoredObservation(
-                text=f"Current ratio of {ratio:.1f} — potential pressure meeting near-term obligations.",
+                text=f"Current ratio of {display} — potential pressure meeting near-term obligations.",
                 kind="risk",
                 materiality=70,
                 score_delta=-10,
             )
         ]
 
-    def _free_cash_flow_observations(self, m: FinancialMetricsSnapshot) -> list[ScoredObservation]:
-        fcf = m.free_cash_flow_latest
-        if fcf is None:
+    def _free_cash_flow_observations(
+        self, c: CanonicalFinancialMetrics
+    ) -> list[ScoredObservation]:
+        fcf = c.free_cash_flow_latest
+        amount = c.format_free_cash_flow()
+        if fcf is None or amount is None:
             return []
 
-        trend = m.free_cash_flow_yoy_pct
-        amount = self._fmt_compact_currency(fcf)
+        trend = c.free_cash_flow_yoy_pct
 
         if fcf > 0:
             if trend is not None and trend > 10:
@@ -364,8 +394,8 @@ class FinancialOverviewGenerator:
             )
         ]
 
-    def _roe_observations(self, m: FinancialMetricsSnapshot) -> list[ScoredObservation]:
-        roe = m.return_on_equity_pct
+    def _roe_observations(self, c: CanonicalFinancialMetrics) -> list[ScoredObservation]:
+        roe = c.return_on_equity_pct
         if roe is None:
             return []
 
@@ -389,9 +419,9 @@ class FinancialOverviewGenerator:
             ]
         return []
 
-    def _payout_observations(self, m: FinancialMetricsSnapshot) -> list[ScoredObservation]:
-        payout = m.payout_ratio_pct
-        coverage = m.fcf_dividend_coverage
+    def _payout_observations(self, c: CanonicalFinancialMetrics) -> list[ScoredObservation]:
+        payout = c.payout_ratio_pct
+        coverage = c.fcf_dividend_coverage
         if payout is None and coverage is None:
             return []
 
@@ -442,130 +472,202 @@ class FinancialOverviewGenerator:
                 )
         return out
 
-    def _build_highlights(self, m: FinancialMetricsSnapshot) -> list[str]:
+    def _build_highlights(self, c: CanonicalFinancialMetrics) -> list[str]:
         lines: list[str] = []
-        if m.revenue_growth_yoy is not None:
-            direction = "up" if m.revenue_growth_yoy >= 0 else "down"
-            lines.append(f"Revenue {direction} {abs(m.revenue_growth_yoy):.1f}% YoY.")
-        if m.gross_margin_pct is not None:
-            lines.append(f"Gross margin {m.gross_margin_pct:.1f}%.")
-        if m.net_margin_pct is not None:
-            lines.append(f"Net margin {m.net_margin_pct:.1f}%.")
-        if m.debt_to_equity is not None:
-            lines.append(f"Debt/equity {self._format_debt_equity(m.debt_to_equity)}.")
-        if m.current_ratio is not None:
-            lines.append(f"Current ratio {m.current_ratio:.2f}.")
-        if m.free_cash_flow_latest is not None:
-            lines.append(f"Free cash flow {self._fmt_compact_currency(m.free_cash_flow_latest)} (latest period).")
-        if m.return_on_equity_pct is not None:
-            lines.append(f"ROE {m.return_on_equity_pct:.1f}%.")
-        if m.payout_ratio_pct is not None:
-            lines.append(f"Payout ratio {m.payout_ratio_pct:.0f}%.")
+        rev = c.format_revenue_growth()
+        if rev is not None:
+            direction = "up" if (c.revenue_growth_yoy or 0) >= 0 else "down"
+            lines.append(f"Revenue {direction} {rev} YoY.")
+        gross = c.format_gross_margin()
+        if gross is not None:
+            lines.append(f"Gross margin {gross}.")
+        net = c.format_net_margin()
+        if net is not None:
+            lines.append(f"Net margin {net}.")
+        debt = c.format_debt_equity()
+        if debt is not None:
+            lines.append(f"Debt/equity {debt}.")
+        current = c.format_current_ratio()
+        if current is not None:
+            lines.append(f"Current ratio {current}.")
+        fcf = c.format_free_cash_flow()
+        if fcf is not None:
+            lines.append(f"Free cash flow {fcf} (latest period).")
+        if c.return_on_equity_pct is not None:
+            lines.append(f"ROE {c.return_on_equity_pct:.1f}%.")
+        if c.payout_ratio_pct is not None:
+            lines.append(f"Payout ratio {c.payout_ratio_pct:.0f}%.")
         return lines
 
-    def _derive_verdict(self, m: FinancialMetricsSnapshot) -> str:
-        rg = m.revenue_growth_yoy
-        nm = m.net_margin_pct
-        gm = m.gross_margin_pct
-        de = m.debt_to_equity
-        fcf = m.free_cash_flow_latest
+    def _category_profile(self, c: CanonicalFinancialMetrics) -> _CategoryProfile:
+        growth = 0.0
+        if c.revenue_growth_yoy is not None:
+            rg = c.revenue_growth_yoy
+            if rg > 100:
+                growth = 1.0
+            elif rg >= 20:
+                growth = 0.75
+            elif rg >= 5:
+                growth = 0.45
+            elif rg >= 0:
+                growth = 0.15
+            else:
+                growth = -0.7
+
+        profitability = 0.0
+        if c.net_margin_pct is not None:
+            nm = c.net_margin_pct
+            if nm > 15:
+                profitability = 1.0
+            elif nm >= 5:
+                profitability = 0.6
+            elif nm >= 0:
+                profitability = 0.25
+            elif nm >= -20:
+                profitability = -0.6
+            else:
+                profitability = -1.0
+
+        balance = 0.0
+        if c.debt_to_equity is not None:
+            de = c.debt_to_equity
+            if de < 0.5:
+                balance += 0.55
+            elif de <= 2:
+                balance += 0.15
+            elif de <= 5:
+                balance -= 0.55
+            else:
+                balance -= 1.0
+        if c.current_ratio is not None:
+            cr = c.current_ratio
+            if cr > 2:
+                balance += 0.35
+            elif cr >= 1:
+                balance += 0.1
+            else:
+                balance -= 0.45
+        balance = max(-1.0, min(1.0, balance))
+
+        cash_flow = 0.0
+        if c.free_cash_flow_latest is not None:
+            if c.free_cash_flow_latest > 0:
+                cash_flow = 0.55
+                if c.free_cash_flow_yoy_pct is not None and c.free_cash_flow_yoy_pct > 10:
+                    cash_flow = 0.9
+                elif c.free_cash_flow_yoy_pct is not None and c.free_cash_flow_yoy_pct < -10:
+                    cash_flow = 0.25
+            else:
+                cash_flow = -0.75
+
+        return _CategoryProfile(
+            growth=growth,
+            profitability=profitability,
+            balance_sheet=balance,
+            cash_flow=cash_flow,
+        )
+
+    def _derive_verdict_weighted(self, c: CanonicalFinancialMetrics) -> str:
+        profile = self._category_profile(c)
+        rg = c.revenue_growth_yoy
+        nm = c.net_margin_pct
+        gm = c.gross_margin_pct
+        de = c.debt_to_equity
+        fcf = c.free_cash_flow_latest
 
         high_growth = rg is not None and rg > 50
-        moderate_growth = rg is not None and 5 <= rg <= 50
-        contracting = rg is not None and rg < 0
-
-        strong_profit = nm is not None and nm > 15
-        modest_profit = nm is not None and 0 <= nm <= 15
-        unprofitable = nm is not None and nm < 0
-        deep_loss = nm is not None and nm < -20
-
-        low_leverage = de is not None and de < 0.5
-        high_leverage = de is not None and de > 2
-        extreme_leverage = de is not None and de > 5
-
-        positive_fcf = fcf is not None and fcf > 0
-        negative_fcf = fcf is not None and fcf < 0
+        growth_risk = (nm is not None and nm < 0) or (fcf is not None and fcf < 0)
         commodity_like = gm is not None and gm < 30
 
-        if deep_loss and extreme_leverage:
-            return "Deep losses with acute balance-sheet strain"
-        if deep_loss and negative_fcf:
-            return "Loss-making with negative free cash flow"
-        if high_growth and (unprofitable or negative_fcf):
-            return "High-growth, speculative profile"
-        if high_growth and strong_profit and positive_fcf:
-            return "High-growth with scaling profitability"
-        if extreme_leverage:
-            return "Highly leveraged balance sheet"
-        if high_leverage and commodity_like:
-            return "Capital-intensive and highly leveraged"
-        if strong_profit and low_leverage and positive_fcf and (rg is None or abs(rg) < 8):
-            return "Mature, financially strong profile"
-        if strong_profit and positive_fcf and moderate_growth:
-            return "Profitable with solid growth"
-        if modest_profit and moderate_growth:
-            return "Profitable with moderate growth"
-        if positive_fcf and (m.payout_ratio_pct or 0) >= 40 and modest_profit:
-            return "Cash-generative value profile"
-        if contracting and unprofitable:
-            return "Turnaround situation"
-        if contracting and modest_profit:
-            return "Shrinking revenue, still profitable"
-        if unprofitable and positive_fcf:
-            return "Accounting losses despite positive free cash flow"
-        if negative_fcf and strong_profit:
-            return "Profitable on earnings, cash-hungry on capex"
-        if positive_fcf:
-            return "Cash-generative operations"
-        if unprofitable:
-            return "Earnings losses dominate the profile"
-        return "Mixed financial profile"
+        if high_growth and growth_risk:
+            return "High Growth / High Risk"
+        if high_growth and (nm is None or nm < 8):
+            return "Speculative Growth"
+        if (
+            profile.profitability >= 0.6
+            and profile.growth >= 0.4
+            and profile.cash_flow >= 0.5
+        ):
+            return "Profitable Compounder"
+        if (
+            profile.profitability >= 0.6
+            and profile.cash_flow >= 0.5
+            and profile.balance_sheet >= 0.2
+            and (rg is None or abs(rg) < 12)
+        ):
+            return "Financially Strong"
+        if (
+            profile.cash_flow >= 0.5
+            and profile.profitability >= 0.2
+            and (rg is None or rg < 15)
+            and ((c.payout_ratio_pct or 0) >= 35 or profile.growth <= 0.2)
+        ):
+            return "Cash-Generating Value Business"
+        if (rg is not None and rg < 0) and profile.profitability < 0:
+            return "Leveraged Turnaround"
+        if de is not None and de > 2 and commodity_like:
+            return "Leveraged Turnaround"
+
+        composite = (
+            0.30 * profile.growth
+            + 0.30 * profile.profitability
+            + 0.25 * profile.cash_flow
+            + 0.15 * profile.balance_sheet
+        )
+        if composite >= 0.55:
+            return "Financially Strong"
+        if composite >= 0.3:
+            return "Profitable Compounder"
+        if composite <= -0.25 and high_growth:
+            return "High Growth / High Risk"
+        if composite <= -0.25:
+            return "Leveraged Turnaround"
+        if high_growth:
+            return "Speculative Growth"
+        return "Profitable Compounder"
 
     def _headline(
         self,
         symbol: str,
         verdict: str,
-        metrics: FinancialMetricsSnapshot,
+        canonical: CanonicalFinancialMetrics,
     ) -> str:
-        hook = self._metric_hook(metrics)
+        hook = self._metric_hook(canonical)
         ticker = symbol.upper()
         if hook:
             return f"{verdict} for {ticker} — {hook}"
         return f"{verdict} for {ticker}."
 
     @staticmethod
-    def _metric_hook(metrics: FinancialMetricsSnapshot) -> str | None:
+    def _metric_hook(canonical: CanonicalFinancialMetrics) -> str | None:
         hooks: list[tuple[float, str]] = []
 
-        if metrics.net_margin_pct is not None and metrics.net_margin_pct < -20:
-            hooks.append(
-                (abs(metrics.net_margin_pct), f"net margin {metrics.net_margin_pct:.0f}%")
-            )
-        if metrics.debt_to_equity is not None and metrics.debt_to_equity > 2:
-            hooks.append(
-                (
-                    metrics.debt_to_equity * 10,
-                    f"debt/equity {FinancialOverviewGenerator._format_debt_equity(metrics.debt_to_equity)}",
-                )
-            )
-        if metrics.revenue_growth_yoy is not None and metrics.revenue_growth_yoy > 50:
-            hooks.append(
-                (metrics.revenue_growth_yoy, f"revenue +{metrics.revenue_growth_yoy:.0f}% YoY")
-            )
-        if metrics.free_cash_flow_latest is not None and metrics.free_cash_flow_latest < 0:
+        net = canonical.format_net_margin()
+        if canonical.net_margin_pct is not None and canonical.net_margin_pct < -20 and net:
+            hooks.append((abs(canonical.net_margin_pct), f"net margin {net}"))
+
+        debt = canonical.format_debt_equity()
+        if canonical.debt_to_equity is not None and canonical.debt_to_equity > 2 and debt:
+            hooks.append((canonical.debt_to_equity * 10, f"debt/equity {debt}"))
+
+        rev = canonical.format_revenue_growth()
+        if canonical.revenue_growth_yoy is not None and canonical.revenue_growth_yoy > 50 and rev:
+            hooks.append((canonical.revenue_growth_yoy, f"revenue {rev} YoY"))
+
+        fcf = canonical.format_free_cash_flow()
+        if canonical.free_cash_flow_latest is not None and canonical.free_cash_flow_latest < 0 and fcf:
             hooks.append(
                 (
-                    abs(metrics.free_cash_flow_latest) / 1_000_000_000,
-                    f"FCF {FinancialOverviewGenerator._fmt_compact_currency(metrics.free_cash_flow_latest)}",
+                    abs(canonical.free_cash_flow_latest) / 1_000_000_000,
+                    f"FCF {fcf}",
                 )
             )
 
         if not hooks:
-            if metrics.net_margin_pct is not None and metrics.net_margin_pct > 15:
-                return f"net margin {metrics.net_margin_pct:.0f}%"
-            if metrics.revenue_growth_yoy is not None:
-                sign = "+" if metrics.revenue_growth_yoy >= 0 else ""
-                return f"revenue {sign}{metrics.revenue_growth_yoy:.0f}% YoY"
+            if canonical.net_margin_pct is not None and canonical.net_margin_pct > 15 and net:
+                return f"net margin {net}"
+            if rev:
+                return f"revenue {rev} YoY"
             return None
 
         hooks.sort(key=lambda item: item[0], reverse=True)
@@ -629,103 +731,3 @@ class FinancialOverviewGenerator:
         if abs_val >= 1_000_000:
             return f"{sign}${abs_val / 1_000_000:.1f}M"
         return f"{sign}${abs_val:,.0f}"
-
-
-def build_metrics_snapshot(
-    *,
-    info: dict,
-    revenue_by_period: dict[str, float | None],
-    net_income_by_period: dict[str, float | None],
-    gross_profit_by_period: dict[str, float | None],
-    free_cash_flow_by_period: dict[str, float | None],
-    dividends_by_period: dict[str, float | None],
-    periods: list[str],
-) -> FinancialMetricsSnapshot:
-    latest = periods[0] if periods else None
-    prior = periods[1] if len(periods) > 1 else None
-
-    def yoy(values: dict[str, float | None]) -> float | None:
-        if not latest or not prior:
-            return None
-        current = values.get(latest)
-        previous = values.get(prior)
-        if current is None or previous is None or previous == 0:
-            return None
-        return ((current - previous) / abs(previous)) * 100
-
-    rev_growth = yoy(revenue_by_period)
-    if rev_growth is None:
-        rev_growth = FinancialOverviewGenerator.normalize_pct(info.get("revenueGrowth"))
-
-    gross_margin: float | None = None
-    if latest:
-        rev = revenue_by_period.get(latest)
-        gp = gross_profit_by_period.get(latest)
-        if rev and gp is not None and rev != 0:
-            gross_margin = (gp / rev) * 100
-    if gross_margin is None:
-        gross_margin = FinancialOverviewGenerator.normalize_pct(info.get("grossMargins"))
-
-    net_margin: float | None = None
-    if latest:
-        rev = revenue_by_period.get(latest)
-        ni = net_income_by_period.get(latest)
-        if rev and ni is not None and rev != 0:
-            net_margin = (ni / rev) * 100
-    if net_margin is None:
-        net_margin = FinancialOverviewGenerator.normalize_pct(info.get("profitMargins"))
-
-    fcf_latest = free_cash_flow_by_period.get(latest) if latest else None
-    if fcf_latest is None:
-        raw_fcf = info.get("freeCashflow")
-        if isinstance(raw_fcf, (int, float)):
-            fcf_latest = float(raw_fcf)
-
-    payout = FinancialOverviewGenerator.normalize_pct(
-        _resolve_payout_ratio(info),
-    )
-
-    coverage: float | None = None
-    if latest and fcf_latest is not None and fcf_latest > 0:
-        div = dividends_by_period.get(latest)
-        if div is not None:
-            paid = abs(div)
-            if paid > 0:
-                coverage = fcf_latest / paid
-
-    return FinancialMetricsSnapshot(
-        revenue_growth_yoy=rev_growth,
-        gross_margin_pct=gross_margin,
-        net_margin_pct=net_margin,
-        debt_to_equity=FinancialOverviewGenerator.normalize_debt_to_equity(
-            info.get("debtToEquity"),
-        ),
-        current_ratio=(
-            float(info["currentRatio"])
-            if isinstance(info.get("currentRatio"), (int, float))
-            else None
-        ),
-        free_cash_flow_latest=fcf_latest,
-        free_cash_flow_yoy_pct=yoy(free_cash_flow_by_period),
-        return_on_equity_pct=FinancialOverviewGenerator.normalize_pct(
-            info.get("returnOnEquity"),
-        ),
-        payout_ratio_pct=payout,
-        fcf_dividend_coverage=coverage,
-    )
-
-
-def _resolve_payout_ratio(info: dict) -> float | None:
-    raw = info.get("payoutRatio")
-    if isinstance(raw, (int, float)):
-        return float(raw)
-
-    dividend_rate = info.get("trailingAnnualDividendRate") or info.get("dividendRate")
-    trailing_eps = info.get("trailingEps")
-    if (
-        isinstance(dividend_rate, (int, float))
-        and isinstance(trailing_eps, (int, float))
-        and trailing_eps > 0
-    ):
-        return float(dividend_rate) / float(trailing_eps)
-    return None

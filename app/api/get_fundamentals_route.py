@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.auth.dependencies import get_current_user_id
 from app.core.paid_access import is_paid_user
+from app.builders.canonical_financial_metrics import merge_key_metrics_into_list
 from app.builders.yfinance_analysis_builder import YFinanceAnalysisBuilder
 from app.builders.yfinance_financials_builder import YFinanceFinancialsBuilder
 from app.builders.yfinance_funds_builder import YFinanceFundsBuilder
@@ -111,6 +112,12 @@ async def get_fundamentals(
             user_id=user_id,
         )
         overview_note = overview.at_a_glance
+
+    if financials_package is not None and financials_package.strength.key_metrics:
+        metrics = merge_key_metrics_into_list(
+            metrics,
+            financials_package.strength.key_metrics,
+        )
 
     return FundamentalsBlock(
         overview=overview,
