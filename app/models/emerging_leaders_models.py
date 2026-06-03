@@ -21,6 +21,8 @@ class EmergingLeaderItem(BaseModel):
     setup_quality_score: int = Field(alias="setupQualityScore", ge=0, le=100)
     setup_stage: SetupStageId = Field(alias="setupStage")
     setup_stage_label: str = Field(alias="setupStageLabel")
+    compression_velocity: int = Field(alias="compressionVelocity", ge=0, le=100)
+    compression_velocity_label: str = Field(alias="compressionVelocityLabel")
     why_it_ranks: str = Field(alias="whyItRanks")
     positive_factors: list[str] = Field(alias="positiveFactors")
     missing_factors: list[str] = Field(alias="missingFactors")

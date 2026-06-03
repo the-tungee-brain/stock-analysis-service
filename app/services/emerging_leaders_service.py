@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from app.builders.emerging_leaders_engine import (
     STAGE_LABELS,
     EmergingLeaderEvaluation,
+    compression_velocity_label,
     evaluate_emerging_leader,
     passes_emerging_leader_list,
     ranking_sort_key,
@@ -93,6 +94,10 @@ def build_emerging_leaders(*, limit: int = 20) -> EmergingLeadersResponse:
             setup_quality_score=ev.setup_quality_score,
             setup_stage=ev.setup_stage,
             setup_stage_label=STAGE_LABELS[ev.setup_stage],
+            compression_velocity=int(ev.components.compression_velocity),
+            compression_velocity_label=compression_velocity_label(
+                ev.components.compression_velocity
+            ),
             why_it_ranks=ev.why_it_ranks,
             positive_factors=ev.positive_factors,
             missing_factors=ev.missing_factors,

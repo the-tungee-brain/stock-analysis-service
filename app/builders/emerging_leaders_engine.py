@@ -28,17 +28,18 @@ STAGE_RANK_PRIORITY: dict[SetupStage, int] = {
 }
 
 # Setup score favors compression dynamics over stable sideways bases.
-WEIGHT_VOL_CONTRACTION_TREND = 0.17
-WEIGHT_TIGHTENING_TREND = 0.16
-WEIGHT_RANGE_TIGHT = 0.08
+WEIGHT_VOL_CONTRACTION_TREND = 0.16
+WEIGHT_TIGHTENING_TREND = 0.15
+WEIGHT_COMPRESSION_VELOCITY = 0.10
+WEIGHT_RANGE_TIGHT = 0.07
 WEIGHT_RESISTANCE = 0.09
-WEIGHT_BREAKOUT_PROXIMITY = 0.12
-WEIGHT_DORMANCY_COMPRESSION = 0.12
+WEIGHT_BREAKOUT_PROXIMITY = 0.11
+WEIGHT_DORMANCY_COMPRESSION = 0.11
 WEIGHT_VOLUME_DRYUP = 0.07
-WEIGHT_BASE_QUALITY = 0.06
+WEIGHT_BASE_QUALITY = 0.05
 WEIGHT_RS_IMPROVEMENT = 0.04
-WEIGHT_ACCUMULATION = 0.03
-WEIGHT_SETUP_PURITY = 0.06
+WEIGHT_ACCUMULATION = 0.02
+WEIGHT_SETUP_PURITY = 0.05
 
 MIN_BARS = 60
 MIN_BASE_AGE_DAYS = 8
@@ -75,6 +76,7 @@ class SetupComponentScores:
     failed_resistance_tests: int
     rsi_14: float
     setup_purity_score: float
+    compression_velocity: float
     momentum_leader_like: bool
 
 
@@ -121,9 +123,19 @@ def evaluate_emerging_leader(symbol: str, ohlcv: pd.DataFrame) -> EmergingLeader
     )
 
 
-def ranking_sort_key(item: EmergingLeaderEvaluation) -> tuple[int, int, int, str]:
+def compression_velocity_label(score: float) -> str:
+    value = int(round(score))
+    if value >= 66:
+        return "High"
+    if value >= 42:
+        return "Medium"
+    return "Low"
+
+
+def ranking_sort_key(item: EmergingLeaderEvaluation) -> tuple[int, int, int, int, str]:
     return (
         item.sort_priority,
+        int(item.components.compression_velocity),
         int(item.components.setup_purity_score),
         item.setup_quality_score,
         item.symbol,
@@ -140,6 +152,11 @@ def passes_emerging_leader_list(item: EmergingLeaderEvaluation) -> bool:
         return False
     if item.setup_stage == "BREAKOUT_TRIGGERED":
         return item.components.setup_purity_score >= 45
+    if (
+        item.setup_stage == "BASE_BUILDING"
+        and item.components.compression_velocity < 40
+    ):
+        return False
     return True
 
 
@@ -252,6 +269,16 @@ def _compute_components(frame: pd.DataFrame) -> SetupComponentScores:
         resistance_level=resistance_level,
         close=float(close.iloc[-1]),
     )
+    compression_velocity = _compression_velocity_score(
+        daily_range=daily_range,
+        atr14=atr14,
+        close=close,
+        tightening_trend=tightening_trend,
+        vol_contraction_trend=vol_contraction_trend,
+        volatility_contraction=volatility_contraction,
+        dormancy_days=dormancy_days,
+        base_age=base_age,
+    )
     base_eligibility_signals = _count_base_eligibility_signals(
         vol_contraction_trend=vol_contraction_trend,
         vol_contraction_deep=vol_contraction_deep,
@@ -300,6 +327,7 @@ def _compute_components(frame: pd.DataFrame) -> SetupComponentScores:
         failed_resistance_tests=failed_tests,
         rsi_14=rsi_14,
         setup_purity_score=setup_purity_score,
+        compression_velocity=compression_velocity,
         momentum_leader_like=momentum_leader_like,
     )
 
@@ -312,6 +340,14 @@ def _passes_structural_filter(c: SetupComponentScores) -> bool:
     if c.setup_purity_score < MIN_SETUP_PURITY:
         return False
     if _is_boring_flat_base(c):
+        return False
+    if (
+        c.compression_velocity < 36
+        and c.tightening_trend < 50
+        and c.vol_contraction_trend < 50
+    ):
+        return False
+    if c.base_age >= 30 and c.compression_velocity < 42:
         return False
     if c.ret_20d > 0.14:
         return False
@@ -351,6 +387,7 @@ def _setup_quality_score(c: SetupComponentScores) -> int:
         + WEIGHT_RS_IMPROVEMENT * rs_capped
         + WEIGHT_ACCUMULATION * accumulation_capped
         + WEIGHT_SETUP_PURITY * c.setup_purity_score
+        + WEIGHT_COMPRESSION_VELOCITY * c.compression_velocity
     )
     penalty = 0.0
     if c.ret_20d > 0.08:
@@ -365,7 +402,11 @@ def _setup_quality_score(c: SetupComponentScores) -> int:
         penalty += min(12.0, (c.base_quality - 72) * 0.45)
     if c.base_age >= 28 and c.vol_contraction_trend < 55:
         penalty += 8.0
-    blended = raw * 0.9 + c.setup_purity_score * 0.1
+    if c.compression_velocity < 40 and c.volatility_contraction >= 62:
+        penalty += min(14.0, (c.volatility_contraction - 58) * 0.35)
+    if c.compression_velocity < 35 and c.dormancy_days >= 18:
+        penalty += 10.0
+    blended = raw * 0.88 + c.setup_purity_score * 0.08 + c.compression_velocity * 0.04
     return int(round(max(0.0, min(100.0, blended - penalty))))
 
 
@@ -422,6 +463,17 @@ def _factor_lists(
 ) -> tuple[list[str], list[str]]:
     positive: list[str] = []
     missing: list[str] = []
+
+    if c.compression_velocity >= 66:
+        positive.append(
+            f"High compression velocity ({int(c.compression_velocity)}/100)"
+        )
+    elif c.compression_velocity >= 42:
+        positive.append(
+            f"Compression velocity building ({int(c.compression_velocity)}/100)"
+        )
+    else:
+        missing.append("Active range tightening velocity")
 
     if c.vol_contraction_trend >= 62:
         positive.append("Volatility contraction trend (compressing)")
@@ -522,10 +574,18 @@ def _why_it_ranks(
     c: SetupComponentScores,
     positive: list[str],
 ) -> str:
-    lead = positive[0] if positive else "Consolidation structure forming"
+    vel = int(c.compression_velocity)
+    vel_label = compression_velocity_label(c.compression_velocity)
+    if c.compression_velocity >= 66:
+        lead = f"active compression velocity ({vel_label}, {vel}/100)"
+    elif positive:
+        lead = positive[0].lower()
+    else:
+        lead = "consolidation structure forming"
     return (
         f"{STAGE_LABELS[stage]} with setup quality {score}/100 "
-        f"(purity {int(c.setup_purity_score)}/100) — led by {lead.lower()}."
+        f"(purity {int(c.setup_purity_score)}/100, compression velocity "
+        f"{vel_label} {vel}/100) — led by {lead}."
     )
 
 
@@ -597,6 +657,82 @@ def _momentum_leader_like(
     if setup_purity_score < 32:
         return True
     return False
+
+
+def _compression_velocity_score(
+    *,
+    daily_range: pd.Series,
+    atr14: pd.Series,
+    close: pd.Series,
+    tightening_trend: float,
+    vol_contraction_trend: float,
+    volatility_contraction: float,
+    dormancy_days: int,
+    base_age: int,
+) -> float:
+    range_ma = daily_range.rolling(5, min_periods=3).mean()
+    range_slope = _series_contraction_slope(range_ma)
+    atr_slope = _series_contraction_slope(atr14)
+    dispersion = close.pct_change().abs().rolling(5, min_periods=3).std()
+    disp_slope = _series_contraction_slope(dispersion)
+
+    r5 = float(daily_range.tail(5).mean())
+    r15 = float(daily_range.tail(15).mean()) or r5
+    r30 = float(daily_range.tail(30).mean()) or r15
+    recent_ratio = r5 / r15 if r15 > 0 else 1.0
+    longer_ratio = r15 / r30 if r30 > 0 else 1.0
+    progression = (
+        _score_lower_is_better(recent_ratio, good=0.62, ok=0.78, bad=0.95) * 0.6
+        + _score_lower_is_better(longer_ratio, good=0.75, ok=0.9, bad=1.0) * 0.4
+    )
+
+    raw = (
+        range_slope * 0.28
+        + atr_slope * 0.22
+        + disp_slope * 0.15
+        + progression * 0.15
+        + tightening_trend * 0.12
+        + vol_contraction_trend * 0.08
+    )
+
+    penalty = 0.0
+    if volatility_contraction >= 60 and tightening_trend < 48 and range_slope < 50:
+        penalty += 18.0
+    if dormancy_days >= 22 and range_slope < 45:
+        penalty += 12.0
+    if base_age >= 32 and range_slope < 50:
+        penalty += 10.0
+    if atr_slope > 55 and range_slope < 40:
+        penalty += 8.0
+
+    return float(max(0.0, min(100.0, raw - penalty)))
+
+
+def _series_contraction_slope(series: pd.Series) -> float:
+    values = series.dropna().tail(22)
+    if len(values) < 10:
+        return 40.0
+    start = float(values.iloc[0])
+    end = float(values.iloc[-1])
+    ratio = end / start if start > 0 else 1.0
+    level = _score_lower_is_better(ratio, good=0.70, ok=0.88, bad=1.05)
+    x = np.arange(len(values), dtype=float)
+    slope = float(np.polyfit(x, values.values, 1)[0])
+    mean_val = float(values.mean()) or 1e-6
+    norm = slope / mean_val
+    trend_bonus = (
+        20.0
+        if norm < -0.015
+        else 10.0
+        if norm < -0.005
+        else -15.0
+        if norm > 0.005
+        else 0.0
+    )
+    flat_penalty = (
+        -18.0 if abs(norm) < 0.002 and ratio > 0.92 else 0.0
+    )
+    return float(max(0.0, min(100.0, level + trend_bonus + flat_penalty)))
 
 
 def _stage1_ok(c: SetupComponentScores) -> bool:

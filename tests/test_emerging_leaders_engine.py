@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 
 from app.builders.emerging_leaders_engine import (
+    compression_velocity_label,
     evaluate_emerging_leader,
     passes_emerging_leader_list,
 )
@@ -86,4 +87,18 @@ def test_tightening_stage_requires_compression():
         result.components.vol_contraction_trend >= 48
         or result.components.tightening_trend >= 55
     )
+    assert result.components.compression_velocity >= 42
+    assert compression_velocity_label(result.components.compression_velocity) in {
+        "High",
+        "Medium",
+    }
     assert result.setup_stage in {"BASE_BUILDING", "TIGHTENING", "BREAKOUT_WATCH"}
+
+
+def test_flat_sideways_low_compression_velocity_rejected():
+    frame = _consolidation_frame(drift=0.0)
+    frame["high"] = frame["close"] + 0.15
+    frame["low"] = frame["close"] - 0.15
+    frame["volume"] = 1_000_000.0
+    result = evaluate_emerging_leader("FLAT", frame)
+    assert result is None or not passes_emerging_leader_list(result)
