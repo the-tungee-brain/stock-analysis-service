@@ -64,7 +64,11 @@ def _format_detail_block(detail: EarningsDetailResponse) -> str:
     return "\n".join(lines)
 
 
-@router.get("/research/earnings", response_model=EarningsListResponse)
+@router.get(
+    "/research/earnings",
+    response_model=EarningsListResponse,
+    response_model_by_alias=True,
+)
 def get_earnings_list(
     symbol: str,
     limit: int = Query(default=8, ge=1, le=20),
@@ -74,7 +78,11 @@ def get_earnings_list(
     return earnings_service.list_earnings(symbol=symbol, limit=limit)
 
 
-@router.get("/research/earnings/detail", response_model=EarningsDetailResponse)
+@router.get(
+    "/research/earnings/detail",
+    response_model=EarningsDetailResponse,
+    response_model_by_alias=True,
+)
 async def get_earnings_detail(
     symbol: str,
     report_date: date = Query(..., description="Earnings report date (YYYY-MM-DD)"),
