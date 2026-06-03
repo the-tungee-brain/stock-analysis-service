@@ -59,12 +59,23 @@ def test_summary_has_four_sections():
     assert summary["disclaimer"]
 
 
-def test_outlook_includes_probability_display():
+def test_outlook_excludes_model_probabilities():
     summary = _build_summary(ranking_score=0.55)
-    assert summary["outlook"]["probability"] == 0.55
-    assert summary["outlook"]["probability_display"] == "55%"
-    assert "model c" in summary["outlook"]["expectation"].lower()
+    assert summary["outlook"]["probability"] is None
+    assert summary["outlook"]["probability_display"] is None
+    assert "model c" not in summary["outlook"]["expectation"].lower()
+    assert "%" not in summary["outlook"]["expectation"]
     assert summary["outlook"]["model_context"] is None
+
+
+def test_evidence_uses_distinct_plain_language():
+    summary = _build_summary(ranking_score=0.62)
+    texts = {b["text"] for b in summary["why_this_outlook"]}
+    joined = " ".join(texts).lower()
+    assert "trend" in joined
+    assert "leadership" in joined or "market" in joined
+    assert not any("Outperforming SPY" in t for t in texts)
+    assert not any("Uptrend intact" in t for t in texts)
 
 
 def test_slight_bearish_inside_uptrend_expectation():
@@ -81,7 +92,7 @@ def test_slight_bearish_inside_uptrend_expectation():
         model_prediction=0,
         ranking_score=0.453,
     )
-    assert summary["outlook"]["label"] == "Slight Bearish"
+    assert "bearish" in summary["outlook"]["label"].lower()
     assert "5 sessions" in summary["outlook"]["expectation"]
 
 
@@ -101,11 +112,13 @@ def test_evidence_bullets_use_plain_language():
     assert len(summary["why_this_outlook"]) <= 5
 
 
-def test_evidence_avoids_duplicate_trend_wording():
+def test_thesis_avoids_restatement_of_evidence():
     summary = _build_summary(ranking_score=0.62)
-    texts = [b["text"].lower() for b in summary["why_this_outlook"]]
-    assert not any("long-term" in t and "trend" in t for t in texts)
-    assert not any("far above" in t for t in texts)
+    thesis = summary["thesis"].lower()
+    outlook = summary["outlook"]["expectation"].lower()
+    assert "outperform" not in thesis
+    assert "strong uptrend" not in thesis
+    assert thesis.count("expect modest upside") <= outlook.count("expect modest upside")
 
 
 def test_key_level_rejects_stale_resistance_far_below_price():

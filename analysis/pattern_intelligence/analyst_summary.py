@@ -36,15 +36,18 @@ def build_analyst_summary(
     ranking_score: float | None,
 ) -> dict[str, Any]:
     is_benchmark = is_model_benchmark_symbol(symbol)
-    probability = None if is_benchmark else _resolve_probability(ranking_score, model_prediction)
-    outlook_label, tone = _conviction_tier(probability, is_benchmark)
     thesis_side = _composite_thesis_side(
         structure=structure,
         context=context,
         volume_ctx=volume_ctx,
         pattern=pattern,
-        probability=probability,
-        model_prediction=model_prediction,
+        is_benchmark=is_benchmark,
+    )
+    outlook_label, tone = _qualitative_outlook_label(
+        structure=structure,
+        thesis_side=thesis_side,
+        volume_ctx=volume_ctx,
+        pattern=pattern,
         is_benchmark=is_benchmark,
     )
 
@@ -59,10 +62,10 @@ def build_analyst_summary(
         "outlook": _outlook_block(
             label=outlook_label,
             tone=tone,
-            probability=probability,
             thesis_side=thesis_side,
             structure=structure,
             pattern=pattern,
+            volume_ctx=volume_ctx,
             is_benchmark=is_benchmark,
         ),
         "key_level": key_level,
@@ -85,44 +88,10 @@ def build_analyst_summary(
             is_benchmark=is_benchmark,
         ),
         "disclaimer": (
-            "Chart intelligence is contextual technical analysis, not investment advice. "
-            "Model C remains the primary 5-day signal; patterns and structure provide context."
+            "Chart intelligence is qualitative technical context, not investment advice. "
+            "See Trend Analysis for model scores and probabilities."
         ),
     }
-
-
-def _resolve_probability(
-    ranking_score: float | None,
-    model_prediction: int | None,
-) -> float | None:
-    if ranking_score is not None:
-        return ranking_score
-    if model_prediction is None:
-        return None
-    return 0.62 if model_prediction == 1 else 0.38
-
-
-def _conviction_tier(
-    probability: float | None,
-    is_benchmark: bool,
-) -> tuple[str, str]:
-    if is_benchmark:
-        return "Benchmark", "unavailable"
-    if probability is None:
-        return "Unavailable", "unavailable"
-    if probability >= 0.65:
-        return "Strong Bullish", "strong_bullish"
-    if probability >= 0.57:
-        return "Bullish", "bullish"
-    if probability >= 0.52:
-        return "Slight Bullish", "slight_bullish"
-    if probability >= 0.48:
-        return "Neutral", "neutral"
-    if probability >= 0.43:
-        return "Slight Bearish", "slight_bearish"
-    if probability >= 0.35:
-        return "Bearish", "bearish"
-    return "Strong Bearish", "strong_bearish"
 
 
 def _composite_thesis_side(
@@ -131,8 +100,6 @@ def _composite_thesis_side(
     context: TrendContext,
     volume_ctx: VolumeContext,
     pattern: CandlestickPatternHit | None,
-    probability: float | None,
-    model_prediction: int | None,
     is_benchmark: bool,
 ) -> ThesisSide:
     score = 0.0
@@ -155,16 +122,6 @@ def _composite_thesis_side(
     elif volume_ctx.distribution or volume_ctx.weak_move:
         score -= 0.4
 
-    if not is_benchmark:
-        prob = probability
-        if prob is None and model_prediction is not None:
-            prob = 0.62 if model_prediction == 1 else 0.38
-        if prob is not None:
-            if prob >= 0.55:
-                score += 0.9
-            elif prob <= 0.45:
-                score -= 0.9
-
     if pattern is not None:
         if pattern.direction == "bullish" and structure.bias != "downtrend":
             score += 0.3
@@ -178,14 +135,49 @@ def _composite_thesis_side(
     return "neutral"
 
 
+def _qualitative_outlook_label(
+    *,
+    structure: TrendStructure,
+    thesis_side: ThesisSide,
+    volume_ctx: VolumeContext,
+    pattern: CandlestickPatternHit | None,
+    is_benchmark: bool,
+) -> tuple[str, str]:
+    """Outlook label from price structure only — not Model C probabilities."""
+    if is_benchmark:
+        return "Benchmark", "unavailable"
+
+    if thesis_side == "bullish":
+        if structure.exhaustion:
+            return "Slight Bullish", "slight_bullish"
+        if structure.acceleration or (
+            volume_ctx.breakout_confirmed and structure.bias == "uptrend"
+        ):
+            return "Bullish", "bullish"
+        return "Slight Bullish", "slight_bullish"
+
+    if thesis_side == "bearish":
+        if structure.bias == "downtrend" and not structure.trend_break:
+            return "Bearish", "bearish"
+        return "Slight Bearish", "slight_bearish"
+
+    if structure.trend_break:
+        return "Neutral", "neutral"
+    if pattern is not None and pattern.direction == "bullish":
+        return "Slight Bullish", "slight_bullish"
+    if pattern is not None and pattern.direction == "bearish":
+        return "Slight Bearish", "slight_bearish"
+    return "Neutral", "neutral"
+
+
 def _outlook_block(
     *,
     label: str,
     tone: str,
-    probability: float | None,
     thesis_side: ThesisSide,
     structure: TrendStructure,
     pattern: CandlestickPatternHit | None,
+    volume_ctx: VolumeContext,
     is_benchmark: bool,
 ) -> dict[str, Any]:
     expectation = _expectation_sentence(
@@ -193,17 +185,15 @@ def _outlook_block(
         thesis_side=thesis_side,
         structure=structure,
         pattern=pattern,
+        volume_ctx=volume_ctx,
         is_benchmark=is_benchmark,
-        probability=probability,
     )
 
     return {
         "label": label,
         "tone": tone,
-        "probability": probability,
-        "probability_display": (
-            f"{int(round(probability * 100))}%" if probability is not None else None
-        ),
+        "probability": None,
+        "probability_display": None,
         "expectation": expectation,
         "model_context": None,
         "is_benchmark": is_benchmark,
@@ -217,8 +207,8 @@ def _expectation_sentence(
     thesis_side: ThesisSide,
     structure: TrendStructure,
     pattern: CandlestickPatternHit | None,
+    volume_ctx: VolumeContext,
     is_benchmark: bool,
-    probability: float | None = None,
 ) -> str:
     if is_benchmark:
         if structure.bias == "uptrend":
@@ -236,72 +226,32 @@ def _expectation_sentence(
             "structure resolves more clearly."
         )
 
-    model_clause = ""
-    if probability is not None:
-        model_clause = f" Model C ({int(round(probability * 100))}%) leans {_model_lean_word(label)}."
-
     label_lower = label.lower()
     if "bullish" in label_lower:
-        if structure.bias == "uptrend" and structure.trend_break:
+        if structure.bias == "uptrend" and not structure.trend_break:
             return (
-                "Expect modest upside or sideways trade over the next 5 sessions; "
-                "nearby resistance may cap gains."
-                + model_clause
-            )
-        if structure.bias == "uptrend":
-            return (
-                "Expect modest upside over the next 5 sessions while the uptrend holds."
-                + model_clause
+                "Expect modest upside over the next 5 sessions while the uptrend remains intact."
             )
         if pattern is not None and pattern.direction == "bullish":
             return (
-                "Expect a constructive bounce over the next 5 sessions pending trend confirmation."
-                + model_clause
+                "Expect a constructive move higher over the next 5 sessions if buyers follow through."
             )
-        return (
-            "Expect a mildly positive 5-day bias; follow-through above nearby levels matters."
-            + model_clause
-        )
+        return "Expect a mildly positive bias over the next 5 sessions."
 
     if "bearish" in label_lower:
-        if structure.bias == "downtrend":
-            return (
-                "Expect continued pressure over the next 5 sessions while the downtrend persists."
-                + model_clause
-            )
         if structure.bias == "uptrend":
             return (
-                "Expect near-term softness or consolidation inside a longer uptrend."
-                + model_clause
+                "Expect near-term softness or consolidation over the next 5 sessions."
             )
-        return (
-            "Expect downside risk or choppy trade until price reclaims support."
-            + model_clause
-        )
+        if structure.bias == "downtrend":
+            return "Expect continued pressure over the next 5 sessions."
+        return "Expect downside risk or choppy trade over the next 5 sessions."
 
     if thesis_side == "bullish":
-        return (
-            "Expect range-bound to slightly higher trade over the next 5 sessions."
-            + model_clause
-        )
+        return "Expect range-bound to slightly higher trade over the next 5 sessions."
     if thesis_side == "bearish":
-        return (
-            "Expect range-bound to slightly lower trade over the next 5 sessions."
-            + model_clause
-        )
-    return (
-        "Expect sideways trade until price breaks a nearby level decisively."
-        + model_clause
-    )
-
-
-def _model_lean_word(label: str) -> str:
-    label_lower = label.lower()
-    if "bullish" in label_lower:
-        return "bullish"
-    if "bearish" in label_lower:
-        return "bearish"
-    return "neutral"
+        return "Expect range-bound to slightly lower trade over the next 5 sessions."
+    return "Expect sideways trade until price commits to a clear direction."
 
 
 def _nearby_resistances(
@@ -456,42 +406,39 @@ def _evidence_bullets(
     slots: dict[str, tuple[str, BulletTone]] = {}
 
     if structure.bias == "uptrend" and not structure.trend_break:
-        slots["trend"] = ("Uptrend intact", "support")
+        slots["trend"] = ("Strong trend", "support")
     elif structure.bias == "downtrend" and not structure.trend_break:
-        slots["trend"] = ("Downtrend in control", "support")
+        slots["trend"] = ("Weak trend structure", "caution")
     elif structure.trend_break:
-        slots["trend"] = ("Trend structure recently broke", "caution")
+        slots["trend"] = ("Trend recently broke down", "caution")
     else:
-        slots["trend"] = ("No dominant trend — range conditions", "caution")
+        slots["trend"] = ("Choppy, range-bound structure", "caution")
 
     if not is_benchmark:
         rs = context.rs_vs_spy_63d
         if rs is not None and rs > 0.02:
-            slots["rs"] = ("Outperforming SPY", "support")
+            slots["rs"] = ("Market leadership", "support")
         elif rs is not None and rs < -0.02:
-            slots["rs"] = ("Lagging SPY", "caution")
+            slots["rs"] = ("Losing market leadership", "caution")
         elif scores.relative_strength >= 0.55:
-            slots["rs"] = ("Relative strength supportive", "support")
+            slots["rs"] = ("Holding leadership vs the market", "support")
         elif scores.relative_strength <= 0.4:
-            slots["rs"] = ("Relative strength soft", "caution")
+            slots["rs"] = ("Leadership fading vs the market", "caution")
 
     if volume_ctx.accumulation or volume_ctx.breakout_confirmed:
         slots["volume"] = ("Volume confirms demand", "support")
     elif volume_ctx.distribution:
-        slots["volume"] = ("Volume points to distribution", "caution")
+        slots["volume"] = ("Volume signals supply pressure", "caution")
     elif volume_ctx.weak_move:
-        slots["volume"] = ("Move lacks volume confirmation", "caution")
+        slots["volume"] = ("Rally lacks volume support", "caution")
 
     if pattern is not None and pattern.direction != "neutral":
-        if pattern.direction == "bullish":
-            slots["pattern"] = (f"{pattern.label} (bullish)", "support")
-        else:
-            slots["pattern"] = (f"{pattern.label} (bearish)", "caution")
+        slots["pattern"] = _pattern_evidence_line(pattern, structure)
 
     if structure.exhaustion:
-        slots["exhaustion"] = ("Trend showing exhaustion", "caution")
+        slots["exhaustion"] = ("Momentum is tiring", "caution")
     elif structure.acceleration and structure.bias == "uptrend" and thesis_side == "bullish":
-        slots["momentum"] = ("Momentum accelerating", "support")
+        slots["momentum"] = ("Momentum improving", "support")
 
     order = ["trend", "rs", "volume", "pattern", "momentum", "exhaustion"]
     bullets: list[dict[str, Any]] = []
@@ -532,55 +479,55 @@ def _thesis_narrative(
             )
         return f"{likely} {strengthen} {weaken}"
 
-    control = _control_phrase(structure, volume_ctx, thesis_side, outlook_label)
-    likely = _likely_path_phrase(outlook_label, thesis_side, structure)
+    lead = _thesis_lead_phrase(thesis_side, volume_ctx, outlook_label)
     strengthen, weaken = _scenario_branches(key_level, thesis_side, pattern, structure)
 
-    return f"{control} {likely} {strengthen} {weaken}"
+    return f"{lead} {strengthen} {weaken}"
 
 
-def _control_phrase(
+def _pattern_evidence_line(
+    pattern: CandlestickPatternHit,
     structure: TrendStructure,
-    volume_ctx: VolumeContext,
+) -> tuple[str, BulletTone]:
+    pattern_id = pattern.pattern_id.lower()
+    if pattern.direction == "bullish":
+        if pattern_id in {"bullish_engulfing", "hammer", "morning_star", "piercing_line"}:
+            return "Buyers regained control after pullback", "support"
+        if pattern_id == "three_white_soldiers":
+            return "Sustained buying across recent sessions", "support"
+        if structure.bias == "downtrend":
+            return "Early sign of buyer interest against the trend", "support"
+        return "Buyers showing renewed interest", "support"
+
+    if pattern_id in {"bearish_engulfing", "shooting_star", "evening_star"}:
+        return "Sellers pressed after a recent rally", "caution"
+    if pattern_id == "three_black_crows":
+        return "Persistent selling pressure", "caution"
+    if structure.bias == "uptrend":
+        return "Pullback pattern — watch for follow-through", "caution"
+    return "Selling pressure emerging", "caution"
+
+
+def _thesis_lead_phrase(
     thesis_side: ThesisSide,
+    volume_ctx: VolumeContext,
     outlook_label: str,
 ) -> str:
+    """Forward-looking setup line — does not repeat the Outlook expectation sentence."""
+    label_lower = outlook_label.lower()
     if thesis_side == "bullish":
         if volume_ctx.accumulation or volume_ctx.breakout_confirmed:
-            return "Buyers remain in control and volume backs the bid."
-        if structure.bias == "uptrend":
-            return "Buyers remain in control as the uptrend persists."
-        return f"Bulls still have the edge on the {outlook_label.lower()} setup."
+            return "Buyers remain in control, though the next leg still needs follow-through."
+        if "bullish" in label_lower:
+            return "Momentum still favors the bulls, but the move may be gradual."
+        return "The setup still leans higher if buyers hold the bid."
 
     if thesis_side == "bearish":
         if volume_ctx.distribution:
-            return "Sellers are pressing and distribution volume weighs on price."
-        if structure.bias == "downtrend":
-            return "Sellers remain in control within a downtrend."
-        return f"Bears have the edge on the {outlook_label.lower()} setup."
+            return "Sellers remain in control until demand re-emerges."
+        return "Downside pressure is more likely than a sustained rebound."
 
-    return "Neither side has a decisive edge — expect two-way trade."
-
-
-def _likely_path_phrase(
-    outlook_label: str,
-    thesis_side: ThesisSide,
-    structure: TrendStructure,
-) -> str:
-    label_lower = outlook_label.lower()
-    if "bullish" in label_lower:
-        if structure.bias == "uptrend":
-            return (
-                "Expect modest upside over the next 5 sessions, though gains may be gradual."
-            )
-        return "Expect a constructive drift higher over the next 5 sessions."
-    if "bearish" in label_lower:
-        return "Expect softness or lower highs over the next 5 sessions."
-    if thesis_side == "bullish":
-        return "Expect a slight upward bias over the next 5 sessions."
-    if thesis_side == "bearish":
-        return "Expect a slight downward bias over the next 5 sessions."
-    return "Expect sideways trade over the next 5 sessions."
+    return "The range is still in play until one side takes control."
 
 
 def _scenario_branches(
@@ -620,13 +567,13 @@ def _scenario_branches(
 
     if thesis_side == "bullish":
         return (
-            "A push through recent highs would strengthen the bullish case.",
-            "Loss of momentum and lower highs would weaken it.",
+            "A move through recent highs would strengthen the bullish case.",
+            "Loss of momentum would weaken it.",
         )
     if thesis_side == "bearish":
         return (
-            "A rebound that fails quickly would reinforce the bearish case.",
-            "A sustained reclaim of recent highs would weaken it.",
+            "A failed bounce would reinforce the bearish case.",
+            "A sustained push above recent highs would weaken it.",
         )
     return (
         "A decisive breakout would set the next directional leg.",
