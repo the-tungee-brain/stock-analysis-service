@@ -19,7 +19,7 @@ Logs: `/home/ubuntu/logs/ranking-bootstrap.log`, `ranking-daily.log`
 ## A. Initial deployment
 
 1. **Push to `main`** — `deploy.yml` runs tests, builds Docker image, deploys `sas-server` with:
-   - `-v /home/ubuntu/sas-ranking-persist/data:/app/data`
+   - `-v .../data/raw:/app/data/raw` and `.../data/ranking:/app/data/ranking` (not the whole `/app/data` tree — that breaks `import data.benchmarks`)
    - `PYTHONPATH=/app`
    - `ranking_pipeline` + `scripts` in the image
 
@@ -78,9 +78,27 @@ Optional ML retrain: `train-pattern-model.yml` or `scripts/train_ranking_model.p
 | Issue | Action |
 |-------|--------|
 | `ModuleNotFoundError: ranking_pipeline` | Redeploy latest image from `main` |
+| `No module named 'data.benchmarks'` (Gunicorn crash) | Whole-volume mount shadowed `/app/data`. Redeploy with split mounts (`raw` + `ranking` only) |
+| Log: `ranking_pipeline not in image` but deploy is new | Log may be **stale** from an old bootstrap. Verify imports (below), then **re-run bootstrap** |
 | Bootstrap stuck | SSH → log file; re-run workflow **bootstrap** |
 | Ranking fails | API serves last run; fix and run workflow **daily** |
 | Portfolio fails | Previous snapshot remains; run workflow **daily** |
+
+### Verify container (on VM)
+
+```bash
+docker exec -w /app sas-server python -c "import ranking_pipeline, data.download; print('ok')"
+docker exec sas-server sh -c 'echo PYTHONPATH=$PYTHONPATH; test -d /app/ranking_pipeline && echo ranking_pipeline present'
+```
+
+If `ok` prints, restart bootstrap (overwrites the old log):
+
+```bash
+nohup /home/ubuntu/ranking_pipeline_remote.sh bootstrap > /home/ubuntu/logs/ranking-bootstrap.log 2>&1 &
+tail -f /home/ubuntu/logs/ranking-bootstrap.log
+```
+
+Or GitHub Actions → **Ranking pipeline (VM)** → mode **bootstrap**.
 
 ---
 

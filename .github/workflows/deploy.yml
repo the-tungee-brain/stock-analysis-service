@@ -90,7 +90,7 @@ jobs:
               redis:7-alpine \
               redis-server --appendonly yes --requirepass "${{ secrets.REDIS_PASSWORD }}" --maxmemory 512mb --maxmemory-policy allkeys-lru
 
-            # Persistent ranking pipeline store (OHLCV Parquet + SQLite)
+            # Persistent ranking store only (do NOT mount over /app/data — that shadows the Python package)
             mkdir -p /home/ubuntu/sas-ranking-persist/data/raw
             mkdir -p /home/ubuntu/sas-ranking-persist/data/ranking/features
 
@@ -103,7 +103,8 @@ jobs:
               --network sas-net \
               -p 8000:8000 \
               -v /home/ubuntu/sas-pattern-artifacts:/app/artifacts \
-              -v /home/ubuntu/sas-ranking-persist/data:/app/data \
+              -v /home/ubuntu/sas-ranking-persist/data/raw:/app/data/raw \
+              -v /home/ubuntu/sas-ranking-persist/data/ranking:/app/data/ranking \
               -e PYTHONPATH=/app \
               -e PATTERN_ARTIFACT_DIR=/app/artifacts \
               --memory=5g \

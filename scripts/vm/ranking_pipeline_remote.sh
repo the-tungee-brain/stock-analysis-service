@@ -13,7 +13,14 @@ exec_in() {
 }
 
 imports_ok() {
-  exec_in python -c "import ranking_pipeline, data.download" >/dev/null 2>&1
+  local err
+  err="$(exec_in python -c "import ranking_pipeline, data.download; print('ok')" 2>&1)" || {
+    echo "Import check failed inside $CONTAINER:" >&2
+    echo "$err" >&2
+    exec_in sh -c 'echo "PYTHONPATH=${PYTHONPATH:-<unset>}"; ls -d /app/ranking_pipeline /app/data/download.py 2>&1' >&2 || true
+    return 1
+  }
+  return 0
 }
 
 run_bootstrap() {
@@ -46,7 +53,7 @@ main() {
     exit 1
   fi
   if ! imports_ok; then
-    echo "ranking_pipeline not in image — deploy latest sas-server first" >&2
+    echo "Fix: ensure Deploy SAS Server succeeded (log: pipeline imports ok), then re-run: $0 $mode" >&2
     exit 1
   fi
   case "$mode" in
