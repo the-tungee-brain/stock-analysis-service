@@ -1,63 +1,65 @@
 # Deployment Runbook — Ranking + Portfolio + Risk
 
-All pipeline steps run **automatically on the OCI VM** inside `sas-server` via GitHub Actions (no manual `docker exec`).
+**Deploy** = new Docker image + restart API. **Ranking** = separate workflow only.
 
 ## Automation overview
 
 | Trigger | Workflow | What runs |
 |---------|----------|-----------|
-| Push to `main` | `deploy.yml` | Build image, deploy container, import check, then **daily** or **bootstrap** (background) |
+| Push to `main` | `deploy.yml` | Build image, deploy container, import check — **no ranking** |
 | Tue–Sat 07:30 UTC | `ranking-pipeline-vm.yml` | **daily** + portfolio |
 | Sun 06:00 UTC | `ranking-pipeline-vm.yml` | **weekly** universe refresh |
-| Manual | `ranking-pipeline-vm.yml` → Run workflow | `daily`, `weekly`, or `bootstrap` |
+| Manual (one-time) | `ranking-pipeline-vm.yml` → **bootstrap** | Universe → SPY → daily → portfolio |
+| Manual | `ranking-pipeline-vm.yml` → **daily** / **bootstrap-resume** | Ad hoc |
 
-Script on VM: `/home/ubuntu/ranking_pipeline_remote.sh`  
+Script on VM: `/home/ubuntu/ranking_pipeline_remote.sh` (copied on deploy and before each pipeline run)  
 Logs: `/home/ubuntu/logs/ranking-bootstrap.log`, `ranking-daily.log`
 
 ---
 
-## A. Initial deployment
+## A. First-time data (bootstrap — once)
 
-1. **Push to `main`** — `deploy.yml` runs tests, builds Docker image, deploys `sas-server` with:
-   - `-v .../data/raw:/app/data/raw` and `.../data/ranking:/app/data/ranking` (not the whole `/app/data` tree — that breaks `import data.benchmarks`)
-   - `PYTHONPATH=/app`
-   - `ranking_pipeline` + `scripts` in the image
+1. **Deploy** latest `main` (`deploy.yml`).
 
-2. **First deploy** automatically starts **bootstrap in background** (universe → SPY → ranking → portfolio). Monitor:
+2. GitHub → **Actions** → **Ranking pipeline (VM)** → **Run workflow** → mode **`bootstrap`**.
+
+3. Monitor on VM:
    ```bash
-   ssh ubuntu@<vm> tail -f /home/ubuntu/logs/ranking-bootstrap.log
+   tail -f /home/ubuntu/logs/ranking-bootstrap.log
    ```
 
-3. **When bootstrap finishes**, marker file exists:
-   `/home/ubuntu/sas-ranking-persist/.pipeline_bootstrapped`
+4. Done when log shows `=== bootstrap complete ===` (marker:
+   `/home/ubuntu/sas-ranking-persist/.pipeline_bootstrapped`).
 
-4. **Verify API** (authenticated):
+5. Verify API (authenticated):
    ```bash
-   curl -H "Authorization: Bearer $TOKEN" https://<host>/api/v1/health
    curl -H "Authorization: Bearer $TOKEN" https://<host>/api/v1/rankings/top?limit=5
    curl -H "Authorization: Bearer $TOKEN" https://<host>/api/v1/portfolio/latest
    ```
 
-Manual bootstrap (only if automation failed):
-
-```bash
-docker exec -w /app sas-server python scripts/run_ranking_universe_weekly.py
-# … see scripts/vm/ranking_pipeline_remote.sh bootstrap
-```
+If universe finished but ranking failed: run workflow mode **`bootstrap-resume`** (not full bootstrap).
 
 ---
 
-## B. Daily operations
+## B. Daily ranking (ongoing)
 
-**Automated** — no action required. `ranking-pipeline-vm.yml` at 07:30 UTC Tue–Sat, plus incremental **daily** after each deploy.
+**Automatic:** `ranking-pipeline-vm.yml` every **Tue–Sat 07:30 UTC**.
+
+**Manual:** same workflow → **daily**.
+
+Deploy does **not** re-run ranking.
 
 ---
 
-## C. Weekly operations
+## C. Deploy (app only)
 
-**Automated** — Sunday 06:00 UTC universe refresh via `ranking-pipeline-vm.yml`.
+Push to `main` → `deploy.yml`:
 
-Optional ML retrain: `train-pattern-model.yml` or `scripts/train_ranking_model.py` on VM.
+- `-v .../data/raw` and `.../data/ranking` (never mount whole `/app/data`)
+- `PYTHONPATH=/app`, `RANKING_MAX_WORKERS=4`, `YFINANCE_MIN_INTERVAL_SEC=0.4`
+- `pipeline imports ok` — then nginx + health check
+
+Existing Parquet/SQLite on the volume are unchanged.
 
 ---
 
@@ -65,11 +67,10 @@ Optional ML retrain: `train-pattern-model.yml` or `scripts/train_ranking_model.p
 
 | Check | Where |
 |-------|--------|
-| Deploy succeeded | GitHub Actions → Deploy SAS Server to OCI |
-| Pipeline imports | Deploy log: `pipeline imports ok` |
+| Deploy | Actions → Deploy SAS Server to OCI |
+| Daily ranking | Actions → Ranking pipeline (VM) |
 | Bootstrap progress | `tail -f /home/ubuntu/logs/ranking-bootstrap.log` |
-| Daily runs | GitHub → Ranking pipeline (VM) |
-| API health | `GET /api/v1/health` |
+| Daily progress | `tail -f /home/ubuntu/logs/ranking-daily.log` |
 
 ---
 
@@ -77,34 +78,13 @@ Optional ML retrain: `train-pattern-model.yml` or `scripts/train_ranking_model.p
 
 | Issue | Action |
 |-------|--------|
-| `ModuleNotFoundError: ranking_pipeline` | Redeploy latest image from `main` |
-| `No module named 'data.benchmarks'` (Gunicorn crash) | Whole-volume mount shadowed `/app/data`. Redeploy with split mounts (`raw` + `ranking` only) |
-| Log: `ranking_pipeline not in image` but deploy is new | Log may be **stale** from an old bootstrap. Verify imports (below), then **re-run bootstrap** |
-| Bootstrap stuck | SSH → log file; re-run workflow **bootstrap** |
-| `No data returned for SPY` after universe | Yahoo throttled after ~6k screens. Wait 5–10 min, then `$0 bootstrap-resume` (skips universe) |
-| `No feature rows available for ranking` | Universe screen only stored ~1y OHLCV; deploy fix backfills 15y on daily, then `bootstrap-resume` |
-| Yahoo rate limits during bulk jobs | Deploy sets `YFINANCE_MIN_INTERVAL_SEC=0.4` + `RANKING_MAX_WORKERS=4`; retries in `data/download.py`; 90s pause before SPY in bootstrap |
-| Ranking fails | API serves last run; fix and run workflow **daily** |
-| Portfolio fails | Previous snapshot remains; run workflow **daily** |
-
-### Verify container (on VM)
-
-```bash
-docker exec -w /app sas-server python -c "import ranking_pipeline, data.download; print('ok')"
-docker exec sas-server sh -c 'echo PYTHONPATH=$PYTHONPATH; test -d /app/ranking_pipeline && echo ranking_pipeline present'
-```
-
-If `ok` prints, restart bootstrap (overwrites the old log):
-
-```bash
-nohup /home/ubuntu/ranking_pipeline_remote.sh bootstrap > /home/ubuntu/logs/ranking-bootstrap.log 2>&1 &
-tail -f /home/ubuntu/logs/ranking-bootstrap.log
-```
-
-Or GitHub Actions → **Ranking pipeline (VM)** → mode **bootstrap**.
+| `No module named 'data.benchmarks'` | Redeploy with split volume mounts |
+| `No feature rows` / short OHLCV | Workflow **bootstrap-resume** or **daily** after deploy with fix |
+| `No data returned for SPY` | Wait 10 min → **bootstrap-resume** |
+| Deploy Actions timeout | Expected if pipeline was wrongly on deploy; fixed — use **Ranking pipeline (VM)** |
 
 ---
 
 ## F. Clients
 
-Web/iOS: `rankings/top`, `portfolio/latest`, `health` only — see [`frontend_integration.md`](frontend_integration.md).
+Web/iOS: `rankings/top`, `portfolio/latest`, `health` — see [`frontend_integration.md`](frontend_integration.md).

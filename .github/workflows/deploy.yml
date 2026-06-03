@@ -71,6 +71,7 @@ jobs:
           host: ${{ secrets.VM_IP }}
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 30m
           script: |
             # Shared Docker network for redis + sas-server
             docker network create sas-net || true
@@ -152,16 +153,7 @@ jobs:
 
             mkdir -p /home/ubuntu/logs
             chmod +x /home/ubuntu/ranking_pipeline_remote.sh
-            MARKER=/home/ubuntu/sas-ranking-persist/.pipeline_bootstrapped
-            if [ ! -f "$MARKER" ]; then
-              echo "First deploy: full bootstrap in background — tail -f /home/ubuntu/logs/ranking-bootstrap.log"
-              nohup /home/ubuntu/ranking_pipeline_remote.sh bootstrap \
-                > /home/ubuntu/logs/ranking-bootstrap.log 2>&1 &
-            else
-              echo "Incremental ranking daily + portfolio after deploy"
-              /home/ubuntu/ranking_pipeline_remote.sh daily \
-                >> /home/ubuntu/logs/ranking-daily.log 2>&1 || true
-            fi
+            echo "Deploy only — ranking runs via Ranking pipeline (VM) workflow, not on deploy"
 
             sudo nginx -t && sudo systemctl restart nginx
             sleep 3
