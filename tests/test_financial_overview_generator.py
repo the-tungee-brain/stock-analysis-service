@@ -4,11 +4,11 @@ from app.builders.financial_overview_generator import FinancialOverviewGenerator
 
 def _generate(metrics: CanonicalFinancialMetrics, symbol: str = "TEST") -> tuple:
     result = FinancialOverviewGenerator().generate(symbol, metrics)
-    return result.headline, result.strengths, result.risks, result.rating
+    return result.headline, result.strengths, result.risks, result.profile, result.score
 
 
 def test_hypergrowth_ai_profile_differs_from_mature_utility():
-    hyper, hyper_strengths, hyper_risks, _ = _generate(
+    hyper, hyper_strengths, hyper_risks, hyper_profile, hyper_score = _generate(
         CanonicalFinancialMetrics(
             revenue_growth_yoy=120,
             gross_margin_pct=78,
@@ -20,7 +20,7 @@ def test_hypergrowth_ai_profile_differs_from_mature_utility():
         ),
         symbol="PLTR",
     )
-    mature, mature_strengths, mature_risks, mature_rating = _generate(
+    mature, mature_strengths, mature_risks, mature_profile, mature_score = _generate(
         CanonicalFinancialMetrics(
             revenue_growth_yoy=3,
             gross_margin_pct=42,
@@ -35,17 +35,22 @@ def test_hypergrowth_ai_profile_differs_from_mature_utility():
         symbol="NEE",
     )
 
-    assert "speculative" in hyper.lower() or "high growth" in hyper.lower()
+    assert hyper_profile in {"Speculative Growth", "High Growth / High Risk"}
     assert any("exceptional" in s or "strong" in s.lower() for s in hyper_strengths)
     assert any("negative" in r.lower() or "cash" in r.lower() for r in hyper_risks)
-    assert "mature" in mature.lower() or "strong" in mature.lower() or "Cash-generative" in mature
-    assert mature_rating in {"strong", "solid"}
+    assert mature_profile in {
+        "Mature Stable Business",
+        "Financially Strong",
+        "Cash-Generating Value",
+        "Profitable Compounder",
+    }
+    assert mature_score >= 55
     assert not any("speculative" in s.lower() for s in mature_strengths)
     assert hyper != mature
 
 
 def test_distressed_profile_prioritizes_margin_and_leverage():
-    headline, strengths, risks, rating = _generate(
+    headline, strengths, risks, profile, score = _generate(
         CanonicalFinancialMetrics(
             revenue_growth_yoy=-5,
             gross_margin_pct=22,
@@ -58,11 +63,9 @@ def test_distressed_profile_prioritizes_margin_and_leverage():
         symbol="DIST",
     )
 
-    assert rating == "weak"
-    assert any(
-        token in headline.lower()
-        for token in ("risk", "loss", "leveraged", "turnaround")
-    )
+    assert profile in {"Leveraged Turnaround", "High Growth / High Risk"}
+    assert score < 45
+    assert "margin" in headline.lower() or "debt" in headline.lower()
     assert len(risks) <= 3
     assert risks[0].lower().find("margin") >= 0 or risks[0].lower().find("loss") >= 0
     assert any("leverage" in r.lower() or "balance-sheet" in r.lower() for r in risks)
@@ -91,7 +94,7 @@ def test_revenue_growth_conditional_bands():
 
 
 def test_low_leverage_skips_leverage_risk():
-    _, strengths, risks, _ = _generate(
+    _, strengths, risks, _, _ = _generate(
         CanonicalFinancialMetrics(
             debt_to_equity=0.25,
             net_margin_pct=18,
@@ -103,7 +106,7 @@ def test_low_leverage_skips_leverage_risk():
 
 
 def test_no_generic_fallback_copy():
-    _, strengths, risks, _ = _generate(CanonicalFinancialMetrics())
+    _, strengths, risks, _, _ = _generate(CanonicalFinancialMetrics())
     banned = (
         "investors should monitor",
         "review the statement tables",

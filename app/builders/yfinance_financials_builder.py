@@ -182,8 +182,11 @@ class YFinanceFinancialsBuilder:
         canonical = build_canonical_metrics(info=info, snapshot=snapshot)
         overview = FinancialOverviewGenerator().generate(symbol, canonical)
         return FinancialStrength(
-            rating=overview.rating,
+            profile=overview.profile,
             score=overview.score,
+            score_explanation=overview.score_explanation,
+            score_breakdown=overview.score_breakdown,
+            rating=overview.rating,
             headline=overview.headline,
             strengths=overview.strengths,
             risks=overview.risks,

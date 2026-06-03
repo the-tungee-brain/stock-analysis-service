@@ -677,7 +677,7 @@ class PromptEnrichmentService:
                 strength = ctx.yfinance_financials.strength
                 strength_lines = [
                     "## Financial health summary (yfinance statements)",
-                    f"- Rating: {strength.rating} ({strength.score}/100)",
+                    f"- Profile: {strength.profile} ({strength.score}/100)",
                     f"- {strength.headline}",
                 ]
                 if strength.highlights:
@@ -1797,7 +1797,7 @@ class PromptEnrichmentService:
             strength_block = dedent(
                 f"""
                 ## Financial strength (rule-based, from yfinance statements)
-                - Rating: {strength.rating} ({strength.score}/100)
+                - Profile: {strength.profile} ({strength.score}/100)
                 - Headline: {strength.headline}
                 - Highlights: {"; ".join(strength.highlights) or "n/a"}
                 - Strengths: {"; ".join(strength.strengths) or "n/a"}

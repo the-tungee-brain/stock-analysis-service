@@ -1,11 +1,11 @@
 from app.models.company_research_models import (
     FinancialLineItem,
     FinancialStatementsSnapshot,
-    FinancialStrength,
     FinancialsPackage,
     FundamentalMetric,
     ResearchContext,
 )
+from tests.financial_strength_fixtures import make_financial_strength
 from app.services.prompt_enrichment_service import PromptEnrichmentService
 
 
@@ -18,9 +18,7 @@ def test_format_dividend_payout_section_includes_payout_and_fcf_coverage():
             FundamentalMetric(label="Annual dividend per share", value="$1.84"),
         ],
         yfinance_financials=FinancialsPackage(
-            strength=FinancialStrength(
-                rating="solid",
-                score=70,
+            strength=make_financial_strength(
                 headline="Solid for KO.",
                 highlights=[
                     "Payout ratio about 75%.",
@@ -57,11 +55,7 @@ def test_cached_context_is_stale_without_payout_when_yield_present():
             FundamentalMetric(label="Dividend yield", value="3.10%"),
         ],
         yfinance_financials=FinancialsPackage(
-            strength=FinancialStrength(
-                rating="solid",
-                score=70,
-                headline="Solid for KO.",
-            ),
+            strength=make_financial_strength(headline="Solid for KO."),
         ),
     )
     assert CompanyResearchService._cached_context_is_stale(cached) is True
@@ -109,11 +103,7 @@ def test_format_dividend_payout_section_computes_from_statements():
         symbol="KO",
         yfinance_financials=FinancialsPackage(
             annual=annual,
-            strength=FinancialStrength(
-                rating="solid",
-                score=70,
-                headline="Solid for KO.",
-            ),
+            strength=make_financial_strength(headline="Solid for KO."),
         ),
     )
 

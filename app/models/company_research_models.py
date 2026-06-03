@@ -129,11 +129,25 @@ class FinancialStatementsSnapshot(BaseModel):
     )
 
 
+class FinancialScoreBreakdown(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    growth: int = Field(ge=0, le=100)
+    profitability: int = Field(ge=0, le=100)
+    balance_sheet: int = Field(ge=0, le=100, serialization_alias="balanceSheet")
+    cash_flow: int = Field(ge=0, le=100, serialization_alias="cashFlow")
+
+
 class FinancialStrength(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    rating: Literal["strong", "solid", "mixed", "weak"]
+    profile: str
     score: int = Field(ge=0, le=100)
+    score_explanation: str = Field(serialization_alias="scoreExplanation")
+    score_breakdown: FinancialScoreBreakdown = Field(
+        serialization_alias="scoreBreakdown",
+    )
+    rating: Literal["strong", "solid", "mixed", "weak"]
     headline: str
     strengths: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)

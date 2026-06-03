@@ -10,7 +10,8 @@ from app.builders.financial_metrics_validation import (
     validate_strength_matches_canonical,
 )
 from app.builders.financial_overview_generator import FinancialOverviewGenerator
-from app.models.company_research_models import FinancialStrength, FundamentalMetric
+from app.models.company_research_models import FinancialScoreBreakdown, FundamentalMetric
+from tests.financial_strength_fixtures import make_financial_strength
 
 
 def _canonical(**kwargs) -> CanonicalFinancialMetrics:
@@ -28,15 +29,18 @@ def test_key_metrics_and_narrative_share_revenue_growth_display():
         free_cash_flow_yoy_pct=-12.0,
     )
     overview = FinancialOverviewGenerator().generate("PLTR", canonical)
-    strength = FinancialStrength(
-        rating=overview.rating,
+    strength = make_financial_strength(
+        profile=overview.profile,
         score=overview.score,
+        score_explanation=overview.score_explanation,
+        score_breakdown=overview.score_breakdown,
+        rating=overview.rating,
         headline=overview.headline,
         strengths=overview.strengths,
         risks=overview.risks,
         highlights=overview.highlights,
-        key_metrics=canonical.to_key_metrics(),
     )
+    strength = strength.model_copy(update={"key_metrics": canonical.to_key_metrics()})
 
     validate_strength_matches_canonical(strength, canonical)
 
@@ -77,15 +81,18 @@ def test_distressed_profile_debt_display_matches_key_metric():
         current_ratio=0.7,
     )
     overview = FinancialOverviewGenerator().generate("DIST", canonical)
-    strength = FinancialStrength(
-        rating=overview.rating,
+    strength = make_financial_strength(
+        profile=overview.profile,
         score=overview.score,
+        score_explanation=overview.score_explanation,
+        score_breakdown=overview.score_breakdown,
+        rating=overview.rating,
         headline=overview.headline,
         strengths=overview.strengths,
         risks=overview.risks,
         highlights=overview.highlights,
-        key_metrics=canonical.to_key_metrics(),
     )
+    strength = strength.model_copy(update={"key_metrics": canonical.to_key_metrics()})
     validate_strength_matches_canonical(strength, canonical)
 
     debt_display = canonical.format_debt_equity()
@@ -103,7 +110,7 @@ def test_verdict_uses_weighted_categories_not_balance_sheet_alone():
         free_cash_flow_latest=6_000_000_000,
         current_ratio=0.9,
     )
-    verdict = FinancialOverviewGenerator()._derive_verdict_weighted(canonical)
+    verdict = FinancialOverviewGenerator()._derive_profile(canonical)
     assert verdict in {
         "Profitable Compounder",
         "Financially Strong",
@@ -114,10 +121,8 @@ def test_verdict_uses_weighted_categories_not_balance_sheet_alone():
 
 def test_mismatching_key_metric_values_fail_validation():
     canonical = _canonical(revenue_growth_yoy=20.0, net_margin_pct=12.0)
-    strength = FinancialStrength(
-        rating="solid",
+    strength = make_financial_strength(
         score=60,
-        headline="Test",
         key_metrics=[
             FundamentalMetric(label="Revenue growth", value="99.9%", note=None),
         ],
