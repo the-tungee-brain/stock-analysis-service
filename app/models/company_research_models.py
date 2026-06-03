@@ -76,26 +76,26 @@ class BusinessBlock(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     industry: str = ""
-    primary_product: str = Field(default="", serialization_alias="primaryProduct")
-    revenue_model: str = Field(default="", serialization_alias="revenueModel")
+    primary_product: str = Field(default="", alias="primaryProduct")
+    revenue_model: str = Field(default="", alias="revenueModel")
     primary_customers: list[str] = Field(
         default_factory=list,
-        serialization_alias="primaryCustomers",
+        alias="primaryCustomers",
     )
-    business_model: str = Field(default="", serialization_alias="businessModel")
+    business_model: str = Field(default="", alias="businessModel")
     how_they_make_money: list[str] = Field(
         default_factory=list,
-        serialization_alias="howTheyMakeMoney",
+        alias="howTheyMakeMoney",
     )
     advantages: list[str] = Field(default_factory=list)
     challenges: list[str] = Field(default_factory=list)
     growth_drivers: list[str] = Field(
         default_factory=list,
-        serialization_alias="growthDrivers",
+        alias="growthDrivers",
     )
     business_risks: list[str] = Field(
         default_factory=list,
-        serialization_alias="businessRisks",
+        alias="businessRisks",
     )
     dependencies: list[str] = Field(default_factory=list)
 

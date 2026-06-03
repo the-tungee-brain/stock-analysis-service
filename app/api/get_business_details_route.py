@@ -18,7 +18,14 @@ from app.dependencies.service_dependencies import (
 router = APIRouter()
 
 
-@router.get("/research/business")
+BUSINESS_LLM_FINGERPRINT_SUFFIX = ":business-intel-v2"
+
+
+@router.get(
+    "/research/business",
+    response_model=BusinessBlock,
+    response_model_by_alias=True,
+)
 async def get_business_details(
     symbol: str,
     user_id: str = Depends(get_current_user_id),
@@ -44,7 +51,10 @@ async def get_business_details(
         response_model=BusinessBlock,
         route=LLMRoute.BUSINESS,
         symbol=ctx.symbol,
-        context_fingerprint=CompanyResearchService.context_fingerprint(ctx),
+        context_fingerprint=(
+            CompanyResearchService.context_fingerprint(ctx)
+            + BUSINESS_LLM_FINGERPRINT_SUFFIX
+        ),
     )
     fallback_industry = ctx.snapshot.sector if ctx.snapshot else None
     return normalize_business_intelligence(
