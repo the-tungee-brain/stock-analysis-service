@@ -447,15 +447,19 @@ class PromptEnrichmentService:
         compact: bool = False,
         action: AnalysisAction | None = None,
         since: datetime | None = None,
+        include_performance: bool | None = None,
+        include_sec_fundamentals: bool | None = None,
+        include_sec_trends: bool | None = None,
+        include_market_fundamentals: bool | None = None,
     ) -> str:
         max_news = 10
         max_trends = 5
         include_peers = True
-        include_performance = True
+        perf_flag = True
         include_news = True
-        include_sec_fundamentals = True
-        include_sec_trends = True
-        include_market_fundamentals = True
+        sec_fundamentals_flag = True
+        sec_trends_flag = True
+        market_fundamentals_flag = True
         include_filings = True
         include_earnings = True
 
@@ -463,53 +467,62 @@ class PromptEnrichmentService:
             max_news = 3
             max_trends = 3
             include_filings = False
-            include_market_fundamentals = not bool(ctx.sec_fundamentals)
+            market_fundamentals_flag = not bool(ctx.sec_fundamentals)
 
         if action is AnalysisAction.TAX_ANGLE:
             include_news = False
             include_peers = False
-            include_performance = False
-            include_market_fundamentals = False
+            perf_flag = False
+            market_fundamentals_flag = False
             include_filings = False
             max_trends = 3
         elif action is AnalysisAction.WHAT_CHANGED:
             max_news = 5
             max_trends = 3
-            include_market_fundamentals = False
+            market_fundamentals_flag = False
             include_filings = False
         elif action is AnalysisAction.DAILY_SUMMARY:
             max_news = 3
             include_peers = False
-            include_sec_fundamentals = False
-            include_sec_trends = False
-            include_market_fundamentals = False
+            sec_fundamentals_flag = False
+            sec_trends_flag = False
+            market_fundamentals_flag = False
             include_filings = False
             include_earnings = False
         elif action is AnalysisAction.RISK_CHECK:
             max_news = 0
             max_trends = 3
-            include_market_fundamentals = False
+            market_fundamentals_flag = False
             include_filings = False
         elif action is AnalysisAction.ASSIGNMENT_RISK:
             max_news = 2
             max_trends = 0
             include_peers = False
-            include_performance = False
-            include_market_fundamentals = False
-            include_sec_fundamentals = False
-            include_sec_trends = False
+            perf_flag = False
+            market_fundamentals_flag = False
+            sec_fundamentals_flag = False
+            sec_trends_flag = False
             include_filings = False
             include_earnings = False
         elif action is AnalysisAction.CONCENTRATION_CHECK:
             max_news = 0
             max_trends = 0
             include_peers = True
-            include_performance = False
-            include_market_fundamentals = False
-            include_sec_fundamentals = False
-            include_sec_trends = False
+            perf_flag = False
+            market_fundamentals_flag = False
+            sec_fundamentals_flag = False
+            sec_trends_flag = False
             include_filings = False
             include_earnings = False
+
+        if include_performance is not None:
+            perf_flag = include_performance
+        if include_sec_fundamentals is not None:
+            sec_fundamentals_flag = include_sec_fundamentals
+        if include_sec_trends is not None:
+            sec_trends_flag = include_sec_trends
+        if include_market_fundamentals is not None:
+            market_fundamentals_flag = include_market_fundamentals
 
         include_enriched_news = include_news and action not in {
             AnalysisAction.TAX_ANGLE,
@@ -576,7 +589,7 @@ class PromptEnrichmentService:
                 "and valuation — do not invent peer-specific financial figures."
             )
 
-        if include_performance:
+        if perf_flag:
             if ctx.performance:
                 p = ctx.performance
                 sections.append(
@@ -655,23 +668,23 @@ class PromptEnrichmentService:
             if earnings_section:
                 sections.append(earnings_section)
 
-        if ctx.sec_company_info and include_sec_fundamentals:
+        if ctx.sec_company_info and sec_fundamentals_flag:
             sections.append(f"## SEC company profile\n{ctx.sec_company_info}")
 
-        if include_sec_fundamentals and ctx.sec_fundamentals:
+        if sec_fundamentals_flag and ctx.sec_fundamentals:
             sections.append(
                 "## SEC filed financials (latest annual, from EDGAR)\n"
                 + self._format_metric_lines(ctx.sec_fundamentals)
             )
 
-        if include_sec_trends and ctx.sec_ratio_trends:
+        if sec_trends_flag and ctx.sec_ratio_trends:
             sections.append(
                 "## SEC filed financial trends (annual, from EDGAR)\n"
                 "Multi-year margin, profitability, and growth trends from official filings.\n\n"
                 + self._format_sec_ratio_trends_table(ctx.sec_ratio_trends[:max_trends])
             )
 
-        if include_market_fundamentals and ctx.yfinance_financials:
+        if market_fundamentals_flag and ctx.yfinance_financials:
             financials_block = self._format_financials_block(ctx.yfinance_financials)
             if financials_block:
                 strength = ctx.yfinance_financials.strength
@@ -695,15 +708,15 @@ class PromptEnrichmentService:
                 sections.append(f"{financials_block}\n\n" + "\n".join(strength_lines))
 
         dividend_section = self._format_dividend_payout_section(ctx)
-        if include_market_fundamentals and dividend_section:
+        if market_fundamentals_flag and dividend_section:
             sections.append(dividend_section)
 
-        if include_market_fundamentals and ctx.fundamentals:
+        if market_fundamentals_flag and ctx.fundamentals:
             sections.append(
                 "## Market data fundamentals (estimates)\n"
                 + self._format_metric_lines(ctx.fundamentals)
             )
-        elif not ctx.sec_fundamentals and include_market_fundamentals:
+        elif not ctx.sec_fundamentals and market_fundamentals_flag:
             sections.append("## Key fundamentals\nNo fundamental metrics available.")
 
         if include_filings and ctx.sec_recent_filings:
@@ -1720,39 +1733,66 @@ class PromptEnrichmentService:
         ).strip()
         return [system_msg, user_msg]
 
+    def _format_business_context_block(self, ctx: ResearchContext) -> str:
+        """Business tab context — no financial ratios, margins, or analyst targets."""
+        return self._format_research_context_block(
+            ctx,
+            compact=True,
+            include_performance=False,
+            include_sec_fundamentals=False,
+            include_sec_trends=False,
+            include_market_fundamentals=False,
+        )
+
     def build_business_details_prompt(self, ctx: ResearchContext) -> List[str]:
-        context_block = self._format_research_context_block(ctx, compact=True)
+        context_block = self._format_business_context_block(ctx)
+        if ctx.sec_company_info:
+            context_block = (
+                f"{context_block}\n\n## SEC registrant notes\n{ctx.sec_company_info}"
+            )
 
         system_msg = dedent(
             f"""
             {RESEARCH_SYSTEM_PREAMBLE}
 
             # Your task
-            Explain how this company makes money for a retail investor (~350–450 words total).
-            Use only supplied data — do not invent figures.
+            Extract structured BUSINESS facts only — not a research essay.
+            Return short bullets and labels a user can scan in under 30 seconds.
 
-            # Depth requirements
-            - **whatTheyDo**: 3–4 sentences. What they sell, who they serve, and their industry role.
-            - **segments**: 3–5 strings. One line each: segment name, rough importance, and what it includes.
-            - **revenueNotes**: 3–4 sentences. Main revenue drivers, recognition model, and seasonality.
-              Anchor to SEC revenue/growth figures when provided.
-            - **customersAndMarkets**: 2–3 sentences. Customer type, geography, concentration.
-            - **competitiveLandscape**: 2–3 sentences. Key competitors and industry structure.
-            - **moatAndDifferentiators**: 2–3 sentences. Defensibility and vulnerabilities.
-            - **growthDrivers**: 3–4 bullet strings. One line each.
-            - **keyRisks**: 3–4 bullet strings. Business-model risks only; one line each.
-            - Do not repeat the same point across fields.
+            # Forbidden (belongs on other tabs — never mention)
+            - Debt/equity, leverage ratios, current ratio, liquidity ratios
+            - Net margin, gross margin, profitability percentages, P/E, valuation
+            - Analyst ratings, price targets, consensus, upside/downside to target
+            - Long paragraphs, generic phrases ("investors should monitor", "faces challenges")
+
+            # Field rules (each bullet ≤ 18 words; concrete and company-specific)
+            - **industry**: Industry label (e.g. "AI Cloud Infrastructure").
+            - **primaryProduct**: Primary product or service in ≤ 12 words.
+            - **revenueModel**: How the company charges (e.g. "Multi-Year Infrastructure Contracts") ≤ 15 words.
+            - **primaryCustomers**: 2–4 short strings naming customer types (not financial metrics).
+            - **businessModel**: One sentence — what the company does and how it earns (≤ 25 words).
+            - **howTheyMakeMoney**: 1–3 bullets on revenue mechanics (contracts, subscriptions, utilization).
+            - **advantages**: 3–5 competitive advantages (partnerships, scale, IP, contracts).
+            - **challenges**: 3–5 competitive or operational challenges (competition, capex, cycles).
+            - **growthDrivers**: 3–5 business growth drivers (demand, capacity, adoption, geography).
+            - **businessRisks**: 3–5 business risks (concentration, suppliers, regulation, execution) — not balance-sheet ratios.
+            - **dependencies**: 3–5 factors the business depends on (key supplier, demand trend, renewals).
+
+            Do not repeat the same point across fields. No segment lists unless revenue share is known.
 
             Return a single JSON object with exactly these keys:
             {{
-              "whatTheyDo": "...",
-              "segments": ["..."],
-              "revenueNotes": "...",
-              "customersAndMarkets": "...",
-              "competitiveLandscape": "...",
-              "moatAndDifferentiators": "...",
+              "industry": "...",
+              "primaryProduct": "...",
+              "revenueModel": "...",
+              "primaryCustomers": ["..."],
+              "businessModel": "...",
+              "howTheyMakeMoney": ["..."],
+              "advantages": ["..."],
+              "challenges": ["..."],
               "growthDrivers": ["..."],
-              "keyRisks": ["..."]
+              "businessRisks": ["..."],
+              "dependencies": ["..."]
             }}
 
             Do not include extra keys, markdown, or commentary outside the JSON.
@@ -1761,11 +1801,11 @@ class PromptEnrichmentService:
 
         user_msg = dedent(
             f"""
-            Write an in-depth business breakdown for:
+            Extract a structured business intelligence profile for:
 
             {context_block}
 
-            Be concise and scannable — quality over length.
+            Facts only — no financial analysis, no valuation, no analyst opinion.
             """
         ).strip()
 

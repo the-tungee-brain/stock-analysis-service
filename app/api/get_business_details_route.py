@@ -36,11 +36,18 @@ async def get_business_details(
         symbol=symbol,
     )
 
+    from app.builders.business_intelligence_validation import normalize_business_intelligence
+
     prompts = prompt_enrichment_service.build_business_details_prompt(ctx=ctx)
-    return await llm_service.generate_from_prompts(
+    raw = await llm_service.generate_from_prompts(
         prompts=prompts,
         response_model=BusinessBlock,
         route=LLMRoute.BUSINESS,
         symbol=ctx.symbol,
         context_fingerprint=CompanyResearchService.context_fingerprint(ctx),
+    )
+    fallback_industry = ctx.snapshot.sector if ctx.snapshot else None
+    return normalize_business_intelligence(
+        raw,
+        fallback_industry=fallback_industry,
     )
