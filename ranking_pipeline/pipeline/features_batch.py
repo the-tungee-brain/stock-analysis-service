@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 
 from data.store import load_raw
 from ranking_pipeline.config import RankingPipelineConfig
+from ranking_pipeline.pipeline.progress_log import log_batch_progress
+
+logger = logging.getLogger(__name__)
 from ranking_pipeline.features.parquet_store import (
     load_ranking_features,
     merge_ranking_features,
@@ -57,8 +61,12 @@ def batch_update_features(
 ) -> dict[str, int]:
     spy_close = _load_spy_close(config)
     stats: dict[str, int] = {}
+    total = len(symbols)
     workers = max(1, config.max_workers)
     tail = config.feature_tail_recompute
+    done = 0
+    with_rows = 0
+    logger.info("Feature update: %d symbols", total)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
@@ -75,4 +83,8 @@ def batch_update_features(
         for fut in as_completed(futures):
             symbol, count = fut.result()
             stats[symbol] = count
+            done += 1
+            if count > 0:
+                with_rows += 1
+            log_batch_progress("Feature update", done, total, detail=f"{with_rows} with rows")
     return stats

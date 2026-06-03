@@ -13,6 +13,7 @@ from app.adapters.market.yfinance_bootstrap import configure_yfinance, yfinance_
 from data.download import download_symbol
 from data.store import save_raw
 from ranking_pipeline.config import RankingPipelineConfig, default_config
+from ranking_pipeline.pipeline.progress_log import log_batch_progress
 from ranking_pipeline.universe.filters import screen_symbol_ohlcv
 from ranking_pipeline.universe.us_listings import fetch_all_us_equity_symbols
 from ranking_pipeline.storage.sqlite import open_store
@@ -70,9 +71,12 @@ def refresh_universe(
     if max_candidates:
         symbols = symbols[:max_candidates]
 
-    logger.info("Screening %d US listing candidates", len(symbols))
+    total = len(symbols)
+    logger.info("Screening %d US listing candidates", total)
     members: list[dict] = []
     workers = max(1, cfg.max_workers)
+    done = 0
+    passed_so_far = 0
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
@@ -80,7 +84,18 @@ def refresh_universe(
             for sym in symbols
         }
         for fut in as_completed(futures):
-            members.append(fut.result())
+            member = fut.result()
+            members.append(member)
+            done += 1
+            if member.get("passed_filters"):
+                passed_so_far += 1
+            log_batch_progress(
+                "Universe screen",
+                done,
+                total,
+                detail=f"{passed_so_far} passed",
+                step=25,
+            )
 
     store.save_universe_snapshot(snapshot_id, members)
     passed = sum(1 for m in members if m.get("passed_filters"))
