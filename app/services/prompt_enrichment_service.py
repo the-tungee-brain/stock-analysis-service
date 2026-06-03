@@ -1756,39 +1756,41 @@ class PromptEnrichmentService:
             {RESEARCH_SYSTEM_PREAMBLE}
 
             # Your task
-            Extract factual BUSINESS STRUCTURE only — structured research notes, not an essay.
-            Each bullet ≤ 16 words. Name actors, products, contract types, or competitors when known.
+            Write institutional equity research NOTES — factual structure, zero essay tone.
+            Each bullet ≤ 14 words. State mechanisms (who, what, how, what limits), not capabilities.
 
-            # Never use (filler / essay language)
-            disciplined execution, strategic positioning, operational momentum, enhancing capabilities,
-            robust ecosystem, scaling efficiently, well positioned, best-in-class, industry-leading,
-            commitment to innovation, investors should monitor, overall the company
+            # Never use (reject abstract / filler)
+            ability to scale efficiently, robust execution, strong operational momentum,
+            large-scale deployments (unless tied to a limit: GPU supply, data center slots),
+            stability of demand, disciplined execution, strategic positioning, robust ecosystem,
+            scaling efficiently, well positioned, best-in-class, industry-leading
+
+            Replace abstract with mechanical:
+            BAD: "ability to scale deployments" → GOOD: "Revenue capped by GPU supply and data center buildout"
 
             # Forbidden (other tabs)
-            - Margins, leverage, liquidity, P/E, valuation, ratios, FCF, ROE
-            - Analyst ratings, price targets, consensus
-            - Vague claims without mechanism ("strong market position", "competitive advantages")
+            Margins, leverage, P/E, valuation, ratios, FCF, analyst ratings, price targets
 
             # Section rules
-            - **industry**: Specific industry label (not just "Technology").
+            - **industry**: Specific industry (not generic "Technology" unless truly broad conglomerate).
             - **primaryProduct**: Primary product/service (≤ 12 words).
-            - **revenueModel**: Pricing/charge model (subscriptions, take-rate, contracts, units).
-            - **primaryCustomers**: 2–4 customer types or segments (who pays).
-            - **howTheyMakeMoney**: 1–3 bullets — structural revenue mechanism ONLY (what is sold, how billed).
-              No growth outlook, no "increasing demand" — save that for growthDrivers.
-            - **revenueVisibility**: Exactly 2 bullets:
-              (1) Contract structure and revenue predictability (length, renewals, backlog, recurring % if known).
-              (2) What drives revenue timing/recognition (delivery milestones, usage, shipments, subscriptions).
-            - **advantages**: 3–5 structural, defensible edges (assets, contracts, IP, scale, distribution). Be specific.
-            - **challenges**: 3–5 specific challenges; name competitors or categories (e.g. "AWS, Azure" not "competition").
-            - **growthDrivers**: 3–5 factors that directly increase revenue — demand, new contracts, capacity,
-              utilization, pricing. No culture/ESG/generic macro.
-            - **businessRisks**: 3–5 operational/structural risks (concentration, suppliers, tech disruption,
-              execution constraints, regulation). No balance-sheet ratios.
-            - **dependencies**: 3–5 external/structural dependencies required for the model to work.
+            - **revenueModel**: Charge model (subscription, usage, contracts, spread, interchange).
+            - **primaryCustomers**: 2–4 payer segments.
+            - **howTheyMakeMoney**: 1–3 bullets — structural billing only (what is sold, unit, cadence). No growth narrative.
+            - **revenueVisibility**: 2–3 bullets acknowledging partial uncertainty:
+              (1) Contract/backlog vs recognized revenue — signed contracts do NOT guarantee timing.
+              (2) Deployment and utilization dependency (when capacity goes live, usage ramps).
+              (3) Optional: renewal/churn or milestone recognition if material.
+            - **advantages**: 3–4 structural edges (assets, contracts, distribution, regulation). Mechanisms only.
+            - **challenges**: 3–4 asymmetric competitor threats — state HOW they win (bundling with cloud,
+              scale economics, undercutting on price, vertical integration), name firms when known.
+            - **revenueDrivers**: 3–4 bullets — direct revenue uplifts (new contracts, utilization, pricing, capacity online).
+            - **constraints**: 3–4 bullets — limiting factors (supply, capital, infrastructure build, execution bottlenecks).
+              Must differ from businessRisks (capacity/supply limits vs risk events).
+            - **businessRisks**: 3–4 operational/structural risks (concentration, disruption, regulation).
+            - **dependencies**: Exactly 3–4 structural dependencies only (largest suppliers, platforms, demand drivers).
 
-            Tailor content to the company's industry (AI cloud vs SaaS vs retail vs bank look different).
-            Do not repeat the same point across fields.
+            Industry tone must differ (AI infra vs SaaS vs bank vs retailer). No repeated points across fields.
 
             Return a single JSON object with exactly these keys:
             {{
@@ -1800,7 +1802,8 @@ class PromptEnrichmentService:
               "revenueVisibility": ["...", "..."],
               "advantages": ["..."],
               "challenges": ["..."],
-              "growthDrivers": ["..."],
+              "revenueDrivers": ["..."],
+              "constraints": ["..."],
               "businessRisks": ["..."],
               "dependencies": ["..."]
             }}
@@ -1815,7 +1818,7 @@ class PromptEnrichmentService:
 
             {context_block}
 
-            Structured facts only — no essay, no financial metrics, no filler phrases.
+            Institutional notes — mechanisms and limits, not capabilities or generic praise.
             """
         ).strip()
 

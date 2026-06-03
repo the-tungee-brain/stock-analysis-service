@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 from app.models.yfinance_analysis_models import StreetAnalysisSnapshot
 from app.models.yfinance_funds_models import EtfFundsSnapshot
@@ -75,6 +75,18 @@ class AISummary(BaseModel):
 class BusinessBlock(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_growth(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        if data.get("revenueDrivers") or data.get("revenue_drivers"):
+            return data
+        legacy = data.get("growthDrivers") or data.get("growth_drivers")
+        if legacy:
+            return {**data, "revenueDrivers": legacy}
+        return data
+
     industry: str = ""
     primary_product: str = Field(default="", alias="primaryProduct")
     revenue_model: str = Field(default="", alias="revenueModel")
@@ -92,10 +104,11 @@ class BusinessBlock(BaseModel):
     )
     advantages: list[str] = Field(default_factory=list)
     challenges: list[str] = Field(default_factory=list)
-    growth_drivers: list[str] = Field(
+    revenue_drivers: list[str] = Field(
         default_factory=list,
-        alias="growthDrivers",
+        alias="revenueDrivers",
     )
+    constraints: list[str] = Field(default_factory=list)
     business_risks: list[str] = Field(
         default_factory=list,
         alias="businessRisks",

@@ -27,9 +27,13 @@ _BANNED_PHRASES = (
     "disciplined execution",
     "strategic positioning",
     "operational momentum",
+    "strong operational momentum",
     "enhancing capabilities",
     "robust ecosystem",
+    "robust execution",
     "scaling efficiently",
+    "ability to scale efficiently",
+    "scale efficiently",
     "strong market position",
     "well positioned",
     "best-in-class",
@@ -40,6 +44,8 @@ _BANNED_PHRASES = (
     "continue to grow",
     "favorable macro",
     "headwinds and tailwinds",
+    "stability of demand",
+    "stable demand",
 )
 
 _VAGUE_ONLY_RE = re.compile(
@@ -52,6 +58,28 @@ _VAGUE_ONLY_RE = re.compile(
 _GROWTH_IN_MECHANISM_RE = re.compile(
     r"\b(growth outlook|market expansion|increasing demand|adoption trends|"
     r"geographic expansion|upside potential)\b",
+    re.IGNORECASE,
+)
+
+_ABILITY_WITHOUT_LIMIT_RE = re.compile(
+    r"\bability to\b",
+    re.IGNORECASE,
+)
+
+_MECHANISM_MARKERS = re.compile(
+    r"\b(limited by|constrained by|depends on|requires|because|via|through|"
+    r"when|if|until|bottleneck|supply|capacity|utilization|bundle|undercut|"
+    r"discount|integrat|vertically|subsidi|metered|recognized|deployed)\b",
+    re.IGNORECASE,
+)
+
+_VAGUE_DEPLOYMENT_RE = re.compile(
+    r"\blarge[- ]scale deployments?\b",
+    re.IGNORECASE,
+)
+
+_GENERIC_CHALLENGE_RE = re.compile(
+    r"^(?:intense |strong )?(?:competition|competitive pressures?)\.?$",
     re.IGNORECASE,
 )
 
@@ -79,16 +107,29 @@ def normalize_business_intelligence(
                 3,
                 extra_check=_reject_growth_commentary,
             ),
-            "revenue_visibility": _filter_bullets(block.revenue_visibility, 2),
-            "advantages": _filter_bullets(block.advantages, 5),
-            "challenges": _filter_bullets(block.challenges, 5),
-            "growth_drivers": _filter_bullets(
-                block.growth_drivers,
-                5,
-                extra_check=_reject_non_revenue_growth,
+            "revenue_visibility": _filter_bullets(
+                block.revenue_visibility,
+                3,
+                extra_check=_reject_capability_style,
             ),
-            "business_risks": _filter_bullets(block.business_risks, 5),
-            "dependencies": _filter_bullets(block.dependencies, 5),
+            "advantages": _filter_bullets(block.advantages, 4),
+            "challenges": _filter_bullets(
+                block.challenges,
+                4,
+                extra_check=_reject_weak_challenge,
+            ),
+            "revenue_drivers": _filter_bullets(
+                block.revenue_drivers,
+                4,
+                extra_check=_reject_non_revenue_driver,
+            ),
+            "constraints": _filter_bullets(
+                block.constraints,
+                4,
+                extra_check=_reject_capability_style,
+            ),
+            "business_risks": _filter_bullets(block.business_risks, 4),
+            "dependencies": _filter_bullets(block.dependencies, 4),
         }
     )
 
@@ -97,7 +138,24 @@ def _reject_growth_commentary(line: str) -> bool:
     return bool(_GROWTH_IN_MECHANISM_RE.search(line))
 
 
-def _reject_non_revenue_growth(line: str) -> bool:
+def _reject_capability_style(line: str) -> bool:
+    if _ABILITY_WITHOUT_LIMIT_RE.search(line) and not _MECHANISM_MARKERS.search(line):
+        return True
+    if _VAGUE_DEPLOYMENT_RE.search(line) and not _MECHANISM_MARKERS.search(line):
+        return True
+    return False
+
+
+def _reject_weak_challenge(line: str) -> bool:
+    if _GENERIC_CHALLENGE_RE.match(line.strip()):
+        return True
+    lowered = line.lower()
+    if "competition" in lowered and not _MECHANISM_MARKERS.search(line):
+        return True
+    return False
+
+
+def _reject_non_revenue_driver(line: str) -> bool:
     lowered = line.lower()
     non_revenue = (
         "brand awareness",
@@ -129,7 +187,7 @@ def _filter_bullets(
 
 
 def _is_disallowed(text: str) -> bool:
-    if len(text) > 160:
+    if len(text) > 150:
         return True
     if _BANNED_PATTERN.search(text):
         return True
