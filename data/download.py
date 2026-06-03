@@ -10,7 +10,7 @@ import pandas as pd
 import yfinance as yf
 
 from app.adapters.market.yfinance_bootstrap import configure_yfinance, yfinance_fetch_lock
-from data.store import _normalize_ohlcv, save_raw
+from data.store import _normalize_ohlcv, append_raw, load_raw, raw_exists, save_raw
 from data.symbols import get_symbols
 
 DEFAULT_YEARS = 15
@@ -39,6 +39,41 @@ def download_symbol(symbol: str, *, years: int = DEFAULT_YEARS) -> pd.DataFrame:
         raise ValueError(f"No data returned for {symbol_upper}")
 
     return _normalize_ohlcv(raw)
+
+
+def download_symbol_incremental(
+    symbol: str,
+    *,
+    years: int = DEFAULT_YEARS,
+    overlap_days: int = 3,
+) -> pd.DataFrame:
+    """Fetch only bars after the last stored date (full history if missing)."""
+    symbol_upper = symbol.strip().upper()
+    if not raw_exists(symbol_upper):
+        return download_symbol(symbol_upper, years=years)
+
+    existing = load_raw(symbol_upper)
+    last_date = pd.Timestamp(existing.index.max()).normalize()
+    end = datetime.now()
+    if last_date.date() >= end.date():
+        return existing
+
+    start = last_date - timedelta(days=overlap_days)
+    configure_yfinance()
+    with yfinance_fetch_lock():
+        raw = yf.download(
+            symbol_upper,
+            start=start.strftime("%Y-%m-%d"),
+            end=end.strftime("%Y-%m-%d"),
+            interval="1d",
+            auto_adjust=True,
+            progress=False,
+            threads=False,
+        )
+    if raw is None or raw.empty:
+        return existing
+    append_raw(raw, symbol_upper)
+    return load_raw(symbol_upper)
 
 
 def download_and_store_symbol(symbol: str, *, years: int = DEFAULT_YEARS):

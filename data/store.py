@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from data.paths import FEATURES_DIR, RAW_DIR, features_parquet_path, raw_parquet_path
+from data.paths import (
+    FEATURES_DIR,
+    RAW_DIR,
+    features_parquet_path,
+    raw_parquet_path,
+)
 
 OHLCV_COLUMNS = ("open", "high", "low", "close", "volume")
 
@@ -25,6 +30,19 @@ def save_raw(df: pd.DataFrame, symbol: str) -> Path:
     _ensure_parent(path)
     out.to_parquet(path, index=True)
     return path
+
+
+def raw_exists(symbol: str) -> bool:
+    """Return True when ``data/raw/{symbol}.parquet`` exists."""
+    return raw_parquet_path(symbol.strip().upper()).exists()
+
+
+def merge_ohlcv(existing: pd.DataFrame, new_rows: pd.DataFrame) -> pd.DataFrame:
+    """Append new daily bars and dedupe by date (last wins)."""
+    if existing.empty:
+        return _normalize_ohlcv(new_rows)
+    combined = pd.concat([existing, _normalize_ohlcv(new_rows)])
+    return _normalize_ohlcv(combined)
 
 
 def load_raw(symbol: str) -> pd.DataFrame:
@@ -72,6 +90,16 @@ def _normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     out = out.sort_index()
     out = out[~out.index.duplicated(keep="last")]
     return out
+
+
+def append_raw(new_rows: pd.DataFrame, symbol: str) -> Path:
+    """Merge ``new_rows`` into existing raw Parquet or create a new file."""
+    symbol_upper = symbol.strip().upper()
+    if raw_exists(symbol_upper):
+        merged = merge_ohlcv(load_raw(symbol_upper), new_rows)
+    else:
+        merged = _normalize_ohlcv(new_rows)
+    return save_raw(merged, symbol_upper)
 
 
 def ensure_data_dirs() -> None:

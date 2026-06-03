@@ -58,5 +58,7 @@ yfinance==1.2.0
 pandas-ta>=0.3.14b,<0.5
 pyarrow>=18,<24
 xgboost>=2.0,<4
+lightgbm>=4.0,<5
+catboost>=1.2,<3
 scikit-learn>=1.5,<2
 joblib>=1.4,<2
