@@ -31,13 +31,11 @@ def main(argv: list[str] | None = None) -> int:
 
     rstore = open_store(default_config())
     pstore = open_portfolio_store(pcfg)
-    prev = pstore.load_previous_weights(result["as_of_date"])
     bt_id = evaluate_risk_backtest(
         result["portfolio_id"],
         result.get("weights_before_risk", result["weights"]),
         result["ranking_run_id"],
         result["as_of_date"],
-        previous_weights=prev,
         ranking_store=rstore,
         portfolio_store=pstore,
         portfolio_config=pcfg,
