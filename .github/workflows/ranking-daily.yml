@@ -1,20 +1,15 @@
-name: Ranking pipeline (daily)
+# Replaced by ranking-pipeline-vm.yml (runs on OCI VM via SSH + docker exec).
+# This file is intentionally empty to avoid duplicate runs on GitHub-hosted runners.
+
+name: Ranking pipeline (daily) [deprecated]
 
 on:
-  schedule:
-    - cron: "0 7 * * 2-6"
   workflow_dispatch:
 
 jobs:
-  ranking-daily:
+  deprecated:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Run nightly ranking
-        run: python scripts/run_ranking_daily.py
-        continue-on-error: true
+      - run: |
+          echo "Use workflow: Ranking pipeline (VM)"
+          exit 1

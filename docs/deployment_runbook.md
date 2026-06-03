@@ -1,107 +1,89 @@
 # Deployment Runbook — Ranking + Portfolio + Risk
 
-Post-deployment operations for the batch pipeline and product API (`/api/v1/rankings`, `/api/v1/portfolio`, `/api/v1/health`).
+All pipeline steps run **automatically on the OCI VM** inside `sas-server` via GitHub Actions (no manual `docker exec`).
+
+## Automation overview
+
+| Trigger | Workflow | What runs |
+|---------|----------|-----------|
+| Push to `main` | `deploy.yml` | Build image, deploy container, import check, then **daily** or **bootstrap** (background) |
+| Tue–Sat 07:30 UTC | `ranking-pipeline-vm.yml` | **daily** + portfolio |
+| Sun 06:00 UTC | `ranking-pipeline-vm.yml` | **weekly** universe refresh |
+| Manual | `ranking-pipeline-vm.yml` → Run workflow | `daily`, `weekly`, or `bootstrap` |
+
+Script on VM: `/home/ubuntu/ranking_pipeline_remote.sh`  
+Logs: `/home/ubuntu/logs/ranking-bootstrap.log`, `ranking-daily.log`
 
 ---
 
 ## A. Initial deployment
 
-1. **Deploy backend** (push to `main` → `deploy.yml` builds image and runs `sas-server` with):
-   - `-v /home/ubuntu/sas-ranking-persist/data:/app/data` (created automatically on the VM)
-   - Default pipeline settings apply (no extra env required)
-   - Optional overrides: `RANKING_DB_PATH`, `RANKING_MODEL_BACKEND`, `PORTFOLIO_*`
+1. **Push to `main`** — `deploy.yml` runs tests, builds Docker image, deploys `sas-server` with:
+   - `-v /home/ubuntu/sas-ranking-persist/data:/app/data`
+   - `PYTHONPATH=/app`
+   - `ranking_pipeline` + `scripts` in the image
 
-2. **Initialize schema** — first pipeline or API access creates SQLite tables under `/app/data/ranking/`.
-
-3. **Universe (weekly job)** — on the VM via Docker:
+2. **First deploy** automatically starts **bootstrap in background** (universe → SPY → ranking → portfolio). Monitor:
    ```bash
-   docker exec sas-server python scripts/run_ranking_universe_weekly.py
-   ```
-   Dev smoke: `--max-candidates 100`
-
-4. **OHLCV backfill** — ensure SPY + universe symbols:
-   ```bash
-   docker exec sas-server python -m data.download --symbols SPY
+   ssh ubuntu@<vm> tail -f /home/ubuntu/logs/ranking-bootstrap.log
    ```
 
-5. **First ranking run**:
-   ```bash
-   docker exec sas-server python scripts/run_ranking_daily.py
-   ```
+3. **When bootstrap finishes**, marker file exists:
+   `/home/ubuntu/sas-ranking-persist/.pipeline_bootstrapped`
 
-6. **First portfolio + risk**:
-   ```bash
-   docker exec sas-server python scripts/run_portfolio_with_risk.py
-   ```
-
-7. **Verify API** (authenticated):
+4. **Verify API** (authenticated):
    ```bash
    curl -H "Authorization: Bearer $TOKEN" https://<host>/api/v1/health
    curl -H "Authorization: Bearer $TOKEN" https://<host>/api/v1/rankings/top?limit=5
    curl -H "Authorization: Bearer $TOKEN" https://<host>/api/v1/portfolio/latest
    ```
-   Expect `system_status: "ok"` and non-empty rankings/portfolio.
+
+Manual bootstrap (only if automation failed):
+
+```bash
+docker exec -w /app sas-server python scripts/run_ranking_universe_weekly.py
+# … see scripts/vm/ranking_pipeline_remote.sh bootstrap
+```
 
 ---
 
-## B. Daily operations (cron, trading days)
+## B. Daily operations
 
-| UTC | Job | Command |
-|-----|-----|---------|
-| 02:00 | OHLCV incremental | `python scripts/run_ranking_daily.py` (step 1–2 only if split; full script OK) |
-| 02:30 | Ranking + regime | `python scripts/run_ranking_daily.py` |
-| 03:00 | Portfolio + risk | `python scripts/run_portfolio_with_risk.py` |
-| 03:15 | Portfolio backtest (optional) | included in `run_portfolio_with_risk.py` |
-| 03:30 | **API ready** | Clients poll; health should show fresh timestamps |
-
-GitHub Actions reference: `.github/workflows/ranking-daily.yml` (extend with portfolio step in your scheduler).
+**Automated** — no action required. `ranking-pipeline-vm.yml` at 07:30 UTC Tue–Sat, plus incremental **daily** after each deploy.
 
 ---
 
 ## C. Weekly operations
 
-| Task | Command / check |
-|------|-----------------|
-| Refresh universe | `python scripts/run_ranking_universe_weekly.py` |
-| Feature warmup | Full re-run if universe grew >20% |
-| ML retrain (optional) | `python scripts/train_ranking_model.py --backend xgboost` |
-| Drift validation | Compare hit rate / Sharpe from `portfolio_backtest_metrics` week-over-week |
-| Regime sanity | `regime_id` distribution via `market_regime_daily` |
+**Automated** — Sunday 06:00 UTC universe refresh via `ranking-pipeline-vm.yml`.
+
+Optional ML retrain: `train-pattern-model.yml` or `scripts/train_ranking_model.py` on VM.
 
 ---
 
-## D. Monitoring checklist
+## D. Monitoring
 
-| Metric | Target | Source |
-|--------|--------|--------|
-| Ranking run success | 100% trading days | Cron logs + `ranking_runs` row/day |
-| Portfolio run success | 100% trading days | `portfolio_snapshots` row/day |
-| API latency | <200ms p95 | APM on `/api/v1/*` |
-| Universe size | Stable ±10% | `/api/v1/health` → `universe_size` |
-| Turnover spikes | <50% daily | `portfolio.metrics.turnover_estimate` |
-| Regime distribution | No weeks stuck in `risk_off` only | `health.regime_id` history |
-| Health status | `ok` during market week | `/api/v1/health` |
-
-**Degraded** if ranking age >36h; **failing** if >72h or DB missing.
+| Check | Where |
+|-------|--------|
+| Deploy succeeded | GitHub Actions → Deploy SAS Server to OCI |
+| Pipeline imports | Deploy log: `pipeline imports ok` |
+| Bootstrap progress | `tail -f /home/ubuntu/logs/ranking-bootstrap.log` |
+| Daily runs | GitHub → Ranking pipeline (VM) |
+| API health | `GET /api/v1/health` |
 
 ---
 
 ## E. Failure recovery
 
-| Scenario | Action |
-|----------|--------|
-| Ranking fails | API serves **last** successful `ranking_runs` (default). Fix logs, re-run `run_ranking_daily.py`. |
-| Portfolio fails | **Previous** `portfolio_snapshots` remains; clients keep last weights. Re-run `run_portfolio_with_risk.py`. |
-| ML model missing | Set `RANKING_MODEL_BACKEND=composite` or train artifacts under `artifacts/ranking_model/`. |
-| SPY data missing | `download_and_store_symbol SPY` then re-run daily. |
-| DB corrupt | Restore `ranking_pipeline.db` backup; replay daily from last good OHLCV. |
+| Issue | Action |
+|-------|--------|
+| `ModuleNotFoundError: ranking_pipeline` | Redeploy latest image from `main` |
+| Bootstrap stuck | SSH → log file; re-run workflow **bootstrap** |
+| Ranking fails | API serves last run; fix and run workflow **daily** |
+| Portfolio fails | Previous snapshot remains; run workflow **daily** |
 
 ---
 
-## F. Client contract reminder
+## F. Clients
 
-- Web/iOS: only `rankings/top`, `portfolio/latest`, `health`.
-- No on-request feature computation.
-- Use `api_version` field for forward compatibility.
-
-See [`frontend_integration.md`](frontend_integration.md) and [`product_serving_architecture.md`](product_serving_architecture.md).
+Web/iOS: `rankings/top`, `portfolio/latest`, `health` only — see [`frontend_integration.md`](frontend_integration.md).

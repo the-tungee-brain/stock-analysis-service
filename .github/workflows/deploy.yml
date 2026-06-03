@@ -55,6 +55,16 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Copy ranking pipeline script to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: scripts/vm/ranking_pipeline_remote.sh
+          target: /home/ubuntu/
+          strip_components: 2
+
       - name: Deploy to OCI VM
         uses: appleboy/ssh-action@v1.0.0
         with:
@@ -94,6 +104,7 @@ jobs:
               -p 8000:8000 \
               -v /home/ubuntu/sas-pattern-artifacts:/app/artifacts \
               -v /home/ubuntu/sas-ranking-persist/data:/app/data \
+              -e PYTHONPATH=/app \
               -e PATTERN_ARTIFACT_DIR=/app/artifacts \
               --memory=5g \
               --memory-swap=6g \
@@ -133,6 +144,21 @@ jobs:
               -e PAID_USER_IDS="${{ secrets.PAID_USER_IDS }}" \
               --restart always \
               tungxd96/sas-server:latest
+
+            docker exec sas-server python -c "import ranking_pipeline, data.download; print('pipeline imports ok')"
+
+            mkdir -p /home/ubuntu/logs
+            chmod +x /home/ubuntu/ranking_pipeline_remote.sh
+            MARKER=/home/ubuntu/sas-ranking-persist/.pipeline_bootstrapped
+            if [ ! -f "$MARKER" ]; then
+              echo "First deploy: full bootstrap in background — tail -f /home/ubuntu/logs/ranking-bootstrap.log"
+              nohup /home/ubuntu/ranking_pipeline_remote.sh bootstrap \
+                > /home/ubuntu/logs/ranking-bootstrap.log 2>&1 &
+            else
+              echo "Incremental ranking daily + portfolio after deploy"
+              /home/ubuntu/ranking_pipeline_remote.sh daily \
+                >> /home/ubuntu/logs/ranking-daily.log 2>&1 || true
+            fi
 
             sudo nginx -t && sudo systemctl restart nginx
             sleep 3
