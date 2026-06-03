@@ -25,7 +25,7 @@ def fetch_nasdaq_symbols() -> list[str]:
         df = df[df["Test Issue"] != "Y"]
     if "ETF" in df.columns:
         df = df[df["ETF"] != "Y"]
-    symbols = df["Symbol"].astype(str).str.strip().str.upper()
+    symbols = df["Symbol"].dropna().astype(str).str.strip().str.upper()
     return _clean_symbols(symbols.tolist())
 
 
@@ -38,7 +38,7 @@ def fetch_other_exchange_symbols() -> list[str]:
         df = df[df["Test Issue"] != "Y"]
     if "ETF" in df.columns:
         df = df[df["ETF"] != "Y"]
-    symbols = df[col].astype(str).str.strip().str.upper()
+    symbols = df[col].dropna().astype(str).str.strip().str.upper()
     return _clean_symbols(symbols.tolist())
 
 
@@ -48,10 +48,23 @@ def fetch_all_us_equity_symbols() -> list[str]:
     return sorted(combined)
 
 
-def _clean_symbols(symbols: list[str]) -> list[str]:
+def _symbol_text(value: object) -> str | None:
+    """Coerce listing-file cell to ticker string; skip NaN / footer garbage."""
+    if value is None:
+        return None
+    if isinstance(value, float) and pd.isna(value):
+        return None
+    text = str(value).strip().upper()
+    if not text or text in {"NAN", "NONE", "NAT", "<NA>"}:
+        return None
+    return text
+
+
+def _clean_symbols(symbols: list[object]) -> list[str]:
     out: list[str] = []
-    for sym in symbols:
-        if not sym or sym == "NAN":
+    for raw in symbols:
+        sym = _symbol_text(raw)
+        if sym is None:
             continue
         if sym.endswith("W") and len(sym) > 4:
             continue
