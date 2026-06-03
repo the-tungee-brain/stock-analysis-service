@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from app.models.trade_decision_models import (
+    ScoreBucket,
     TradeAction,
     TradeDecision,
     TradeDecisionRegime,
@@ -18,13 +19,20 @@ from ranking_pipeline.regime.constants import (
 )
 
 PatternReliability = Literal["low", "medium", "high"]
-TrendStage = Literal["early", "mid", "late", "unknown"]
 
 WEIGHT_RS = 0.30
 WEIGHT_EARLY_MOVER = 0.20
 WEIGHT_BREAKOUT = 0.25
 WEIGHT_SR = 0.15
 WEIGHT_PATTERN = 0.10
+
+REJECTION_REGIME = "Neutral or unfavorable regime"
+REJECTION_BREAKOUT = "Weak breakout quality"
+REJECTION_RS = "Weak relative strength"
+REJECTION_SR = "Poor S/R structure"
+REJECTION_PATTERN = "Low pattern reliability"
+REJECTION_EARLY = "Weak early-mover / trend inflection signals"
+REJECTION_SCORE = "Trade quality below actionable threshold"
 
 
 @dataclass(frozen=True)
@@ -48,51 +56,80 @@ class TradeDecisionInputs:
     universe_rank_count: int | None
 
 
+@dataclass(frozen=True)
+class _ScoreComponents:
+    rs: float
+    early_mover: float
+    breakout: float
+    support_resistance: float
+    pattern: float
+
+
 def evaluate_trade_decision(inputs: TradeDecisionInputs) -> TradeDecision:
     regime = _regime_gate(inputs.regime_id, inputs.market_breadth_pct)
     symbol = inputs.symbol.upper()
 
     if regime.trade_environment == "AVOID":
-        explanation = _build_explanation(
-            inputs=inputs,
-            regime=regime,
-            score=0,
-            trend_stage=_trend_stage(inputs, None),
-            rs_pct=None,
-            verdict="NO_TRADE",
-        )
-        return TradeDecision(
+        return _compile(
             symbol=symbol,
             as_of_date=inputs.as_of_date,
             regime=regime,
-            trade_quality_score=0,
-            verdict="NO_TRADE",
-            action="AVOID",
-            explanation=explanation[:5],
+            score=0,
+            components=None,
+            inputs=inputs,
+            rs_pct=None,
         )
 
     rs_pct = _resolve_rs_percentile(inputs)
-    trend_stage = _trend_stage(inputs, rs_pct)
-    score = _compute_trade_quality_score(inputs, rs_pct)
-    verdict = _verdict_from_score(score)
-    action = _action_from_verdict(verdict)
-    explanation = _build_explanation(
-        inputs=inputs,
+    components = _score_components(inputs, rs_pct)
+    score = _compute_trade_quality_score(components)
+    return _compile(
+        symbol=symbol,
+        as_of_date=inputs.as_of_date,
         regime=regime,
         score=score,
-        trend_stage=trend_stage,
+        components=components,
+        inputs=inputs,
         rs_pct=rs_pct,
+    )
+
+
+def _compile(
+    *,
+    symbol: str,
+    as_of_date: str | None,
+    regime: TradeDecisionRegime,
+    score: int,
+    components: _ScoreComponents | None,
+    inputs: TradeDecisionInputs,
+    rs_pct: float | None,
+) -> TradeDecision:
+    bucket = _bucket_from_score(score)
+    verdict = _verdict_from_score(score) if regime.trade_environment != "AVOID" else "NO_TRADE"
+    if regime.trade_environment == "AVOID":
+        bucket = "NO_TRADE"
+        verdict = "NO_TRADE"
+        score = 0
+
+    action = _action_from_verdict(verdict)
+    rejection = _primary_rejection_reason(
+        regime=regime,
         verdict=verdict,
+        inputs=inputs,
+        rs_pct=rs_pct,
+        components=components,
+        score=score,
     )
 
     return TradeDecision(
         symbol=symbol,
-        as_of_date=inputs.as_of_date,
+        as_of_date=as_of_date,
         regime=regime,
         trade_quality_score=score,
+        score_bucket=bucket,
         verdict=verdict,
         action=action,
-        explanation=explanation[:5],
+        primary_rejection_reason=rejection,
     )
 
 
@@ -165,141 +202,106 @@ def _pattern_component(reliability: PatternReliability) -> float:
     return {"high": 85.0, "medium": 60.0, "low": 35.0}[reliability]
 
 
-def _compute_trade_quality_score(
+def _score_components(
     inputs: TradeDecisionInputs,
     rs_pct: float | None,
-) -> int:
-    rs = _rs_component(inputs, rs_pct)
-    early = _early_mover_score(inputs) * 100.0
-    breakout = float(max(0, min(100, inputs.breakout_quality_score)))
-    sr = float(max(0, min(100, inputs.support_resistance_confidence)))
-    pattern = _pattern_component(inputs.pattern_reliability)
+) -> _ScoreComponents:
+    return _ScoreComponents(
+        rs=_rs_component(inputs, rs_pct),
+        early_mover=_early_mover_score(inputs) * 100.0,
+        breakout=float(max(0, min(100, inputs.breakout_quality_score))),
+        support_resistance=float(max(0, min(100, inputs.support_resistance_confidence))),
+        pattern=_pattern_component(inputs.pattern_reliability),
+    )
 
+
+def _compute_trade_quality_score(components: _ScoreComponents) -> int:
     raw = (
-        WEIGHT_RS * rs
-        + WEIGHT_EARLY_MOVER * early
-        + WEIGHT_BREAKOUT * breakout
-        + WEIGHT_SR * sr
-        + WEIGHT_PATTERN * pattern
+        WEIGHT_RS * components.rs
+        + WEIGHT_EARLY_MOVER * components.early_mover
+        + WEIGHT_BREAKOUT * components.breakout
+        + WEIGHT_SR * components.support_resistance
+        + WEIGHT_PATTERN * components.pattern
     )
     return int(round(max(0.0, min(100.0, raw))))
 
 
+def _bucket_from_score(score: int) -> ScoreBucket:
+    if score >= 80:
+        return "TRADE"
+    if score >= 60:
+        return "SETUP"
+    if score >= 40:
+        return "WATCHLIST"
+    return "NO_TRADE"
+
+
 def _verdict_from_score(score: int) -> TradeVerdict:
     if score >= 80:
-        return "HIGH_CONVICTION_TRADE"
-    if score >= 60:
+        return "TRADE"
+    if score >= 40:
         return "WATCHLIST"
     return "NO_TRADE"
 
 
 def _action_from_verdict(verdict: TradeVerdict) -> TradeAction:
-    if verdict == "HIGH_CONVICTION_TRADE":
+    if verdict == "TRADE":
         return "ENTER"
     if verdict == "WATCHLIST":
         return "WAIT_FOR_SETUP"
     return "AVOID"
 
 
-def _trend_stage(inputs: TradeDecisionInputs, rs_pct: float | None) -> TrendStage:
-    early = _early_mover_score(inputs) >= 0.45
-    at_highs = (inputs.dist_52w_high_pct is not None and inputs.dist_52w_high_pct <= 0.02) or (
-        inputs.near_52w_high and not early
-    )
-    if early and rs_pct is not None and rs_pct < 80:
-        return "early"
-    if at_highs or (rs_pct is not None and rs_pct >= 85):
-        return "late"
-    if rs_pct is not None and rs_pct >= 55:
-        return "mid"
-    return "unknown"
-
-
-def _regime_label(regime_id: str | None) -> str:
-    mapping = {
-        REGIME_RISK_ON_TREND: "Risk-on trend",
-        REGIME_RISK_ON_CHOP: "Risk-on chop",
-        REGIME_RISK_OFF: "Risk-off",
-        REGIME_HIGH_VOL_CHOP: "High-volatility chop",
-    }
-    return mapping.get(regime_id or "", regime_id or "Unknown")
-
-
-def _breakout_summary(score: int) -> str:
-    if score >= 78:
-        quality = "strong"
-    elif score >= 55:
-        quality = "moderate"
-    elif score >= 35:
-        quality = "weak"
-    else:
-        quality = "poor / failed"
-    return f"Breakout quality: {quality} ({score}/100)."
-
-
-def _build_explanation(
+def _primary_rejection_reason(
     *,
-    inputs: TradeDecisionInputs,
     regime: TradeDecisionRegime,
-    score: int,
-    trend_stage: TrendStage,
-    rs_pct: float | None,
     verdict: TradeVerdict,
-) -> list[str]:
-    env = regime.trade_environment
-    regime_line = (
-        f"Market regime: {_regime_label(regime.regime_id)} — gate {env.lower()}."
-    )
-    if env == "AVOID":
-        regime_line += " New long exposure blocked."
+    inputs: TradeDecisionInputs,
+    rs_pct: float | None,
+    components: _ScoreComponents | None,
+    score: int,
+) -> str | None:
+    if verdict == "TRADE":
+        return None
 
-    if rs_pct is not None:
-        strength = f"Relative strength: ~{rs_pct:.0f}th percentile vs ranked universe."
-    elif inputs.rs_score_0_1 is not None:
-        strength = (
-            f"Relative strength: model RS score {inputs.rs_score_0_1:.2f} "
-            "(percentile rank unavailable)."
-        )
-    else:
-        strength = "Relative strength: limited data for this symbol."
+    if regime.trade_environment == "AVOID":
+        return REJECTION_REGIME
 
-    stage_map = {
-        "early": "early leadership / inflection",
-        "mid": "confirmed mid-trend",
-        "late": "late-stage extension",
-        "unknown": "stage unclear",
-    }
-    stage_line = f"Trend stage: {stage_map[trend_stage]}."
+    candidates: list[tuple[float, str]] = []
 
-    breakout_line = _breakout_summary(
-        max(0, min(100, inputs.breakout_quality_score)),
-    )
+    breakout = float(max(0, min(100, inputs.breakout_quality_score)))
+    if breakout < 45:
+        gap = (45.0 - breakout) * WEIGHT_BREAKOUT
+        candidates.append((gap, REJECTION_BREAKOUT))
 
-    risk_parts: list[str] = []
-    if env == "AVOID":
-        risk_parts.append("risk-off or high-volatility macro regime")
-    elif env == "NEUTRAL":
-        risk_parts.append("neutral macro regime")
-    if inputs.support_resistance_confidence < 40:
-        risk_parts.append("weak nearby support/resistance")
+    rs_val = rs_pct if rs_pct is not None else (components.rs if components else 50.0)
+    if rs_val < 55:
+        gap = (55.0 - rs_val) * WEIGHT_RS
+        candidates.append((gap, REJECTION_RS))
+
+    sr = float(max(0, min(100, inputs.support_resistance_confidence)))
+    if sr < 50:
+        gap = (50.0 - sr) * WEIGHT_SR
+        candidates.append((gap, REJECTION_SR))
+
     if inputs.pattern_reliability == "low":
-        risk_parts.append("low pattern sample reliability")
-    if trend_stage == "late":
-        risk_parts.append("late-trend extension risk")
-    if inputs.breakout_quality_score < 35:
-        risk_parts.append("failed or unconfirmed breakout")
-    if not risk_parts:
-        risk_parts.append("normal execution and structure risk")
-    score_note = ""
-    if verdict == "NO_TRADE" and env != "AVOID":
-        score_note = f" Trade quality {score}/100 — below threshold."
-    elif verdict == "WATCHLIST":
-        score_note = f" Trade quality {score}/100 — forming, not entry-ready."
-    elif verdict == "HIGH_CONVICTION_TRADE":
-        score_note = f" Trade quality {score}/100 — passes filter."
-    risk_line = f"Key risk: {risk_parts[0]}.{score_note}"
+        candidates.append((8.0, REJECTION_PATTERN))
 
-    return [regime_line, strength, stage_line, breakout_line, risk_line]
+    early = components.early_mover if components else _early_mover_score(inputs) * 100.0
+    if early < 45:
+        gap = (45.0 - early) * WEIGHT_EARLY_MOVER
+        candidates.append((gap, REJECTION_EARLY))
+
+    if regime.trade_environment == "NEUTRAL":
+        candidates.append((6.0, REJECTION_REGIME))
+
+    if score < 40 and not candidates:
+        return REJECTION_SCORE
+
+    if candidates:
+        return max(candidates, key=lambda item: item[0])[1]
+
+    return REJECTION_SCORE
 
 
 def compute_breakout_quality_score(

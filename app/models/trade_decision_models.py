@@ -5,7 +5,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 TradeEnvironment = Literal["FAVORABLE", "NEUTRAL", "AVOID"]
-TradeVerdict = Literal["HIGH_CONVICTION_TRADE", "WATCHLIST", "NO_TRADE"]
+ScoreBucket = Literal["TRADE", "SETUP", "WATCHLIST", "NO_TRADE"]
+TradeVerdict = Literal["TRADE", "WATCHLIST", "NO_TRADE"]
 TradeAction = Literal["ENTER", "WAIT_FOR_SETUP", "AVOID"]
 
 
@@ -17,12 +18,17 @@ class TradeDecisionRegime(BaseModel):
 
 
 class TradeDecision(BaseModel):
+    """Single-output trade decision compiled from regime gate → score → bucket → verdict."""
+
     model_config = ConfigDict(populate_by_name=True)
 
     symbol: str
     as_of_date: str | None = Field(default=None, alias="asOfDate")
     regime: TradeDecisionRegime
     trade_quality_score: int = Field(alias="tradeQualityScore", ge=0, le=100)
+    score_bucket: ScoreBucket = Field(alias="scoreBucket")
     verdict: TradeVerdict
     action: TradeAction
-    explanation: list[str] = Field(default_factory=list, max_length=5)
+    primary_rejection_reason: str | None = Field(
+        default=None, alias="primaryRejectionReason"
+    )
