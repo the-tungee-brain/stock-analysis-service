@@ -10,12 +10,9 @@ from app.models.company_research_models import (
     FundamentalsOverview,
     InvestmentThesis,
     ResearchSnapshot,
+    ValuationSignal,
 )
-from app.models.yfinance_analysis_models import (
-    PeriodEstimate,
-    RecommendationBreakdown,
-    StreetAnalysisSnapshot,
-)
+from app.models.yfinance_analysis_models import StreetAnalysisSnapshot
 from app.models.yfinance_funds_models import EtfFundsSnapshot
 
 
@@ -28,7 +25,6 @@ class _ScoredBullet:
 class FundamentalsValuationGenerator:
     MAX_BULL = 3
     MAX_BEAR = 3
-    MAX_SUMMARY_SENTENCES = 5
 
     def generate(
         self,
@@ -43,8 +39,13 @@ class FundamentalsValuationGenerator:
         industry: str | None = None,
     ) -> FundamentalsOverview:
         ctx = FinancialCompanyContext(symbol=symbol, sector=sector, industry=industry)
-        bulls = self._bull_bullets(
+        signals = self._valuation_signals(
             snapshot=snapshot,
+            canonical=canonical,
+            street=street,
+            metrics=metrics,
+        )
+        bulls = self._bull_bullets(
             canonical=canonical,
             strength=strength,
             street=street,
@@ -59,22 +60,30 @@ class FundamentalsValuationGenerator:
             metrics=metrics,
             company_ctx=ctx,
         )
-        summary = self._valuation_summary(
+        conclusion = self._valuation_conclusion(
             snapshot=snapshot,
             canonical=canonical,
             strength=strength,
             street=street,
             metrics=metrics,
-            company_ctx=ctx,
             bulls=bulls,
             bears=bears,
         )
+        summary = self._valuation_summary(
+            snapshot=snapshot,
+            canonical=canonical,
+            metrics=metrics,
+            street=street,
+        )
         return FundamentalsOverview(
+            valuation_conclusion=conclusion,
             valuation_summary=summary,
+            valuation_signals=signals,
             investment_thesis=InvestmentThesis(
                 bull_case=self._top_bullets(bulls, self.MAX_BULL),
                 bear_case=self._top_bullets(bears, self.MAX_BEAR),
             ),
+            street_context=self._street_context(street),
         )
 
     def generate_etf(
@@ -85,9 +94,19 @@ class FundamentalsValuationGenerator:
     ) -> FundamentalsOverview:
         bulls: list[_ScoredBullet] = []
         bears: list[_ScoredBullet] = []
+        signals: list[ValuationSignal] = []
 
         expense = funds.expense_ratio_pct
         category_expense = funds.category_expense_ratio_pct
+        if expense is not None:
+            signals.append(
+                ValuationSignal(label="Expense ratio", value=f"{expense:.2f}%")
+            )
+        if dividend_yield_pct is not None:
+            signals.append(
+                ValuationSignal(label="Dividend yield", value=f"{dividend_yield_pct:.2f}%")
+            )
+
         if expense is not None and category_expense is not None and expense < category_expense:
             bulls.append(
                 _ScoredBullet(
@@ -98,14 +117,6 @@ class FundamentalsValuationGenerator:
                     materiality=78,
                 )
             )
-        elif expense is not None and expense <= 0.15:
-            bulls.append(
-                _ScoredBullet(
-                    text=f"Low {expense:.2f}% expense ratio supports long-run compounding versus pricier peers.",
-                    materiality=70,
-                )
-            )
-
         if dividend_yield_pct is not None and dividend_yield_pct >= 2:
             bulls.append(
                 _ScoredBullet(
@@ -113,78 +124,92 @@ class FundamentalsValuationGenerator:
                     materiality=62,
                 )
             )
-
-        if funds.top_holdings and len(funds.top_holdings) >= 5:
-            bulls.append(
-                _ScoredBullet(
-                    text="Broad top holdings spread reduces single-name risk versus concentrated ETFs.",
-                    materiality=55,
-                )
-            )
-
         if expense is not None and category_expense is not None and expense > category_expense * 1.15:
             bears.append(
                 _ScoredBullet(
                     text=(
                         f"Expense ratio of {expense:.2f}% is above category norms "
-                        f"({category_expense:.2f}%), a headwind to net returns."
+                        f"({category_expense:.2f}%), a drag on long-run returns."
                     ),
                     materiality=75,
                 )
             )
 
-        if funds.holdings_turnover_pct is not None and funds.holdings_turnover_pct > 40:
-            bears.append(
-                _ScoredBullet(
-                    text=(
-                        f"High {funds.holdings_turnover_pct:.0f}% turnover can raise trading costs "
-                        "and tax friction in taxable accounts."
-                    ),
-                    materiality=60,
-                )
-            )
-
-        if funds.top_holdings and funds.top_holdings[0].weight_pct > 12:
-            top = funds.top_holdings[0]
-            bears.append(
-                _ScoredBullet(
-                    text=(
-                        f"Top holding {top.name} at {top.weight_pct:.1f}% weight "
-                        "concentrates outcome risk in a single name."
-                    ),
-                    materiality=68,
-                )
-            )
-
-        sentences = [
-            "Fundamentals here are about cost, yield, and what the basket prices in — not operating margins.",
-        ]
-        if expense is not None:
-            sentences.append(f"The fund charges {expense:.2f}% annually.")
-        if funds.category:
-            sentences.append(f"Category: {funds.category}.")
-        if category_expense is not None:
-            sentences.append(
-                f"Peers in the category average about {category_expense:.2f}% expense."
-            )
-        sentences.append(
-            "Compare yield, turnover, and top weights before sizing a position."
+        conclusion = (
+            "The fund's attractiveness at today's price depends mainly on fees, yield, "
+            "and whether the underlying basket matches your risk budget."
         )
+        if expense is not None and category_expense is not None and expense > category_expense:
+            conclusion = (
+                f"The fund charges {expense:.2f}% annually versus a {category_expense:.2f}% "
+                "category average — cost is the main valuation hurdle from here."
+            )
 
         return FundamentalsOverview(
-            valuation_summary=" ".join(sentences[: self.MAX_SUMMARY_SENTENCES]),
+            valuation_conclusion=conclusion,
+            valuation_summary=conclusion,
+            valuation_signals=signals,
             investment_thesis=InvestmentThesis(
                 bull_case=self._top_bullets(bulls, self.MAX_BULL)
-                or ["Cost structure and diversification can support a core allocation."],
+                or ["Low cost and broad exposure can support a core allocation."],
                 bear_case=self._top_bullets(bears, self.MAX_BEAR)
                 or ["Fees and concentration still matter on a total-return basis."],
             ),
         )
 
-    def _bull_bullets(
+    def _valuation_signals(
         self,
         *,
         snapshot: ResearchSnapshot | None,
+        canonical: CanonicalFinancialMetrics | None,
+        street: StreetAnalysisSnapshot | None,
+        metrics: list[FundamentalMetric],
+    ) -> list[ValuationSignal]:
+        signals: list[ValuationSignal] = []
+        pb = self._metric_value(metrics, "Price / book")
+        if pb:
+            signals.append(ValuationSignal(label="Price / book", value=pb))
+
+        trailing_pe = self._metric_value(metrics, "P/E (trailing)")
+        if trailing_pe:
+            signals.append(ValuationSignal(label="P/E (trailing)", value=trailing_pe))
+
+        eps = self._metric_value(metrics, "EPS (trailing)") or self._metric_value(
+            metrics, "EPS (forward)"
+        )
+        if eps:
+            signals.append(ValuationSignal(label="EPS", value=eps))
+
+        targets = street.price_targets if street else None
+        if targets and targets.current is not None and targets.mean is not None:
+            gap = self._format_target_gap(
+                targets.current, targets.mean, targets.upside_to_mean_pct
+            )
+            signals.append(ValuationSignal(label="Analyst target gap", value=gap))
+
+        if canonical:
+            rev = canonical.format_revenue_growth()
+            if rev:
+                signals.append(ValuationSignal(label="Revenue growth", value=rev))
+            net = canonical.format_net_margin()
+            if net:
+                signals.append(ValuationSignal(label="Net margin", value=net))
+            fcf = canonical.format_free_cash_flow()
+            if fcf:
+                signals.append(ValuationSignal(label="Free cash flow", value=fcf))
+
+        if snapshot and snapshot.peRatio is not None and not any(
+            signal.label.startswith("P/E") for signal in signals
+        ):
+            signals.append(
+                ValuationSignal(label="P/E (trailing)", value=f"{snapshot.peRatio:.1f}x")
+            )
+
+        return signals[:8]
+
+    def _bull_bullets(
+        self,
+        *,
         canonical: CanonicalFinancialMetrics | None,
         strength: FinancialStrength | None,
         street: StreetAnalysisSnapshot | None,
@@ -192,108 +217,103 @@ class FundamentalsValuationGenerator:
         company_ctx: FinancialCompanyContext,
     ) -> list[_ScoredBullet]:
         out: list[_ScoredBullet] = []
-        targets = street.price_targets if street else None
-        upside = targets.upside_to_mean_pct if targets else None
-        current = targets.current if targets else snapshot.price if snapshot else None
-        mean_target = targets.mean if targets else None
 
-        if upside is not None and upside >= 12:
-            out.append(
-                _ScoredBullet(
-                    text=(
-                        f"Shares trade about {upside:.0f}% below the Street mean price target "
-                        f"({self._fmt_price(mean_target)} vs {self._fmt_price(current)}), "
-                        "leaving room if estimates prove conservative."
-                    ),
-                    materiality=88,
-                )
-            )
-        elif upside is not None and upside >= 5:
-            out.append(
-                _ScoredBullet(
-                    text=(
-                        f"Modest {upside:.0f}% upside to the consensus mean target "
-                        "suggests the market is not fully pricing a bullish scenario."
-                    ),
-                    materiality=72,
-                )
-            )
-
-        trailing_pe = self._parse_multiple(self._metric_value(metrics, "P/E (trailing)"))
-        forward_pe = self._parse_multiple(self._metric_value(metrics, "P/E (forward)"))
-        if (
-            trailing_pe is not None
-            and forward_pe is not None
-            and forward_pe < trailing_pe * 0.85
-            and forward_pe > 0
-        ):
-            out.append(
-                _ScoredBullet(
-                    text=(
-                        f"Forward P/E of {forward_pe:.1f}x is below trailing {trailing_pe:.1f}x — "
-                        "analysts expect earnings to catch up to the current price."
-                    ),
-                    materiality=76,
-                )
-            )
-        elif trailing_pe is not None and trailing_pe <= 18 and canonical:
+        if canonical and canonical.revenue_growth_yoy is not None:
             rg = canonical.revenue_growth_yoy
-            if rg is not None and rg >= 10:
+            display = canonical.format_revenue_growth()
+            if rg >= 15:
                 out.append(
                     _ScoredBullet(
                         text=(
-                            f"Trailing P/E near {trailing_pe:.1f}x with "
-                            f"{canonical.format_revenue_growth() or 'solid'} revenue growth "
-                            "pairs a reasonable multiple with expansion."
+                            f"Revenue growth of {display} YoY shows strong commercial momentum "
+                            "and rising demand for the product set."
                         ),
-                        materiality=74,
+                        materiality=90 if rg >= 30 else 78,
+                    )
+                )
+            elif rg >= 5:
+                out.append(
+                    _ScoredBullet(
+                        text=f"Revenue is still expanding at {display} YoY, supporting a growth narrative.",
+                        materiality=62,
                     )
                 )
 
-        if street and street.consensus_label:
-            label = street.consensus_label.lower()
-            if "buy" in label and "sell" not in label:
+        if canonical:
+            gross = canonical.format_gross_margin()
+            net = canonical.format_net_margin()
+            if canonical.gross_margin_pct is not None and canonical.gross_margin_pct >= 45:
                 out.append(
                     _ScoredBullet(
-                        text=f"Wall Street consensus is {street.consensus_label}, supporting a constructive setup.",
-                        materiality=65,
+                        text=(
+                            f"Gross margin of {gross} indicates pricing power and "
+                            "scalable unit economics as revenue compounds."
+                        ),
+                        materiality=76,
+                    )
+                )
+            elif canonical.net_margin_pct is not None and canonical.net_margin_pct >= 12:
+                out.append(
+                    _ScoredBullet(
+                        text=(
+                            f"Net margin of {net} shows the business converts revenue "
+                            "into profit at a healthy rate."
+                        ),
+                        materiality=72,
                     )
                 )
 
-        if street and street.estimate_revision_headline:
-            headline = street.estimate_revision_headline.lower()
-            if any(token in headline for token in ("up", "raised", "higher", "positive")):
+            fcf = canonical.format_free_cash_flow()
+            if canonical.free_cash_flow_latest is not None and canonical.free_cash_flow_latest > 0:
+                trend = ""
+                if canonical.free_cash_flow_yoy_pct is not None and canonical.free_cash_flow_yoy_pct > 8:
+                    trend = f", up {canonical.free_cash_flow_yoy_pct:.0f}% YoY"
                 out.append(
                     _ScoredBullet(
-                        text=f"Estimate revisions lean positive: {street.estimate_revision_headline}",
+                        text=(
+                            f"Free cash flow of {fcf}{trend} funds reinvestment, "
+                            "deleveraging, or shareholder returns without relying on new capital."
+                        ),
+                        materiality=85,
+                    )
+                )
+
+            if (
+                canonical.revenue_growth_yoy is not None
+                and canonical.revenue_growth_yoy >= 20
+                and canonical.gross_margin_pct is not None
+                and canonical.gross_margin_pct >= 40
+            ):
+                out.append(
+                    _ScoredBullet(
+                        text=(
+                            "High growth with solid gross margins points to contracted or "
+                            "recurring demand rather than one-off volume spikes."
+                        ),
                         materiality=70,
                     )
                 )
 
-        next_eps = self._next_period_estimate(street, "+1q") or street.next_quarter_eps if street else None
-        if next_eps and next_eps.growth_pct is not None and next_eps.growth_pct >= 8:
+        rev_est = self._next_period_estimate(street, "+1q", revenue=True)
+        if rev_est and rev_est.growth_pct is not None and rev_est.growth_pct >= 10:
             out.append(
                 _ScoredBullet(
                     text=(
-                        f"Next-quarter EPS estimates imply "
-                        f"{next_eps.growth_pct:+.0f}% growth — execution is already in the numbers."
+                        f"Forward revenue estimates imply {rev_est.growth_pct:+.0f}% growth, "
+                        "suggesting backlog or pipeline conversion into reported sales."
                     ),
                     materiality=68,
                 )
             )
 
-        if strength and strength.profile in {
-            "Financially Strong",
-            "Profitable Compounder",
-            "Cash-Generating Value",
-        }:
+        if strength and strength.score >= 60:
             out.append(
                 _ScoredBullet(
                     text=(
-                        f"A {strength.profile} operating profile gives the market a credible "
-                        "path to justify today's valuation if growth holds."
+                        f"Operating momentum aligns with a {strength.profile} profile "
+                        f"(financial health score {strength.score}/100)."
                     ),
-                    materiality=58,
+                    materiality=55,
                 )
             )
 
@@ -303,8 +323,8 @@ class FundamentalsValuationGenerator:
                 out.append(
                     _ScoredBullet(
                         text=(
-                            f"Return on equity of {roe:.0f}% supports book-value-based "
-                            "valuation for a bank at today's price."
+                            f"Return on equity of {roe:.0f}% reflects earning power on "
+                            "tangible book — a core fundamental support for the stock."
                         ),
                         materiality=64,
                     )
@@ -323,95 +343,115 @@ class FundamentalsValuationGenerator:
         company_ctx: FinancialCompanyContext,
     ) -> list[_ScoredBullet]:
         out: list[_ScoredBullet] = []
-        targets = street.price_targets if street else None
-        upside = targets.upside_to_mean_pct if targets else None
-        current = targets.current if targets else snapshot.price if snapshot else None
-        mean_target = targets.mean if targets else None
-
-        if upside is not None and upside <= -5:
-            out.append(
-                _ScoredBullet(
-                    text=(
-                        f"Price sits {abs(upside):.0f}% above the mean analyst target "
-                        f"({self._fmt_price(current)} vs {self._fmt_price(mean_target)}), "
-                        "so the stock must outperform estimates to work from here."
-                    ),
-                    materiality=90,
-                )
-            )
-
         trailing_pe = self._parse_multiple(self._metric_value(metrics, "P/E (trailing)"))
         forward_pe = self._parse_multiple(self._metric_value(metrics, "P/E (forward)"))
-        if trailing_pe is not None and trailing_pe >= 35:
+        price_book = self._parse_multiple(self._metric_value(metrics, "Price / book"))
+
+        if trailing_pe is not None and trailing_pe >= 30:
             growth_note = ""
             if canonical and canonical.revenue_growth_yoy is not None:
-                growth_note = f" with revenue growing {canonical.format_revenue_growth()}"
+                growth_note = f" despite {canonical.format_revenue_growth()} revenue growth"
             out.append(
                 _ScoredBullet(
                     text=(
-                        f"Trailing P/E of {trailing_pe:.1f}x prices in strong growth{growth_note} — "
-                        "disappointment would compress the multiple quickly."
+                        f"Trailing P/E of {trailing_pe:.1f}x embeds a premium valuation{growth_note} — "
+                        "multiples can compress if growth or margins disappoint."
                     ),
-                    materiality=85,
+                    materiality=88,
                 )
             )
-        elif forward_pe is not None and forward_pe >= 40:
+        elif forward_pe is not None and forward_pe >= 35:
             out.append(
                 _ScoredBullet(
                     text=(
-                        f"Forward P/E near {forward_pe:.1f}x leaves little margin for "
-                        "earnings misses or guide-downs."
+                        f"Forward P/E of {forward_pe:.1f}x prices in a demanding earnings path "
+                        "with limited room for execution slips."
+                    ),
+                    materiality=82,
+                )
+            )
+
+        if price_book is not None and price_book >= 4:
+            out.append(
+                _ScoredBullet(
+                    text=(
+                        f"Price/book of {price_book:.1f}x is rich relative to accounting value "
+                        "unless ROE and growth stay elevated."
+                    ),
+                    materiality=70,
+                )
+            )
+
+        if canonical and canonical.net_margin_pct is not None:
+            if canonical.net_margin_pct < 0:
+                out.append(
+                    _ScoredBullet(
+                        text=(
+                            f"Net margin of {canonical.format_net_margin()} means profitability "
+                            "does not yet support the current valuation on earnings alone."
+                        ),
+                        materiality=86,
+                    )
+                )
+            elif canonical.net_margin_pct < 5:
+                out.append(
+                    _ScoredBullet(
+                        text=(
+                            f"Thin net margin of {canonical.format_net_margin()} leaves little "
+                            "cushion if costs rise or pricing weakens."
+                        ),
+                        materiality=68,
+                    )
+                )
+
+        if canonical and canonical.debt_to_equity is not None and canonical.debt_to_equity > 2:
+            out.append(
+                _ScoredBullet(
+                    text=(
+                        f"Debt/equity of {canonical.format_debt_equity()} raises financial risk "
+                        "if rates rise or cash flow slows."
+                    ),
+                    materiality=78,
+                )
+            )
+
+        if canonical and canonical.current_ratio is not None and canonical.current_ratio < 1:
+            out.append(
+                _ScoredBullet(
+                    text=(
+                        f"Current ratio of {canonical.format_current_ratio()} signals "
+                        "liquidity pressure in a downturn."
+                    ),
+                    materiality=74,
+                )
+            )
+
+        targets = street.price_targets if street else None
+        upside = targets.upside_to_mean_pct if targets else None
+        if upside is not None and upside <= -5:
+            current = targets.current if targets else snapshot.price if snapshot else None
+            mean_target = targets.mean if targets else None
+            out.append(
+                _ScoredBullet(
+                    text=(
+                        f"Price is {abs(upside):.0f}% above the mean analyst target "
+                        f"({self._fmt_price(current)} vs {self._fmt_price(mean_target)}) — "
+                        "returns depend on estimates moving higher, not just meeting them."
+                    ),
+                    materiality=84,
+                )
+            )
+
+        if canonical and canonical.free_cash_flow_latest is not None and canonical.free_cash_flow_latest < 0:
+            out.append(
+                _ScoredBullet(
+                    text=(
+                        "Negative free cash flow means the equity story requires a turnaround "
+                        "in operations or external funding."
                     ),
                     materiality=80,
                 )
             )
-
-        if canonical:
-            if (
-                canonical.free_cash_flow_latest is not None
-                and canonical.free_cash_flow_latest < 0
-                and trailing_pe is not None
-                and trailing_pe >= 25
-            ):
-                out.append(
-                    _ScoredBullet(
-                        text=(
-                            "Negative free cash flow alongside a premium multiple means "
-                            "valuation depends on future profits, not today's cash generation."
-                        ),
-                        materiality=82,
-                    )
-                )
-            if canonical.revenue_growth_yoy is not None and canonical.revenue_growth_yoy < 0:
-                out.append(
-                    _ScoredBullet(
-                        text=(
-                            f"Revenue decline of {canonical.format_revenue_growth()} makes "
-                            "today's price a bet on stabilization, not momentum."
-                        ),
-                        materiality=78,
-                    )
-                )
-
-        if street and street.estimate_revision_headline:
-            headline = street.estimate_revision_headline.lower()
-            if any(token in headline for token in ("down", "cut", "lower", "negative")):
-                out.append(
-                    _ScoredBullet(
-                        text=f"Estimate revisions are softening: {street.estimate_revision_headline}",
-                        materiality=72,
-                    )
-                )
-
-        if street and street.recommendation:
-            sell_skew = self._sell_skew(street.recommendation)
-            if sell_skew >= 0.25:
-                out.append(
-                    _ScoredBullet(
-                        text="A meaningful share of analysts rate the stock Sell or Strong Sell.",
-                        materiality=66,
-                    )
-                )
 
         if strength and strength.profile in {
             "High Growth / High Risk",
@@ -421,10 +461,20 @@ class FundamentalsValuationGenerator:
             out.append(
                 _ScoredBullet(
                     text=(
-                        f"The {strength.profile} label flags that the price still requires "
-                        "flawless execution on growth, margins, or balance-sheet repair."
+                        f"Execution risk is elevated for a {strength.profile} name — "
+                        "the market is paying ahead of proven stability."
                     ),
-                    materiality=70,
+                    materiality=76,
+                )
+            )
+        elif canonical and canonical.revenue_growth_yoy is not None and canonical.revenue_growth_yoy < 0:
+            out.append(
+                _ScoredBullet(
+                    text=(
+                        "Contracting revenue raises execution risk: the stock must prove "
+                        "stabilization before multiple expansion is realistic."
+                    ),
+                    materiality=72,
                 )
             )
 
@@ -433,8 +483,8 @@ class FundamentalsValuationGenerator:
                 out.append(
                     _ScoredBullet(
                         text=(
-                            "Biotech-style cash burn means valuation is tied to funding and "
-                            "pipeline milestones, not near-term earnings."
+                            "Biotech cash burn creates execution and funding risk — "
+                            "valuation hinges on pipeline milestones, not current earnings."
                         ),
                         materiality=75,
                     )
@@ -442,7 +492,7 @@ class FundamentalsValuationGenerator:
 
         return out
 
-    def _valuation_summary(
+    def _valuation_conclusion(
         self,
         *,
         snapshot: ResearchSnapshot | None,
@@ -450,80 +500,155 @@ class FundamentalsValuationGenerator:
         strength: FinancialStrength | None,
         street: StreetAnalysisSnapshot | None,
         metrics: list[FundamentalMetric],
-        company_ctx: FinancialCompanyContext,
         bulls: list[_ScoredBullet],
         bears: list[_ScoredBullet],
     ) -> str:
-        sentences: list[str] = []
+        trailing_pe = self._parse_multiple(self._metric_value(metrics, "P/E (trailing)"))
         targets = street.price_targets if street else None
-        current = targets.current if targets else snapshot.price if snapshot else None
-        mean_target = targets.mean if targets else None
         upside = targets.upside_to_mean_pct if targets else None
+        rg = canonical.revenue_growth_yoy if canonical else None
+        nm = canonical.net_margin_pct if canonical else None
 
-        if current is not None and mean_target is not None:
-            vs = self._vs_mean_target_label(current, mean_target, upside)
-            sentences.append(
-                f"At {self._fmt_price(current)}, the stock is {vs} "
-                f"against a mean analyst target of {self._fmt_price(mean_target)}."
+        premium_multiple = trailing_pe is not None and trailing_pe >= 28
+        hypergrowth = rg is not None and rg >= 25
+        weak_profit = nm is not None and nm < 5
+        above_target = upside is not None and upside <= -8
+        below_target = upside is not None and upside >= 10
+        strong_fundamentals = strength is not None and strength.score >= 62 and not weak_profit
+
+        if premium_multiple and hypergrowth and weak_profit:
+            return (
+                "The stock trades at a premium valuation that assumes continued hypergrowth "
+                "and improving profitability. Current fundamentals alone do not fully justify "
+                "the market price."
             )
-        elif current is not None:
-            sentences.append(f"The stock last traded near {self._fmt_price(current)}.")
+        if premium_multiple and hypergrowth:
+            return (
+                "A rich multiple prices in sustained hypergrowth — investors are paying for "
+                "future margin expansion, not just today's revenue curve."
+            )
+        if premium_multiple and above_target:
+            return (
+                "The shares trade above both typical earnings multiples and the Street mean target, "
+                "so expectations for growth and execution are already ambitious."
+            )
+        if premium_multiple and not hypergrowth:
+            return (
+                "The market assigns a premium multiple without matching revenue momentum — "
+                "either estimates must rise or the multiple needs to normalize for investors to earn a return."
+            )
+        if below_target and strong_fundamentals:
+            return (
+                "Fundamentals are solid relative to the price, and the stock trades below the "
+                "mean analyst target — returns may come from earnings delivery rather than multiple expansion."
+            )
+        if weak_profit and (premium_multiple or above_target):
+            return (
+                "Weak profitability alongside a demanding price means investors are betting on "
+                "a sharp earnings inflection, not what the business earns today."
+            )
+        if bears and not bulls:
+            return (
+                "Valuation and balance-sheet risks dominate — the price already reflects optimism "
+                "that must materialize in earnings and cash flow."
+            )
+        if bulls and not bears:
+            return (
+                "Operating fundamentals support the narrative at today's price, though returns still "
+                "require growth and margins to hold as the market expects."
+            )
+        if hypergrowth:
+            return (
+                "Hypergrowth is largely priced in; investors need sustained revenue gains and "
+                "margin progress to earn a return from current levels."
+            )
+        return (
+            "What happens next quarter — growth, margins, and cash conversion — determines whether "
+            "today's price already captures the upside or leaves room for investors."
+        )
 
+    def _valuation_summary(
+        self,
+        *,
+        snapshot: ResearchSnapshot | None,
+        canonical: CanonicalFinancialMetrics | None,
+        metrics: list[FundamentalMetric],
+        street: StreetAnalysisSnapshot | None,
+    ) -> str:
+        parts: list[str] = []
         trailing_pe = self._parse_multiple(self._metric_value(metrics, "P/E (trailing)"))
         forward_pe = self._parse_multiple(self._metric_value(metrics, "P/E (forward)"))
-        if trailing_pe is not None and forward_pe is not None:
-            if forward_pe < trailing_pe * 0.9:
-                sentences.append(
-                    f"Forward P/E ({forward_pe:.1f}x) sits below trailing ({trailing_pe:.1f}x), "
-                    "so the market is pricing earnings improvement."
-                )
-            elif forward_pe > trailing_pe * 1.1:
-                sentences.append(
-                    f"Forward P/E ({forward_pe:.1f}x) exceeds trailing ({trailing_pe:.1f}x), "
-                    "implying earnings pressure or one-off boosts in the rearview."
-                )
-            else:
-                sentences.append(
-                    f"Trailing and forward P/E are both near {trailing_pe:.1f}x — "
-                    "expectations are relatively stable."
-                )
-        elif trailing_pe is not None:
-            sentences.append(f"Shares trade at about {trailing_pe:.1f}x trailing earnings.")
 
-        if street and street.growth_context_headline:
-            sentences.append(street.growth_context_headline.rstrip(".") + ".")
-        elif canonical and canonical.revenue_growth_yoy is not None:
-            sentences.append(
-                f"Revenue is {canonical.format_revenue_growth()} year over year, "
-                "which shapes how much growth is already embedded in the price."
+        if trailing_pe is not None:
+            parts.append(f"Shares trade near {trailing_pe:.1f}x trailing earnings.")
+        if forward_pe is not None and trailing_pe is not None and forward_pe < trailing_pe * 0.9:
+            parts.append(
+                f"Forward P/E of {forward_pe:.1f}x implies the market expects earnings to improve."
             )
+        if canonical and canonical.revenue_growth_yoy is not None:
+            parts.append(
+                f"Revenue is {canonical.format_revenue_growth()} YoY — that pace sets how much "
+                "growth is already embedded in the price."
+            )
+        targets = street.price_targets if street else None
+        if targets and targets.mean is not None and targets.current is not None:
+            parts.append(
+                f"Versus a mean target of {self._fmt_price(targets.mean)}, "
+                f"the last price of {self._fmt_price(targets.current)} "
+                f"is {self._format_target_gap(targets.current, targets.mean, targets.upside_to_mean_pct).lower()}."
+            )
+        elif snapshot:
+            parts.append(f"Last price near {self._fmt_price(snapshot.price)}.")
 
-        if strength:
-            sentences.append(
-                f"Operationally the company screens as {strength.profile}; "
-                "this tab focuses on whether the price compensates for that profile."
-            )
+        return " ".join(parts[:4])
 
-        if bulls and bears:
-            sentences.append(
-                "The bull case hinges on estimates and multiples holding up; "
-                "the bear case centers on what happens if they do not."
+    @staticmethod
+    def _street_context(street: StreetAnalysisSnapshot | None) -> str:
+        if not street:
+            return ""
+        parts: list[str] = []
+        if street.consensus_label:
+            parts.append(f"Consensus rating: {street.consensus_label}")
+        targets = street.price_targets
+        if targets and targets.mean is not None and targets.upside_to_mean_pct is not None:
+            parts.append(
+                f"mean target implies {targets.upside_to_mean_pct:+.0f}% from the last price"
             )
-        elif bears:
-            sentences.append(
-                "Upside from here likely requires estimate beats or multiple expansion."
-            )
-        else:
-            sentences.append(
-                "Execution on the next few quarters will determine whether today's valuation looks fair."
-            )
+        if street.estimate_revision_headline:
+            parts.append(street.estimate_revision_headline.rstrip("."))
+        if not parts:
+            return ""
+        return (
+            "Wall Street (supporting context): "
+            + "; ".join(parts)
+            + ". Use estimates as a cross-check, not the core thesis."
+        )
 
-        return " ".join(sentences[: self.MAX_SUMMARY_SENTENCES])
+    @staticmethod
+    def _format_target_gap(
+        current: float,
+        mean: float,
+        upside_pct: float | None,
+    ) -> str:
+        if upside_pct is not None:
+            if upside_pct >= 0.5:
+                return f"{upside_pct:.1f}% below mean target"
+            if upside_pct <= -0.5:
+                return f"{abs(upside_pct):.1f}% above mean target"
+        pct = ((current - mean) / mean) * 100 if mean else 0
+        if pct <= -0.5:
+            return f"{abs(pct):.1f}% below mean target"
+        if pct >= 0.5:
+            return f"{pct:.1f}% above mean target"
+        return "At mean target"
 
     @staticmethod
     def _top_bullets(bullets: list[_ScoredBullet], limit: int) -> list[str]:
         ranked = sorted(bullets, key=lambda item: item.materiality, reverse=True)
-        return [item.text for item in ranked[:limit]]
+        picked = [item.text for item in ranked[:limit]]
+        if picked:
+            return picked
+        return ["Operating trends are mixed — see valuation signals for the key inputs."]
 
     @staticmethod
     def _metric_value(metrics: list[FundamentalMetric], label: str) -> str | None:
@@ -550,44 +675,16 @@ class FundamentalsValuationGenerator:
         return f"${value:,.2f}"
 
     @staticmethod
-    def _vs_mean_target_label(
-        current: float,
-        mean: float,
-        upside_pct: float | None,
-    ) -> str:
-        if upside_pct is not None:
-            if upside_pct >= 1:
-                return f"roughly {upside_pct:.0f}% below"
-            if upside_pct <= -1:
-                return f"roughly {abs(upside_pct):.0f}% above"
-        pct = ((current - mean) / mean) * 100 if mean else 0
-        if pct <= -1:
-            return f"roughly {abs(pct):.0f}% below"
-        if pct >= 1:
-            return f"roughly {pct:.0f}% above"
-        return "in line with"
-
-    @staticmethod
-    def _sell_skew(recommendation: RecommendationBreakdown) -> float:
-        total = (
-            recommendation.strong_buy
-            + recommendation.buy
-            + recommendation.hold
-            + recommendation.sell
-            + recommendation.strong_sell
-        )
-        if total <= 0:
-            return 0.0
-        return (recommendation.sell + recommendation.strong_sell) / total
-
-    @staticmethod
     def _next_period_estimate(
         street: StreetAnalysisSnapshot | None,
         period_key: str,
-    ) -> PeriodEstimate | None:
+        *,
+        revenue: bool = False,
+    ):
         if not street:
             return None
-        for row in street.eps_estimates:
+        rows = street.revenue_estimates if revenue else street.eps_estimates
+        for row in rows:
             if row.period_key == period_key:
                 return row
         return None

@@ -182,11 +182,25 @@ class InvestmentThesis(BaseModel):
     bear_case: list[str] = Field(default_factory=list, serialization_alias="bearCase")
 
 
+class ValuationSignal(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    label: str
+    value: str
+    note: str | None = None
+
+
 class FundamentalsOverview(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    valuation_conclusion: str = Field(serialization_alias="valuationConclusion")
     valuation_summary: str = Field(serialization_alias="valuationSummary")
+    valuation_signals: list[ValuationSignal] = Field(
+        default_factory=list,
+        serialization_alias="valuationSignals",
+    )
     investment_thesis: InvestmentThesis = Field(serialization_alias="investmentThesis")
+    street_context: str = Field(default="", serialization_alias="streetContext")
 
 
 class FundamentalsBlock(BaseModel):
