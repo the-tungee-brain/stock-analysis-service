@@ -11,9 +11,11 @@ COPY data ./data
 COPY features ./features
 COPY models ./models
 COPY backtest ./backtest
+COPY ranking_pipeline ./ranking_pipeline
+COPY scripts ./scripts
 COPY api ./api
 COPY docker-entrypoint.sh .
-RUN mkdir -p artifacts data/raw data/features
+RUN mkdir -p artifacts data/raw data/features data/ranking/features
 RUN chmod +x docker-entrypoint.sh
 
 EXPOSE 8000

@@ -6,34 +6,32 @@ Post-deployment operations for the batch pipeline and product API (`/api/v1/rank
 
 ## A. Initial deployment
 
-1. **Deploy backend** (FastAPI + gunicorn/uvicorn) with env:
-   - `RANKING_DB_PATH` → persistent volume for `data/ranking/ranking_pipeline.db`
-   - `RANKING_MODEL_BACKEND` → `xgboost` or `composite`
-   - `PORTFOLIO_SIZING_MODE` → `volatility_adjusted` (recommended)
-   - `PORTFOLIO_TARGET_VOL` → `0.12`–`0.15`
+1. **Deploy backend** (push to `main` → `deploy.yml` builds image and runs `sas-server` with):
+   - `-v /home/ubuntu/sas-ranking-persist/data:/app/data` (created automatically on the VM)
+   - Default pipeline settings apply (no extra env required)
+   - Optional overrides: `RANKING_DB_PATH`, `RANKING_MODEL_BACKEND`, `PORTFOLIO_*`
 
-2. **Initialize schema** — first API or pipeline start creates SQLite tables via existing stores.
+2. **Initialize schema** — first pipeline or API access creates SQLite tables under `/app/data/ranking/`.
 
-3. **Universe (weekly job)**:
+3. **Universe (weekly job)** — on the VM via Docker:
    ```bash
-   python scripts/run_ranking_universe_weekly.py
+   docker exec sas-server python scripts/run_ranking_universe_weekly.py
    ```
    Dev smoke: `--max-candidates 100`
 
 4. **OHLCV backfill** — ensure SPY + universe symbols:
    ```bash
-   python data/download.py --symbols SPY
-   python scripts/run_ranking_daily.py  # will incremental-fill universe
+   docker exec sas-server python -m data.download --symbols SPY
    ```
 
 5. **First ranking run**:
    ```bash
-   python scripts/run_ranking_daily.py
+   docker exec sas-server python scripts/run_ranking_daily.py
    ```
 
 6. **First portfolio + risk**:
    ```bash
-   python scripts/run_portfolio_with_risk.py
+   docker exec sas-server python scripts/run_portfolio_with_risk.py
    ```
 
 7. **Verify API** (authenticated):

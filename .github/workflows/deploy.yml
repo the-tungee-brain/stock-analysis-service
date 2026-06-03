@@ -75,6 +75,10 @@ jobs:
               redis:7-alpine \
               redis-server --appendonly yes --requirepass "${{ secrets.REDIS_PASSWORD }}" --maxmemory 512mb --maxmemory-policy allkeys-lru
 
+            # Persistent ranking pipeline store (OHLCV Parquet + SQLite)
+            mkdir -p /home/ubuntu/sas-ranking-persist/data/raw
+            mkdir -p /home/ubuntu/sas-ranking-persist/data/ranking/features
+
             # Backend
             docker pull tungxd96/sas-server:latest
             docker stop sas-server || true
@@ -84,6 +88,7 @@ jobs:
               --network sas-net \
               -p 8000:8000 \
               -v /home/ubuntu/sas-pattern-artifacts:/app/artifacts \
+              -v /home/ubuntu/sas-ranking-persist/data:/app/data \
               -e PATTERN_ARTIFACT_DIR=/app/artifacts \
               --memory=5g \
               --memory-swap=6g \
