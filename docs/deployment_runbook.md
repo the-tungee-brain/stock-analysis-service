@@ -82,6 +82,8 @@ Optional ML retrain: `train-pattern-model.yml` or `scripts/train_ranking_model.p
 | Log: `ranking_pipeline not in image` but deploy is new | Log may be **stale** from an old bootstrap. Verify imports (below), then **re-run bootstrap** |
 | Bootstrap stuck | SSH → log file; re-run workflow **bootstrap** |
 | `No data returned for SPY` after universe | Yahoo throttled after ~6k screens. Wait 5–10 min, then `$0 bootstrap-resume` (skips universe) |
+| `No feature rows available for ranking` | Universe screen only stored ~1y OHLCV; deploy fix backfills 15y on daily, then `bootstrap-resume` |
+| Yahoo rate limits during bulk jobs | Deploy sets `YFINANCE_MIN_INTERVAL_SEC=0.4` + `RANKING_MAX_WORKERS=4`; retries in `data/download.py`; 90s pause before SPY in bootstrap |
 | Ranking fails | API serves last run; fix and run workflow **daily** |
 | Portfolio fails | Previous snapshot remains; run workflow **daily** |
 

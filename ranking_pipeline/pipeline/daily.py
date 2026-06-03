@@ -48,7 +48,8 @@ def run_daily_pipeline(
     ohlcv_stats = batch_update_ohlcv(universe, store, config)
 
     logger.info("Updating ranking features")
-    feature_stats = batch_update_features(universe, config, include_labels=True)
+    # Labels need extra tail rows; scoring uses feature columns only at run time.
+    feature_stats = batch_update_features(universe, config, include_labels=False)
 
     run_id, ranked = run_ranking(universe, store, config)
     logger.info("Ranking run %s complete (%d symbols)", run_id, len(ranked))

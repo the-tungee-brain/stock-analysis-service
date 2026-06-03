@@ -49,7 +49,7 @@ class RankingPipelineConfig:
     model_backend: ModelBackend = ModelBackend.XGBOOST
     ml_blend_weight: float = 0.6
     composite_blend_weight: float = 0.4
-    max_workers: int = 8
+    max_workers: int = 4
     feature_warmup_bars: int = 252
     feature_tail_recompute: int = 320
     top_n_api: int = 20

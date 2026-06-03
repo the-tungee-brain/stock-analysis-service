@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 import re
 import threading
+import time
 from pathlib import Path
+from types import TracebackType
 
 _YAHOO_HTTP_ERROR_RE = re.compile(r"^HTTP Error (\d+):\s*", re.IGNORECASE)
 
@@ -14,10 +16,43 @@ _config_lock = threading.Lock()
 
 # Serialize Yahoo cookie/cache writes within a process (yfinance peewee race).
 _yfinance_fetch_lock = threading.Lock()
+_last_yahoo_fetch_at = 0.0
 
 
-def yfinance_fetch_lock() -> threading.Lock:
-    return _yfinance_fetch_lock
+def _yahoo_min_interval_sec() -> float:
+    raw = os.environ.get("YFINANCE_MIN_INTERVAL_SEC", "0.35")
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 0.35
+
+
+class _ThrottledYFinanceFetchLock:
+    """Process-wide lock plus minimum gap between Yahoo requests (rate-limit friendly)."""
+
+    def __enter__(self) -> _ThrottledYFinanceFetchLock:
+        global _last_yahoo_fetch_at
+        _yfinance_fetch_lock.acquire()
+        gap = _yahoo_min_interval_sec()
+        if gap > 0 and _last_yahoo_fetch_at > 0:
+            wait = gap - (time.monotonic() - _last_yahoo_fetch_at)
+            if wait > 0:
+                time.sleep(wait)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        global _last_yahoo_fetch_at
+        _last_yahoo_fetch_at = time.monotonic()
+        _yfinance_fetch_lock.release()
+
+
+def yfinance_fetch_lock() -> _ThrottledYFinanceFetchLock:
+    return _ThrottledYFinanceFetchLock()
 
 
 def format_yahoo_finance_error(exc: BaseException) -> str:

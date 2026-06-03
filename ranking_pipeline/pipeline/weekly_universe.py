@@ -11,7 +11,7 @@ import yfinance as yf
 
 from app.adapters.market.yfinance_bootstrap import configure_yfinance, yfinance_fetch_lock
 from data.download import download_symbol
-from data.store import save_raw
+from data.store import load_raw, raw_exists, save_raw
 from ranking_pipeline.config import RankingPipelineConfig, default_config
 from ranking_pipeline.pipeline.progress_log import log_batch_progress
 from ranking_pipeline.universe.filters import screen_symbol_ohlcv
@@ -38,9 +38,13 @@ def _screen_one(
     lookback_days: int,
 ) -> dict:
     try:
-        ohlcv = download_symbol(symbol, years=1)
+        sym = symbol.strip().upper()
+        if raw_exists(sym):
+            ohlcv = load_raw(sym)
+        else:
+            ohlcv = download_symbol(sym, years=1)
+            save_raw(ohlcv, sym)
         ohlcv = ohlcv.tail(lookback_days)
-        save_raw(ohlcv, symbol)
         cap = _fetch_market_cap(symbol)
         metrics = screen_symbol_ohlcv(symbol, ohlcv, market_cap=cap, filters=filters)
         return {
