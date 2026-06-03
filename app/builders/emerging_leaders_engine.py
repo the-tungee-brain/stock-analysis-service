@@ -27,22 +27,25 @@ STAGE_RANK_PRIORITY: dict[SetupStage, int] = {
     "EXTENDED": 5,
 }
 
-WEIGHT_VOL_CONTRACTION = 0.14
-WEIGHT_RANGE_TIGHT = 0.14
-WEIGHT_RESISTANCE = 0.12
-WEIGHT_VOLUME_DRYUP = 0.10
-WEIGHT_RS_IMPROVEMENT = 0.06
-WEIGHT_ACCUMULATION = 0.08
-WEIGHT_BASE_QUALITY = 0.12
-WEIGHT_BREAKOUT_PROXIMITY = 0.10
-WEIGHT_DORMANCY = 0.08
-WEIGHT_TIGHTENING_TREND = 0.10
+# Setup score favors compression dynamics over stable sideways bases.
+WEIGHT_VOL_CONTRACTION_TREND = 0.17
+WEIGHT_TIGHTENING_TREND = 0.16
+WEIGHT_RANGE_TIGHT = 0.08
+WEIGHT_RESISTANCE = 0.09
+WEIGHT_BREAKOUT_PROXIMITY = 0.12
+WEIGHT_DORMANCY_COMPRESSION = 0.12
+WEIGHT_VOLUME_DRYUP = 0.07
+WEIGHT_BASE_QUALITY = 0.06
+WEIGHT_RS_IMPROVEMENT = 0.04
+WEIGHT_ACCUMULATION = 0.03
 WEIGHT_SETUP_PURITY = 0.06
 
 MIN_BARS = 60
-MIN_SETUP_PURITY = 38
-MIN_PURITY_STAGE_2 = 52
-MIN_PURITY_STAGE_3 = 58
+MIN_BASE_AGE_DAYS = 8
+MIN_BASE_ELIGIBILITY_SIGNALS = 2
+MIN_SETUP_PURITY = 42
+MIN_PURITY_STAGE_2 = 50
+MIN_PURITY_STAGE_3 = 56
 
 
 @dataclass(frozen=True)
@@ -62,7 +65,11 @@ class SetupComponentScores:
     distance_from_breakout_pct: float
     resistance_level: float
     tightening_trend: float
+    vol_contraction_trend: float
     vol_contraction_deep: float
+    consolidation_structure: float
+    volume_dryup_trend: float
+    base_eligibility_signals: int
     dormancy_days: int
     base_age: int
     failed_resistance_tests: int
@@ -95,6 +102,8 @@ def evaluate_emerging_leader(symbol: str, ohlcv: pd.DataFrame) -> EmergingLeader
 
     setup_score = _setup_quality_score(components)
     stage = _resolve_stage(frame, components)
+    if stage is None:
+        return None
     positive, missing = _factor_lists(components, stage)
     next_conf = _next_confirmation(stage, components)
     why = _why_it_ranks(stage, setup_score, components, positive)
@@ -169,6 +178,9 @@ def _compute_components(frame: pd.DataFrame) -> SetupComponentScores:
     vol_contraction_deep = _score_lower_is_better(vol_ratio_deep, good=0.62, ok=0.78, bad=0.95)
 
     daily_range = (high - low) / close.replace(0, np.nan)
+    vol_contraction_trend = _vol_contraction_trend_score(
+        atr14, daily_range=daily_range, vol_ratio_deep=vol_ratio_deep
+    )
     range_5 = float(daily_range.tail(5).mean())
     range_15 = float(daily_range.tail(15).mean()) or range_5
     range_30 = float(daily_range.tail(30).mean()) or range_15
@@ -187,6 +199,11 @@ def _compute_components(frame: pd.DataFrame) -> SetupComponentScores:
     vol_30 = float(volume.tail(30).mean()) or vol_10
     vol_dry_ratio = vol_10 / vol_30 if vol_30 > 0 else 1.0
     volume_dryup = _score_lower_is_better(vol_dry_ratio, good=0.68, ok=0.85, bad=1.05)
+    volume_dryup_trend = _volume_dryup_trend_score(volume)
+
+    consolidation_structure = _consolidation_structure_score(
+        close, high, low, resistance_level
+    )
 
     rs_improvement = _rs_improvement_score(close)
     accumulation = _accumulation_score(close, volume)
@@ -235,6 +252,18 @@ def _compute_components(frame: pd.DataFrame) -> SetupComponentScores:
         resistance_level=resistance_level,
         close=float(close.iloc[-1]),
     )
+    base_eligibility_signals = _count_base_eligibility_signals(
+        vol_contraction_trend=vol_contraction_trend,
+        vol_contraction_deep=vol_contraction_deep,
+        tightening_trend=tightening_trend,
+        consolidation_structure=consolidation_structure,
+        volume_dryup=volume_dryup,
+        volume_dryup_trend=volume_dryup_trend,
+        base_age=base_age,
+        resistance_tests=tests,
+        failed_resistance_tests=failed_tests,
+    )
+
     momentum_leader_like = _momentum_leader_like(
         ret_5d=ret_5d,
         ret_10d=ret_10d,
@@ -261,7 +290,11 @@ def _compute_components(frame: pd.DataFrame) -> SetupComponentScores:
         distance_from_breakout_pct=distance_pct * 100.0,
         resistance_level=resistance_level,
         tightening_trend=tightening_trend,
+        vol_contraction_trend=vol_contraction_trend,
         vol_contraction_deep=vol_contraction_deep,
+        consolidation_structure=consolidation_structure,
+        volume_dryup_trend=volume_dryup_trend,
+        base_eligibility_signals=base_eligibility_signals,
         dormancy_days=dormancy_days,
         base_age=base_age,
         failed_resistance_tests=failed_tests,
@@ -274,7 +307,11 @@ def _compute_components(frame: pd.DataFrame) -> SetupComponentScores:
 def _passes_structural_filter(c: SetupComponentScores) -> bool:
     if c.momentum_leader_like:
         return False
+    if c.base_eligibility_signals < MIN_BASE_ELIGIBILITY_SIGNALS:
+        return False
     if c.setup_purity_score < MIN_SETUP_PURITY:
+        return False
+    if _is_boring_flat_base(c):
         return False
     if c.ret_20d > 0.14:
         return False
@@ -291,17 +328,28 @@ def _passes_structural_filter(c: SetupComponentScores) -> bool:
 
 def _setup_quality_score(c: SetupComponentScores) -> int:
     dormancy_score = float(min(100, 35 + c.dormancy_days * 2.2))
+    dormancy_compression = float(
+        min(
+            100.0,
+            dormancy_score * 0.45
+            + c.vol_contraction_trend * 0.35
+            + c.tightening_trend * 0.20,
+        )
+    )
+    volume_signal = max(c.volume_dryup, c.volume_dryup_trend * 0.9)
+    rs_capped = min(c.rs_improvement, 56.0)
+    accumulation_capped = min(c.accumulation, 54.0)
     raw = (
-        WEIGHT_VOL_CONTRACTION * c.volatility_contraction
+        WEIGHT_VOL_CONTRACTION_TREND * c.vol_contraction_trend
+        + WEIGHT_TIGHTENING_TREND * c.tightening_trend
         + WEIGHT_RANGE_TIGHT * c.range_tightening
         + WEIGHT_RESISTANCE * c.resistance_tests_score
-        + WEIGHT_VOLUME_DRYUP * c.volume_dryup
-        + WEIGHT_RS_IMPROVEMENT * c.rs_improvement
-        + WEIGHT_ACCUMULATION * c.accumulation
-        + WEIGHT_BASE_QUALITY * c.base_quality
         + WEIGHT_BREAKOUT_PROXIMITY * c.breakout_proximity
-        + WEIGHT_DORMANCY * dormancy_score
-        + WEIGHT_TIGHTENING_TREND * c.tightening_trend
+        + WEIGHT_DORMANCY_COMPRESSION * dormancy_compression
+        + WEIGHT_VOLUME_DRYUP * volume_signal
+        + WEIGHT_BASE_QUALITY * c.base_quality
+        + WEIGHT_RS_IMPROVEMENT * rs_capped
+        + WEIGHT_ACCUMULATION * accumulation_capped
         + WEIGHT_SETUP_PURITY * c.setup_purity_score
     )
     penalty = 0.0
@@ -311,11 +359,17 @@ def _setup_quality_score(c: SetupComponentScores) -> int:
         penalty += min(10.0, (c.ret_10d - 0.06) * 80)
     if c.rsi_14 > 70:
         penalty += min(12.0, (c.rsi_14 - 70) * 1.2)
-    blended = raw * 0.88 + c.setup_purity_score * 0.12
+    if _is_boring_flat_base(c):
+        penalty += 14.0
+    if c.base_quality >= 72 and c.tightening_trend < 52:
+        penalty += min(12.0, (c.base_quality - 72) * 0.45)
+    if c.base_age >= 28 and c.vol_contraction_trend < 55:
+        penalty += 8.0
+    blended = raw * 0.9 + c.setup_purity_score * 0.1
     return int(round(max(0.0, min(100.0, blended - penalty))))
 
 
-def _resolve_stage(frame: pd.DataFrame, c: SetupComponentScores) -> SetupStage:
+def _resolve_stage(frame: pd.DataFrame, c: SetupComponentScores) -> SetupStage | None:
     close = float(frame["close"].iloc[-1])
     resistance = c.resistance_level
     vol_recent = float(frame["volume"].tail(5).mean())
@@ -331,10 +385,12 @@ def _resolve_stage(frame: pd.DataFrame, c: SetupComponentScores) -> SetupStage:
         return "BREAKOUT_TRIGGERED"
 
     tightening_ok = (
-        c.vol_contraction_deep >= 68
-        and c.tightening_trend >= 65
-        and c.range_tightening >= 62
-        and c.dormancy_days >= 10
+        c.vol_contraction_deep >= 64
+        and c.vol_contraction_trend >= 56
+        and c.tightening_trend >= 62
+        and c.tightening_trend >= c.volatility_contraction * 0.72
+        and c.range_tightening >= 58
+        and c.dormancy_days >= 8
         and c.setup_purity_score >= MIN_PURITY_STAGE_2
         and abs(c.ret_10d) <= 0.05
         and 2.5 <= dist <= 9.0
@@ -343,9 +399,10 @@ def _resolve_stage(frame: pd.DataFrame, c: SetupComponentScores) -> SetupStage:
         return "TIGHTENING"
 
     watch_ok = (
-        c.volatility_contraction >= 70
-        and c.tightening_trend >= 60
-        and 1.2 <= dist <= 3.8
+        c.vol_contraction_trend >= 58
+        and c.tightening_trend >= 58
+        and c.consolidation_structure >= 55
+        and 1.0 <= dist <= 3.8
         and c.failed_resistance_tests >= 2
         and c.setup_purity_score >= MIN_PURITY_STAGE_3
         and c.ret_20d <= 0.07
@@ -354,9 +411,9 @@ def _resolve_stage(frame: pd.DataFrame, c: SetupComponentScores) -> SetupStage:
     if watch_ok:
         return "BREAKOUT_WATCH"
 
-    if c.volatility_contraction >= 55 or c.dormancy_days >= 8:
+    if _stage1_ok(c):
         return "BASE_BUILDING"
-    return "BASE_BUILDING"
+    return None
 
 
 def _factor_lists(
@@ -366,12 +423,21 @@ def _factor_lists(
     positive: list[str] = []
     missing: list[str] = []
 
-    if c.vol_contraction_deep >= 65:
+    if c.vol_contraction_trend >= 62:
+        positive.append("Volatility contraction trend (compressing)")
+    elif c.vol_contraction_deep >= 65:
         positive.append("Meaningful volatility contraction")
     elif c.volatility_contraction >= 55:
         positive.append("Volatility contraction")
     else:
-        missing.append("Volatility contraction")
+        missing.append("Volatility contraction trend")
+
+    if c.consolidation_structure >= 58:
+        positive.append("Structured consolidation base")
+    elif c.consolidation_structure >= 50:
+        positive.append("Developing consolidation structure")
+    else:
+        missing.append("Identifiable consolidation structure")
 
     if c.tightening_trend >= 65:
         positive.append("Multi-day range compression")
@@ -482,10 +548,10 @@ def _setup_purity_score(
 ) -> float:
     quiet = 90.0 - min(50.0, abs(ret_5d) * 400 + abs(ret_10d) * 200 + abs(ret_20d) * 80)
     compression = (
-        volatility_contraction * 0.25
-        + vol_contraction_deep * 0.2
+        tightening_trend * 0.3
+        + vol_contraction_deep * 0.25
         + range_tightening * 0.2
-        + tightening_trend * 0.2
+        + volatility_contraction * 0.1
     )
     structure = min(100.0, 30 + dormancy_days * 2.0 + base_age * 1.5 + failed_tests * 6)
     dist_score = 85.0 if 2.0 <= distance_pct <= 8.0 else 45.0 if distance_pct <= 12 else 25.0
@@ -531,6 +597,154 @@ def _momentum_leader_like(
     if setup_purity_score < 32:
         return True
     return False
+
+
+def _stage1_ok(c: SetupComponentScores) -> bool:
+    if c.base_eligibility_signals < MIN_BASE_ELIGIBILITY_SIGNALS:
+        return False
+    has_compression_trend = c.vol_contraction_trend >= 50 or (
+        c.vol_contraction_deep >= 58 and c.tightening_trend >= 50
+    )
+    if not has_compression_trend:
+        return False
+    if c.consolidation_structure < 52:
+        return False
+    if c.tightening_trend < 42 and c.vol_contraction_deep < 52:
+        return False
+    if c.vol_contraction_trend < 48 and c.tightening_trend < 48:
+        return False
+    return True
+
+
+def _is_boring_flat_base(c: SetupComponentScores) -> bool:
+    if c.base_age >= 35 and c.tightening_trend < 48 and c.vol_contraction_trend < 52:
+        return True
+    if c.base_age >= 28 and c.tightening_trend < 42 and c.vol_contraction_trend < 48:
+        return True
+    flat_vol = c.volatility_contraction >= 60 and c.vol_contraction_trend < 45
+    if c.base_age >= 22 and flat_vol and c.tightening_trend < 50:
+        return True
+    return False
+
+
+def _count_base_eligibility_signals(
+    *,
+    vol_contraction_trend: float,
+    vol_contraction_deep: float,
+    tightening_trend: float,
+    consolidation_structure: float,
+    volume_dryup: float,
+    volume_dryup_trend: float,
+    base_age: int,
+    resistance_tests: int,
+    failed_resistance_tests: int,
+) -> int:
+    signals = 0
+    compression_trend = vol_contraction_trend >= 50 or (
+        vol_contraction_deep >= 58 and tightening_trend >= 50
+    )
+    if compression_trend:
+        signals += 1
+    if consolidation_structure >= 52:
+        signals += 1
+    if volume_dryup >= 52 or volume_dryup_trend >= 50:
+        signals += 1
+    if base_age >= MIN_BASE_AGE_DAYS:
+        signals += 1
+    if resistance_tests >= 1 or failed_resistance_tests >= 1:
+        signals += 1
+    return signals
+
+
+def _vol_contraction_trend_score(
+    atr14: pd.Series,
+    *,
+    daily_range: pd.Series,
+    vol_ratio_deep: float,
+) -> float:
+    series = atr14.dropna().tail(30)
+    atr_score = 35.0
+    if len(series) >= 12:
+        early = float(series.head(10).mean())
+        late = float(series.tail(8).mean())
+        ratio = late / early if early > 0 else 1.0
+        level = _score_lower_is_better(ratio, good=0.72, ok=0.88, bad=1.02)
+        x = np.arange(len(series), dtype=float)
+        slope = float(np.polyfit(x, series.values, 1)[0])
+        mean_val = float(series.mean()) or 1.0
+        norm_slope = slope / mean_val
+        trend_bonus = (
+            18.0
+            if norm_slope < -0.012
+            else 8.0
+            if norm_slope < -0.004
+            else -12.0
+            if norm_slope > 0.003
+            else 0.0
+        )
+        flat_penalty = -15.0 if abs(norm_slope) < 0.002 and ratio > 0.92 else 0.0
+        atr_score = float(max(0.0, min(100.0, level + trend_bonus + flat_penalty)))
+
+    range_score = _tightening_trend_score(daily_range)
+    deep_score = _score_lower_is_better(vol_ratio_deep, good=0.62, ok=0.78, bad=0.95)
+    range_blend = range_score * 0.72 + deep_score * 0.28
+    if atr_score < 48:
+        return float(max(0.0, min(100.0, max(atr_score, range_blend * 0.94))))
+    return float(max(0.0, min(100.0, atr_score * 0.52 + range_blend * 0.48)))
+
+
+def _consolidation_structure_score(
+    close: pd.Series,
+    high: pd.Series,
+    low: pd.Series,
+    resistance: float,
+) -> float:
+    if resistance <= 0:
+        return 30.0
+    window = 35
+    c = close.tail(window)
+    h = high.tail(window)
+    l = low.tail(window)
+    if len(c) < 15:
+        return 35.0
+    under_res = float((c < resistance * 0.995).mean())
+    if under_res < 0.65:
+        return 38.0
+    mid = len(l) // 2
+    low_first = float(l.head(mid).min())
+    low_second = float(l.tail(len(l) - mid).min())
+    if low_second >= low_first * 1.002:
+        hl_score = 82.0
+    elif low_second >= low_first * 0.995:
+        hl_score = 68.0
+    elif low_second >= low_first * 0.98:
+        hl_score = 48.0
+    else:
+        hl_score = 28.0
+    band = (resistance - float(c.min())) / resistance
+    band_score = _score_mid_band(band, low=0.06, high=0.18)
+    range_cv = float(c.pct_change().std()) if len(c) > 5 else 0.02
+    if 0.004 <= range_cv <= 0.018:
+        cv_score = 80.0
+    elif range_cv < 0.004:
+        cv_score = 42.0
+    else:
+        cv_score = 35.0
+    return float(min(100.0, band_score * 0.35 + hl_score * 0.35 + cv_score * 0.30))
+
+
+def _volume_dryup_trend_score(volume: pd.Series) -> float:
+    v = volume.astype(float)
+    if len(v) < 25:
+        return 40.0
+    r5 = float(v.tail(5).mean())
+    r15 = float(v.tail(15).mean()) or r5
+    r30 = float(v.tail(30).mean()) or r15
+    short_ratio = r5 / r15 if r15 > 0 else 1.0
+    long_ratio = r15 / r30 if r30 > 0 else 1.0
+    level = _score_lower_is_better(short_ratio, good=0.70, ok=0.88, bad=1.05)
+    trend = _score_lower_is_better(long_ratio, good=0.78, ok=0.92, bad=1.08)
+    return float(min(100.0, level * 0.55 + trend * 0.45))
 
 
 def _tightening_trend_score(daily_range: pd.Series) -> float:

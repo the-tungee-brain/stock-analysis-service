@@ -32,7 +32,8 @@ def test_quiet_consolidation_passes_purity_filter():
     ]
     result = evaluate_emerging_leader("TEST", frame)
     assert result is not None
-    assert result.components.setup_purity_score >= 38
+    assert result.components.setup_purity_score >= 42
+    assert result.components.base_eligibility_signals >= 2
     assert not result.components.momentum_leader_like
     assert passes_emerging_leader_list(result)
     assert result.setup_stage in {"BASE_BUILDING", "TIGHTENING", "BREAKOUT_WATCH"}
@@ -66,13 +67,23 @@ def test_extended_stage_filtered_from_list():
 def test_tightening_stage_requires_compression():
     frame = _consolidation_frame()
     cap = float(frame["high"].tail(60).max())
-    for i in range(-25, 0):
-        frame.loc[frame.index[i], "high"] = cap * 0.99
-        frame.loc[frame.index[i], "close"] = cap * 0.94
-        frame.loc[frame.index[i], "low"] = cap * 0.91
-    frame.loc[frame.index[-5:], "high"] = cap * 0.988
-    frame.loc[frame.index[-5:], "close"] = cap * 0.965
+    for i in range(-30, 0):
+        frame.loc[frame.index[i], "high"] = cap * 0.992
+        frame.loc[frame.index[i], "close"] = cap * 0.945
+        frame.loc[frame.index[i], "low"] = cap * 0.928
+    for i in range(-14, 0):
+        mid = float(frame.loc[frame.index[i], "close"])
+        frame.loc[frame.index[i], ["high", "low", "open"]] = [
+            mid + 0.22,
+            mid - 0.22,
+            mid,
+        ]
+    frame.loc[frame.index[-40:-8], "volume"] *= 0.5
     result = evaluate_emerging_leader("TEST", frame)
     assert result is not None
-    assert result.components.dormancy_days >= 8
-    assert result.components.base_age >= 15
+    assert result.components.base_eligibility_signals >= 2
+    assert (
+        result.components.vol_contraction_trend >= 48
+        or result.components.tightening_trend >= 55
+    )
+    assert result.setup_stage in {"BASE_BUILDING", "TIGHTENING", "BREAKOUT_WATCH"}
