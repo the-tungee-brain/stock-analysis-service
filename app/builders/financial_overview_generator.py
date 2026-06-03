@@ -4,7 +4,19 @@ from dataclasses import dataclass
 from typing import Literal
 
 from app.builders.canonical_financial_metrics import CanonicalFinancialMetrics
-from app.models.company_research_models import FinancialScoreBreakdown
+from app.builders.financial_metrics_validation import validate_overview_result
+from app.builders.financial_score_percentiles import rank_label_for_score
+from app.builders.financial_sector_context import (
+    FinancialCompanyContext,
+    _CategorySignals,
+    archetype_observations,
+    build_verdict_phrase,
+    derive_profile,
+)
+from app.models.company_research_models import (
+    FinancialCategoryScore,
+    FinancialScoreBreakdown,
+)
 
 StrengthRating = Literal["strong", "solid", "mixed", "weak"]
 ObservationKind = Literal["strength", "risk"]
@@ -13,23 +25,6 @@ GROWTH_WEIGHT = 0.30
 PROFITABILITY_WEIGHT = 0.30
 CASH_FLOW_WEIGHT = 0.25
 BALANCE_SHEET_WEIGHT = 0.15
-
-RISKY_PROFILES = frozenset(
-    {
-        "High Growth / High Risk",
-        "Speculative Growth",
-        "Leveraged Turnaround",
-    }
-)
-STRONG_PROFILES = frozenset(
-    {
-        "Financially Strong",
-        "Profitable Compounder",
-        "Cash-Generating Value",
-        "Mature Stable Business",
-    }
-)
-
 
 @dataclass(frozen=True)
 class _CategoryProfile:
@@ -65,7 +60,9 @@ class ScoredObservation:
 class FinancialOverviewResult:
     profile: str
     score: int
+    financial_verdict: str
     score_explanation: str
+    business_context: str
     score_breakdown: FinancialScoreBreakdown
     rating: StrengthRating
     headline: str
@@ -92,8 +89,16 @@ class FinancialOverviewGenerator:
         self,
         symbol: str,
         canonical: CanonicalFinancialMetrics,
+        *,
+        sector: str | None = None,
+        industry: str | None = None,
     ) -> FinancialOverviewResult:
-        observations = self._build_observations(canonical)
+        ctx = FinancialCompanyContext(
+            symbol=symbol,
+            sector=sector,
+            industry=industry,
+        )
+        observations = self._build_observations(canonical, ctx)
 
         strengths = self._top_observations(
             [o for o in observations if o.kind == "strength"],
@@ -106,25 +111,25 @@ class FinancialOverviewGenerator:
 
         breakdown = self._category_scores_0_100(canonical)
         score = self._weighted_overall_score(breakdown)
-        profile = self._align_profile_with_score(
-            self._derive_profile(canonical),
-            score,
-            breakdown,
-        )
+        signals = self._category_signals(canonical)
+        profile = derive_profile(canonical, ctx, signals)
         rating = self._rating_from_score(score)
-        score_explanation = self._build_score_explanation(
+        financial_verdict = self._build_financial_verdict(
             canonical,
             breakdown,
+            ctx,
             strengths,
             risks,
         )
         headline = self._headline(symbol, canonical)
-        highlights = self._build_highlights(canonical)
+        highlights = self._build_highlights(canonical, ctx)
 
-        return FinancialOverviewResult(
+        result = FinancialOverviewResult(
             profile=profile,
             score=score,
-            score_explanation=score_explanation,
+            financial_verdict=financial_verdict,
+            score_explanation=financial_verdict,
+            business_context=ctx.business_context_label,
             score_breakdown=breakdown,
             rating=rating,
             headline=headline,
@@ -132,6 +137,8 @@ class FinancialOverviewGenerator:
             risks=risks,
             highlights=highlights[: self.MAX_HIGHLIGHTS],
         )
+        validate_overview_result(result, canonical, ctx)
+        return result
 
     @staticmethod
     def _is_high_growth_cash_story(c: CanonicalFinancialMetrics) -> bool:
@@ -139,8 +146,21 @@ class FinancialOverviewGenerator:
         cash_pressure = c.free_cash_flow_latest is not None and c.free_cash_flow_latest < 0
         return high_growth and cash_pressure
 
-    def _build_observations(self, c: CanonicalFinancialMetrics) -> list[ScoredObservation]:
+    def _build_observations(
+        self,
+        c: CanonicalFinancialMetrics,
+        ctx: FinancialCompanyContext,
+    ) -> list[ScoredObservation]:
         out: list[ScoredObservation] = []
+        for text, kind, materiality, delta in archetype_observations(c, ctx):
+            out.append(
+                ScoredObservation(
+                    text=text,
+                    kind=kind,  # type: ignore[arg-type]
+                    materiality=materiality,
+                    score_delta=delta,
+                )
+            )
         out.extend(self._revenue_growth_observations(c))
         out.extend(self._gross_margin_observations(c))
         out.extend(self._net_margin_observations(c))
@@ -148,8 +168,16 @@ class FinancialOverviewGenerator:
         out.extend(self._current_ratio_observations(c))
         out.extend(self._free_cash_flow_observations(c))
         out.extend(self._roe_observations(c))
-        out.extend(self._payout_observations(c))
-        return [o for o in out if not self._is_banned(o.text)]
+        if ctx.allows_dividend_commentary:
+            out.extend(self._payout_observations(c))
+        filtered = [o for o in out if not self._is_banned(o.text)]
+        if not ctx.allows_dividend_commentary:
+            filtered = [
+                o
+                for o in filtered
+                if "payout" not in o.text.lower() and "dividend" not in o.text.lower()
+            ]
+        return filtered
 
     def _revenue_growth_observations(
         self, c: CanonicalFinancialMetrics
@@ -510,7 +538,11 @@ class FinancialOverviewGenerator:
                 )
         return out
 
-    def _build_highlights(self, c: CanonicalFinancialMetrics) -> list[str]:
+    def _build_highlights(
+        self,
+        c: CanonicalFinancialMetrics,
+        ctx: FinancialCompanyContext,
+    ) -> list[str]:
         lines: list[str] = []
         rev = c.format_revenue_growth()
         if rev is not None:
@@ -533,9 +565,18 @@ class FinancialOverviewGenerator:
             lines.append(f"Free cash flow {fcf} (latest period).")
         if c.return_on_equity_pct is not None:
             lines.append(f"ROE {c.return_on_equity_pct:.1f}%.")
-        if c.payout_ratio_pct is not None:
+        if ctx.allows_dividend_commentary and c.payout_ratio_pct is not None:
             lines.append(f"Payout ratio {c.payout_ratio_pct:.0f}%.")
         return lines
+
+    def _category_signals(self, c: CanonicalFinancialMetrics) -> _CategorySignals:
+        profile = self._category_profile(c)
+        return _CategorySignals(
+            growth=profile.growth,
+            profitability=profile.profitability,
+            balance_sheet=profile.balance_sheet,
+            cash_flow=profile.cash_flow,
+        )
 
     def _category_profile(self, c: CanonicalFinancialMetrics) -> _CategoryProfile:
         growth = 0.0
@@ -634,141 +675,52 @@ class FinancialOverviewGenerator:
                 return 50
             return self._normalized_to_score(profile.cash_flow)
 
+        def wrap(value: int) -> FinancialCategoryScore:
+            return FinancialCategoryScore(
+                score=value,
+                rank_label=rank_label_for_score(value),
+            )
+
         return FinancialScoreBreakdown(
-            growth=growth_score(),
-            profitability=profitability_score(),
-            balance_sheet=balance_score(),
-            cash_flow=cash_score(),
+            growth=wrap(growth_score()),
+            profitability=wrap(profitability_score()),
+            balance_sheet=wrap(balance_score()),
+            cash_flow=wrap(cash_score()),
         )
 
     @staticmethod
     def _weighted_overall_score(breakdown: FinancialScoreBreakdown) -> int:
         composite = (
-            GROWTH_WEIGHT * breakdown.growth
-            + PROFITABILITY_WEIGHT * breakdown.profitability
-            + CASH_FLOW_WEIGHT * breakdown.cash_flow
-            + BALANCE_SHEET_WEIGHT * breakdown.balance_sheet
+            GROWTH_WEIGHT * breakdown.growth.score
+            + PROFITABILITY_WEIGHT * breakdown.profitability.score
+            + CASH_FLOW_WEIGHT * breakdown.cash_flow.score
+            + BALANCE_SHEET_WEIGHT * breakdown.balance_sheet.score
         )
         return int(round(max(0, min(100, composite))))
 
-    @staticmethod
-    def _align_profile_with_score(
-        profile: str,
-        score: int,
-        breakdown: FinancialScoreBreakdown,
-    ) -> str:
-        if score >= 68 and profile in RISKY_PROFILES:
-            if breakdown.profitability >= 58 and breakdown.cash_flow >= 55:
-                return "Profitable Compounder"
-            if breakdown.growth >= 65:
-                return "High Growth / High Risk"
-            return "Financially Strong"
-
-        if score < 42 and profile in STRONG_PROFILES:
-            if breakdown.balance_sheet <= 40:
-                return "Leveraged Turnaround"
-            return "High Growth / High Risk"
-
-        if score >= 55 and profile == "Speculative Growth":
-            if breakdown.profitability >= 55:
-                return "High Growth / High Risk"
-            return profile
-
-        if score >= 62 and profile == "Leveraged Turnaround":
-            return "Profitable Compounder"
-
-        return profile
-
-    def _derive_profile(self, c: CanonicalFinancialMetrics) -> str:
-        profile = self._category_profile(c)
-        rg = c.revenue_growth_yoy
-        nm = c.net_margin_pct
-        gm = c.gross_margin_pct
-        de = c.debt_to_equity
-        fcf = c.free_cash_flow_latest
-
-        high_growth = rg is not None and rg > 50
-        growth_risk = (nm is not None and nm < 0) or (fcf is not None and fcf < 0)
-        commodity_like = gm is not None and gm < 30
-
-        if high_growth and growth_risk:
-            return "High Growth / High Risk"
-        if high_growth and (nm is None or nm < 8):
-            return "Speculative Growth"
-        if (
-            profile.profitability >= 0.6
-            and profile.growth >= 0.4
-            and profile.cash_flow >= 0.5
-        ):
-            return "Profitable Compounder"
-        if (
-            profile.profitability >= 0.6
-            and profile.cash_flow >= 0.5
-            and profile.balance_sheet >= 0.2
-            and (rg is None or abs(rg) < 12)
-        ):
-            return "Financially Strong"
-        if (
-            profile.profitability >= 0.5
-            and profile.cash_flow >= 0.4
-            and profile.balance_sheet >= 0.2
-            and (rg is None or abs(rg) < 6)
-        ):
-            return "Mature Stable Business"
-        if (
-            profile.cash_flow >= 0.5
-            and profile.profitability >= 0.2
-            and (rg is None or rg < 15)
-            and ((c.payout_ratio_pct or 0) >= 35 or profile.growth <= 0.2)
-        ):
-            return "Cash-Generating Value"
-        if (rg is not None and rg < 0) and profile.profitability < 0:
-            return "Leveraged Turnaround"
-        if de is not None and de > 2 and commodity_like:
-            return "Leveraged Turnaround"
-
-        composite = (
-            GROWTH_WEIGHT * profile.growth
-            + PROFITABILITY_WEIGHT * profile.profitability
-            + CASH_FLOW_WEIGHT * profile.cash_flow
-            + BALANCE_SHEET_WEIGHT * profile.balance_sheet
-        )
-        if composite >= 0.55:
-            return "Financially Strong"
-        if composite >= 0.3:
-            return "Profitable Compounder"
-        if composite <= -0.25 and high_growth:
-            return "High Growth / High Risk"
-        if composite <= -0.25:
-            return "Leveraged Turnaround"
-        if high_growth:
-            return "Speculative Growth"
-        return "Profitable Compounder"
-
-    def _build_score_explanation(
+    def _build_financial_verdict(
         self,
         canonical: CanonicalFinancialMetrics,
         breakdown: FinancialScoreBreakdown,
+        ctx: FinancialCompanyContext,
         strengths: list[str],
         risks: list[str],
     ) -> str:
         positive = self._score_drivers(breakdown, canonical, positive=True)
         negative = self._score_drivers(breakdown, canonical, positive=False)
-
-        if positive and negative:
-            return (
-                f"{self._join_phrases(positive)} are offset by "
-                f"{self._join_phrases(negative)}."
+        if positive or negative:
+            return build_verdict_phrase(positive, negative, ctx)
+        if strengths and risks:
+            return build_verdict_phrase(
+                [strengths[0].rstrip(".")],
+                [risks[0].rstrip(".")],
+                ctx,
             )
-        if positive:
-            return f"{self._join_phrases(positive)} support the overall financial score."
-        if negative:
-            return f"{self._join_phrases(negative)} weigh on the overall financial score."
         if strengths:
             return strengths[0]
         if risks:
             return risks[0]
-        return "Mixed signals across growth, profitability, cash flow, and leverage."
+        return build_verdict_phrase([], [], ctx)
 
     def _score_drivers(
         self,
@@ -784,57 +736,69 @@ class FinancialOverviewGenerator:
                 drivers.append((weight, phrase))
 
         if positive:
-            if breakdown.growth >= 72:
+            if breakdown.growth.score >= 72:
                 rev = canonical.format_revenue_growth()
                 add(
                     True,
                     f"exceptional revenue growth ({rev})" if rev else "exceptional revenue growth",
-                    breakdown.growth,
+                    breakdown.growth.score,
                 )
-            elif breakdown.growth >= 58:
-                add(True, "solid revenue growth", breakdown.growth)
-            if breakdown.profitability >= 72:
+            elif breakdown.growth.score >= 58:
+                add(True, "solid revenue growth", breakdown.growth.score)
+            if breakdown.profitability.score >= 72:
                 net = canonical.format_net_margin()
                 add(
                     True,
                     f"strong margins ({net})" if net else "strong profitability",
-                    breakdown.profitability,
+                    breakdown.profitability.score,
                 )
-            elif breakdown.profitability >= 58:
-                add(True, "healthy profitability", breakdown.profitability)
-            if breakdown.cash_flow >= 72:
+            elif breakdown.profitability.score >= 58:
+                add(True, "healthy profitability", breakdown.profitability.score)
+            if breakdown.cash_flow.score >= 72:
                 fcf = canonical.format_free_cash_flow()
                 add(
                     True,
                     f"strong free cash flow ({fcf})" if fcf else "strong free cash flow",
-                    breakdown.cash_flow,
+                    breakdown.cash_flow.score,
                 )
-            elif breakdown.cash_flow >= 58:
-                add(True, "positive cash generation", breakdown.cash_flow)
-            if breakdown.balance_sheet >= 68:
-                add(True, "conservative leverage and liquidity", breakdown.balance_sheet)
+            elif breakdown.cash_flow.score >= 58:
+                add(True, "positive cash generation", breakdown.cash_flow.score)
+            if breakdown.balance_sheet.score >= 68:
+                add(
+                    True,
+                    "conservative leverage and liquidity",
+                    breakdown.balance_sheet.score,
+                )
         else:
-            if breakdown.growth <= 38:
-                add(True, "weak or contracting revenue", 100 - breakdown.growth)
-            if breakdown.profitability <= 35:
+            if breakdown.growth.score <= 38:
+                add(True, "weak or contracting revenue", 100 - breakdown.growth.score)
+            if breakdown.profitability.score <= 35:
                 net = canonical.format_net_margin()
                 add(
                     True,
                     f"deep losses ({net})" if net and (canonical.net_margin_pct or 0) < -20 else "weak profitability",
-                    100 - breakdown.profitability,
+                    100 - breakdown.profitability.score,
                 )
-            elif breakdown.profitability <= 45:
-                add(True, "thin profitability", 100 - breakdown.profitability)
-            if breakdown.cash_flow <= 35:
-                add(True, "negative free cash flow", 100 - breakdown.cash_flow)
-            if breakdown.balance_sheet <= 38:
+            elif breakdown.profitability.score <= 45:
+                add(True, "thin profitability", 100 - breakdown.profitability.score)
+            if breakdown.cash_flow.score <= 35:
+                add(True, "negative free cash flow", 100 - breakdown.cash_flow.score)
+            if breakdown.balance_sheet.score <= 38:
                 debt = canonical.format_debt_equity()
                 if debt and (canonical.debt_to_equity or 0) > 2:
-                    add(True, f"elevated leverage ({debt})", 100 - breakdown.balance_sheet)
+                    add(
+                        True,
+                        f"elevated leverage ({debt})",
+                        100 - breakdown.balance_sheet.score,
+                    )
                 elif (canonical.current_ratio or 2) < 1:
-                    add(True, "liquidity pressure", 100 - breakdown.balance_sheet)
+                    add(True, "liquidity pressure", 100 - breakdown.balance_sheet.score)
                 else:
-                    add(True, "balance-sheet strain", 100 - breakdown.balance_sheet)
+                    add(
+                        True,
+                        "balance-sheet strain",
+                        100 - breakdown.balance_sheet.score,
+                    )
 
         drivers.sort(key=lambda item: item[0], reverse=True)
         return [phrase for _, phrase in drivers[:2]]

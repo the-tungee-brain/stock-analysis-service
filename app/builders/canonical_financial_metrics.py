@@ -76,6 +76,8 @@ class CanonicalFinancialMetrics:
             ("Debt / equity", self.format_debt_equity()),
             ("Current ratio", self.format_current_ratio()),
         ]
+        if self.return_on_equity_pct is not None:
+            rows.append(("Return on equity", f"{self.return_on_equity_pct:.1f}%"))
         metrics: list[FundamentalMetric] = []
         for label, value in rows:
             if value is None:

@@ -180,11 +180,18 @@ class YFinanceFinancialsBuilder:
     ) -> FinancialStrength:
         snapshot = annual or quarterly
         canonical = build_canonical_metrics(info=info, snapshot=snapshot)
-        overview = FinancialOverviewGenerator().generate(symbol, canonical)
-        return FinancialStrength(
+        overview = FinancialOverviewGenerator().generate(
+            symbol,
+            canonical,
+            sector=info.get("sector"),
+            industry=info.get("industry"),
+        )
+        strength = FinancialStrength(
             profile=overview.profile,
             score=overview.score,
-            score_explanation=overview.score_explanation,
+            financial_verdict=overview.financial_verdict,
+            score_explanation=overview.financial_verdict,
+            business_context=overview.business_context,
             score_breakdown=overview.score_breakdown,
             rating=overview.rating,
             headline=overview.headline,
@@ -193,6 +200,21 @@ class YFinanceFinancialsBuilder:
             highlights=overview.highlights,
             key_metrics=canonical.to_key_metrics(),
         )
+        from app.builders.financial_metrics_validation import (
+            validate_strength_matches_canonical,
+        )
+        from app.builders.financial_sector_context import FinancialCompanyContext
+
+        validate_strength_matches_canonical(
+            strength,
+            canonical,
+            ctx=FinancialCompanyContext(
+                symbol=symbol,
+                sector=info.get("sector"),
+                industry=info.get("industry"),
+            ),
+        )
+        return strength
 
     @staticmethod
     def _line_values(

@@ -19,11 +19,12 @@ def test_overall_score_matches_weighted_breakdown():
         free_cash_flow_yoy_pct=8.0,
     )
     result = FinancialOverviewGenerator().generate("TEST", canonical)
+    b = result.score_breakdown
     expected = round(
-        GROWTH_WEIGHT * result.score_breakdown.growth
-        + PROFITABILITY_WEIGHT * result.score_breakdown.profitability
-        + CASH_FLOW_WEIGHT * result.score_breakdown.cash_flow
-        + BALANCE_SHEET_WEIGHT * result.score_breakdown.balance_sheet
+        GROWTH_WEIGHT * b.growth.score
+        + PROFITABILITY_WEIGHT * b.profitability.score
+        + CASH_FLOW_WEIGHT * b.cash_flow.score
+        + BALANCE_SHEET_WEIGHT * b.balance_sheet.score
     )
     assert result.score == expected
     assert result.profile

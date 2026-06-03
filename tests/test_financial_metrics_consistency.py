@@ -32,7 +32,7 @@ def test_key_metrics_and_narrative_share_revenue_growth_display():
     strength = make_financial_strength(
         profile=overview.profile,
         score=overview.score,
-        score_explanation=overview.score_explanation,
+        financial_verdict=overview.financial_verdict,
         score_breakdown=overview.score_breakdown,
         rating=overview.rating,
         headline=overview.headline,
@@ -84,7 +84,7 @@ def test_distressed_profile_debt_display_matches_key_metric():
     strength = make_financial_strength(
         profile=overview.profile,
         score=overview.score,
-        score_explanation=overview.score_explanation,
+        financial_verdict=overview.financial_verdict,
         score_breakdown=overview.score_breakdown,
         rating=overview.rating,
         headline=overview.headline,
@@ -110,13 +110,24 @@ def test_verdict_uses_weighted_categories_not_balance_sheet_alone():
         free_cash_flow_latest=6_000_000_000,
         current_ratio=0.9,
     )
-    verdict = FinancialOverviewGenerator()._derive_profile(canonical)
-    assert verdict in {
+    from app.builders.financial_sector_context import (
+        FinancialCompanyContext,
+        derive_profile,
+    )
+
+    gen = FinancialOverviewGenerator()
+    signals = gen._category_signals(canonical)
+    profile = derive_profile(
+        canonical,
+        FinancialCompanyContext(symbol="TEST"),
+        signals,
+    )
+    assert profile in {
         "Profitable Compounder",
         "Financially Strong",
         "High Growth / High Risk",
     }
-    assert verdict != "Leveraged Turnaround"
+    assert profile != "Leveraged Turnaround"
 
 
 def test_mismatching_key_metric_values_fail_validation():

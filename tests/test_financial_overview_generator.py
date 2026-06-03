@@ -2,8 +2,19 @@ from app.builders.canonical_financial_metrics import CanonicalFinancialMetrics
 from app.builders.financial_overview_generator import FinancialOverviewGenerator
 
 
-def _generate(metrics: CanonicalFinancialMetrics, symbol: str = "TEST") -> tuple:
-    result = FinancialOverviewGenerator().generate(symbol, metrics)
+def _generate(
+    metrics: CanonicalFinancialMetrics,
+    symbol: str = "TEST",
+    *,
+    sector: str | None = None,
+    industry: str | None = None,
+) -> tuple:
+    result = FinancialOverviewGenerator().generate(
+        symbol,
+        metrics,
+        sector=sector,
+        industry=industry,
+    )
     return result.headline, result.strengths, result.risks, result.profile, result.score
 
 
@@ -18,7 +29,9 @@ def test_hypergrowth_ai_profile_differs_from_mature_utility():
             free_cash_flow_latest=-2_000_000_000,
             free_cash_flow_yoy_pct=-15,
         ),
-        symbol="PLTR",
+        symbol="NVDA",
+        sector="Technology",
+        industry="Semiconductors",
     )
     mature, mature_strengths, mature_risks, mature_profile, mature_score = _generate(
         CanonicalFinancialMetrics(
@@ -33,6 +46,8 @@ def test_hypergrowth_ai_profile_differs_from_mature_utility():
             fcf_dividend_coverage=1.8,
         ),
         symbol="NEE",
+        sector="Utilities",
+        industry="Utilities - Regulated Electric",
     )
 
     assert hyper_profile in {"Speculative Growth", "High Growth / High Risk"}

@@ -129,13 +129,20 @@ class FinancialStatementsSnapshot(BaseModel):
     )
 
 
+class FinancialCategoryScore(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    score: int = Field(ge=0, le=100)
+    rank_label: str = Field(serialization_alias="rankLabel")
+
+
 class FinancialScoreBreakdown(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    growth: int = Field(ge=0, le=100)
-    profitability: int = Field(ge=0, le=100)
-    balance_sheet: int = Field(ge=0, le=100, serialization_alias="balanceSheet")
-    cash_flow: int = Field(ge=0, le=100, serialization_alias="cashFlow")
+    growth: FinancialCategoryScore
+    profitability: FinancialCategoryScore
+    balance_sheet: FinancialCategoryScore = Field(serialization_alias="balanceSheet")
+    cash_flow: FinancialCategoryScore = Field(serialization_alias="cashFlow")
 
 
 class FinancialStrength(BaseModel):
@@ -143,7 +150,9 @@ class FinancialStrength(BaseModel):
 
     profile: str
     score: int = Field(ge=0, le=100)
+    financial_verdict: str = Field(serialization_alias="financialVerdict")
     score_explanation: str = Field(serialization_alias="scoreExplanation")
+    business_context: str = Field(default="", serialization_alias="businessContext")
     score_breakdown: FinancialScoreBreakdown = Field(
         serialization_alias="scoreBreakdown",
     )
