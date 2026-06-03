@@ -36,7 +36,15 @@ def build_trade_decision(symbol: str) -> TradeDecision:
             ranking_rank = int(row["rank"])
         universe_count = store.count_ranking_results(run_id) or None
 
-    pattern = build_pattern_intelligence_payload(symbol_upper)
+    loaded_model = None
+    try:
+        from models.prediction_service import load_deployed_model
+
+        loaded_model = load_deployed_model()
+    except Exception:
+        pass
+
+    pattern = build_pattern_intelligence_payload(symbol_upper, loaded_model)
     return _decision_from_pattern(
         symbol_upper=symbol_upper,
         as_of_date=as_of_date or (pattern.as_of_date if pattern else None),
