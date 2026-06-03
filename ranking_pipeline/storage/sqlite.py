@@ -202,6 +202,37 @@ class RankingStore:
             ).fetchone()
         return row["run_id"] if row else None
 
+    def get_symbol_ranking_row(
+        self,
+        run_id: str,
+        symbol: str,
+    ) -> dict[str, Any] | None:
+        sym = symbol.strip().upper()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM ranking_results WHERE run_id = ? AND symbol = ?",
+                (run_id, sym),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "symbol": row["symbol"],
+            "rank": row["rank"],
+            "composite_score": row["composite_score"],
+            "ml_probability": row["ml_probability"],
+            "expected_excess_return": row["expected_excess_return"],
+            "final_score": row["final_score"],
+            "contributions": json.loads(row["contributions_json"]),
+        }
+
+    def count_ranking_results(self, run_id: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM ranking_results WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        return int(row["n"]) if row else 0
+
     def get_ranking_results(
         self,
         run_id: str,
