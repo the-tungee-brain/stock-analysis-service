@@ -175,14 +175,18 @@ class FinancialsPackage(BaseModel):
     strength: FinancialStrength
 
 
+class InvestmentThesis(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    bull_case: list[str] = Field(default_factory=list, serialization_alias="bullCase")
+    bear_case: list[str] = Field(default_factory=list, serialization_alias="bearCase")
+
+
 class FundamentalsOverview(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    at_a_glance: str = Field(serialization_alias="atAGlance")
-    valuation_take: str = Field(serialization_alias="valuationTake")
-    strengths: list[str] = Field(default_factory=list)
-    concerns: list[str] = Field(default_factory=list)
-    assumptions: str = ""
+    valuation_summary: str = Field(serialization_alias="valuationSummary")
+    investment_thesis: InvestmentThesis = Field(serialization_alias="investmentThesis")
 
 
 class FundamentalsBlock(BaseModel):
