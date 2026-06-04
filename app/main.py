@@ -79,6 +79,9 @@ from app.api.momentum_breakout_performance_route import (
 from app.api.momentum_breakout_research_route import (
     router as momentum_breakout_research_router,
 )
+from app.api.momentum_breakout_scan_route import (
+    router as momentum_breakout_scan_router,
+)
 from app.api.wheel_backtest_route import router as wheel_backtest_router
 from app.api.get_account_plan_route import router as get_account_plan_router
 from app.api.watchlist_routes import router as watchlist_router
@@ -148,6 +151,7 @@ protected_api.include_router(strategy_playbook_ask_router)
 protected_api.include_router(wheel_backtest_router)
 protected_api.include_router(momentum_breakout_research_router)
 protected_api.include_router(momentum_breakout_alert_router)
+protected_api.include_router(momentum_breakout_scan_router)
 protected_api.include_router(momentum_breakout_notification_router)
 protected_api.include_router(momentum_breakout_performance_router)
 protected_api.include_router(momentum_breakout_feature_status_router)
