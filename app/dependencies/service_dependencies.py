@@ -33,6 +33,15 @@ from app.services.strategy.strategy_stock_screener_service import (
 from app.services.strategy.strategy_stock_suggestion_service import (
     StrategyStockSuggestionService,
 )
+from app.services.strategy.momentum_breakout_alert_refresh_service import (
+    MomentumBreakoutAlertRefreshService,
+)
+from app.services.strategy.momentum_breakout_alert_service import (
+    MomentumBreakoutAlertService,
+)
+from app.services.strategy.momentum_breakout_research_service import (
+    MomentumBreakoutResearchService,
+)
 from app.services.strategy.wheel_backtest_service import WheelBacktestService
 from app.services.account_deletion_service import AccountDeletionService
 from app.services.research_overview_service import ResearchOverviewService
@@ -163,6 +172,24 @@ def get_account_deletion_service(request: Request) -> AccountDeletionService:
 
 def get_wheel_backtest_service(request: Request) -> WheelBacktestService:
     return request.app.state.wheel_backtest_service
+
+
+def get_momentum_breakout_research_service(
+    request: Request,
+) -> MomentumBreakoutResearchService:
+    return request.app.state.momentum_breakout_research_service
+
+
+def get_momentum_breakout_alert_service(
+    request: Request,
+) -> MomentumBreakoutAlertService:
+    return request.app.state.momentum_breakout_alert_service
+
+
+def get_momentum_breakout_alert_refresh_service(
+    request: Request,
+) -> MomentumBreakoutAlertRefreshService:
+    return request.app.state.momentum_breakout_alert_refresh_service
 
 
 def get_research_overview_service(request: Request) -> ResearchOverviewService:

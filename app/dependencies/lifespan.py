@@ -1,3 +1,4 @@
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -103,6 +104,27 @@ from app.services.strategy.strategy_stock_screener_service import (
 )
 from app.services.strategy.strategy_stock_suggestion_service import (
     StrategyStockSuggestionService,
+)
+from trade_planner.alerts.lifecycle_service import AlertLifecycleService
+from app.adapters.strategy.momentum_breakout_alert_store_factory import (
+    build_momentum_breakout_alert_store,
+)
+from app.jobs.momentum_breakout_alert_scheduler import (
+    is_scheduler_enabled,
+    resolve_refresh_interval_sec,
+    run_momentum_breakout_alert_scheduler,
+)
+from app.services.strategy.momentum_breakout_alert_price_provider import (
+    FinnhubMomentumBreakoutPriceProvider,
+)
+from app.services.strategy.momentum_breakout_alert_refresh_service import (
+    MomentumBreakoutAlertRefreshService,
+)
+from app.services.strategy.momentum_breakout_alert_service import (
+    MomentumBreakoutAlertService,
+)
+from app.services.strategy.momentum_breakout_research_service import (
+    MomentumBreakoutResearchService,
 )
 from app.services.strategy.wheel_backtest_service import WheelBacktestService
 
@@ -405,6 +427,19 @@ async def lifespan(app: FastAPI):
     )
     strategy_stock_screener_service = StrategyStockScreenerService()
     wheel_backtest_service = WheelBacktestService(yfinance_adapter=yfinance_adapter)
+    momentum_breakout_research_service = MomentumBreakoutResearchService()
+    mb_alert_store = build_momentum_breakout_alert_store(powerpocketdb_client)
+    momentum_breakout_alert_lifecycle_service = AlertLifecycleService(mb_alert_store)
+    momentum_breakout_alert_price_provider = FinnhubMomentumBreakoutPriceProvider(
+        finnhub_builder
+    )
+    momentum_breakout_alert_refresh_service = MomentumBreakoutAlertRefreshService(
+        lifecycle_service=momentum_breakout_alert_lifecycle_service,
+        price_provider=momentum_breakout_alert_price_provider,
+    )
+    momentum_breakout_alert_service = MomentumBreakoutAlertService(
+        lifecycle_service=momentum_breakout_alert_lifecycle_service,
+    )
 
     try:
         from models.prediction_service import load_deployed_model
@@ -455,9 +490,29 @@ async def lifespan(app: FastAPI):
     app.state.strategy_stock_suggestion_service = strategy_stock_suggestion_service
     app.state.strategy_stock_screener_service = strategy_stock_screener_service
     app.state.wheel_backtest_service = wheel_backtest_service
+    app.state.momentum_breakout_research_service = momentum_breakout_research_service
+    app.state.momentum_breakout_alert_service = momentum_breakout_alert_service
+    app.state.momentum_breakout_alert_refresh_service = (
+        momentum_breakout_alert_refresh_service
+    )
+
+    scheduler_task = None
+    if is_scheduler_enabled():
+        scheduler_task = asyncio.create_task(
+            run_momentum_breakout_alert_scheduler(
+                momentum_breakout_alert_refresh_service,
+                interval_sec=resolve_refresh_interval_sec(),
+            )
+        )
 
     try:
         yield
     finally:
+        if scheduler_task is not None:
+            scheduler_task.cancel()
+            try:
+                await scheduler_task
+            except asyncio.CancelledError:
+                pass
         redis_client.close()
         session.close()
