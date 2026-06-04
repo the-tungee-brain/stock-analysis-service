@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from trade_planner.alerts.lifecycle_models import AlertLifecycleStatus
+from trade_planner.alerts.market_calendar import latest_completed_bar_trading_day
 from trade_planner.alerts.lifecycle_service import AlertLifecycleService
 from trade_planner.alerts.lifecycle_store import DuplicateActiveMomentumAlertError
 from trade_planner.setups.momentum_breakout import MomentumBreakoutSetup
@@ -48,9 +49,8 @@ def _record(
     symbol: str = "NVDA",
     signal_date: date | None = None,
 ) -> object:
-    today = date.today()
-    sig = signal_date or today
     created = datetime.now(timezone.utc)
+    sig = signal_date or latest_completed_bar_trading_day(created)
     return AlertLifecycleService.build_record(
         user_id=USER,
         symbol=symbol,
@@ -153,6 +153,7 @@ class TestScheduledStyleRefresh:
     def test_pending_expires_on_refresh(
         self, lifecycle: AlertLifecycleService
     ) -> None:
+        created_at = datetime(2020, 1, 1, 21, 0, tzinfo=timezone.utc)
         record = AlertLifecycleService.build_record(
             user_id=USER,
             symbol="NVDA",
@@ -161,7 +162,7 @@ class TestScheduledStyleRefresh:
             stop_price=95.0,
             target_price=110.0,
             entry_is_stop=True,
-            created_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            created_at=created_at,
         )
         created = lifecycle.create_alert(record)
         refresh = MomentumBreakoutAlertRefreshService(

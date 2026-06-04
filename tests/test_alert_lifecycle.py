@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -32,7 +33,7 @@ def _record(
     target: float = 110.0,
     signal_date: date | None = None,
 ) -> object:
-    sig = signal_date or date(2024, 6, 1)
+    sig = signal_date or date(2024, 6, 3)
     return AlertLifecycleService.build_record(
         user_id=USER,
         symbol=symbol,
@@ -41,7 +42,7 @@ def _record(
         stop_price=stop,
         target_price=target,
         entry_is_stop=True,
-        created_at=datetime(2024, 6, 1, 15, 0, tzinfo=timezone.utc),
+        created_at=datetime(2024, 6, 3, 15, 0, tzinfo=timezone.utc),
     )
 
 
@@ -96,10 +97,20 @@ class TestOpenStopHit:
 
 class TestPendingExpires:
     def test_expired_after_window(self, lifecycle: AlertLifecycleService) -> None:
-        created = lifecycle.create_alert(
-            _record(lifecycle, signal_date=date(2024, 6, 1))
+        eastern = ZoneInfo("America/New_York")
+        created_at = datetime(2024, 6, 3, 15, 0, tzinfo=eastern).astimezone(timezone.utc)
+        record = AlertLifecycleService.build_record(
+            user_id=USER,
+            symbol="NVDA",
+            signal_date=date(2024, 6, 3),
+            entry_price=100.0,
+            stop_price=95.0,
+            target_price=110.0,
+            entry_is_stop=True,
+            created_at=created_at,
         )
-        after_expiry = datetime(2024, 6, 3, 0, 0, tzinfo=timezone.utc)
+        created = lifecycle.create_alert(record)
+        after_expiry = datetime(2024, 6, 4, 21, 0, tzinfo=eastern).astimezone(timezone.utc)
         updated = lifecycle.update_with_latest_price(
             USER,
             created.alert_id,
@@ -133,7 +144,7 @@ class TestLifecycleEventHistory:
             created.alert_id,
             symbol="NVDA",
             price=100.0,
-            timestamp=datetime(2024, 6, 2, 12, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2024, 6, 3, 16, 0, tzinfo=timezone.utc),
         )
         events = lifecycle.list_lifecycle_events(USER, created.alert_id)
         assert len(events) >= 2

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -35,6 +35,7 @@ from trade_planner.alerts.paper_trade_store import InMemoryPaperTradePerformance
 
 
 def _build_record(**kwargs):
+    created_at = datetime(2025, 1, 10, 21, 0, tzinfo=timezone.utc)
     defaults = dict(
         user_id="user-1",
         symbol="AAPL",
@@ -43,6 +44,7 @@ def _build_record(**kwargs):
         stop_price=95.0,
         target_price=110.0,
         entry_is_stop=True,
+        created_at=created_at,
     )
     defaults.update(kwargs)
     return AlertLifecycleService.build_record(**defaults)

@@ -9,6 +9,7 @@ from typing import Any
 import oracledb
 
 from trade_planner.alerts.lifecycle_models import AlertLifecycleStatus
+from trade_planner.alerts.market_calendar import latest_completed_bar_trading_day
 from trade_planner.alerts.lifecycle_service import AlertLifecycleService
 from trade_planner.alerts.lifecycle_store import MomentumBreakoutAlertStore
 from trade_planner.alerts.paper_trade_store import PaperTradePerformanceStore
@@ -206,14 +207,16 @@ class MomentumBreakoutLaunchReadinessService:
 
     def _check_alert_store_writable(self) -> HealthCheckResult:
         try:
+            now = datetime.now(timezone.utc)
             record = AlertLifecycleService.build_record(
                 user_id=_PROBE_USER,
                 symbol="SPY",
-                signal_date=datetime.now(timezone.utc).date(),
+                signal_date=latest_completed_bar_trading_day(now),
                 entry_price=1.0,
                 stop_price=0.5,
                 target_price=2.0,
                 entry_is_stop=True,
+                created_at=now,
             )
             record = record.with_status(AlertLifecycleStatus.CANCELLED)
             self._alert_store.save(_PROBE_USER, record)
@@ -240,14 +243,16 @@ class MomentumBreakoutLaunchReadinessService:
             )
 
             svc = PaperTradePerformanceService(self._paper_store)
+            now = datetime.now(timezone.utc)
             record = AlertLifecycleService.build_record(
                 user_id=_PROBE_USER,
                 symbol="SPY",
-                signal_date=datetime.now(timezone.utc).date(),
+                signal_date=latest_completed_bar_trading_day(now),
                 entry_price=1.0,
                 stop_price=0.5,
                 target_price=2.0,
                 entry_is_stop=True,
+                created_at=now,
             )
             record = record.with_status(AlertLifecycleStatus.PENDING_ENTRY)
             svc.backfill_from_alert(record)

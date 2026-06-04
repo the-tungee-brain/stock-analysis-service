@@ -18,6 +18,7 @@ from trade_planner.research.features import capture_momentum_feature_snapshot
 from trade_planner.research.models import MarketRegime
 from trade_planner.research.regime import classify_market_regime
 from trade_planner.alerts.lifecycle_service import AlertLifecycleService
+from trade_planner.alerts.lifecycle_models import StaleMomentumSignalError
 from trade_planner.alerts.lifecycle_store import DuplicateActiveMomentumAlertError
 from trade_planner.alerts.risk_models import AlertGateAction
 from app.services.strategy.momentum_breakout_notification_emitter import (
@@ -199,6 +200,11 @@ class MomentumBreakoutAlertService:
                         alert_id=alert_id,
                     )
             except DuplicateActiveMomentumAlertError as exc:
+                price_alerts = [
+                    *price_alerts,
+                    f"Lifecycle: {exc}",
+                ]
+            except StaleMomentumSignalError as exc:
                 price_alerts = [
                     *price_alerts,
                     f"Lifecycle: {exc}",

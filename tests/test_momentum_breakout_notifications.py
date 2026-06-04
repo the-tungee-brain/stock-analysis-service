@@ -65,7 +65,7 @@ def _record(
     target: float = 110.0,
     signal_date: date | None = None,
 ) -> object:
-    sig = signal_date or date(2024, 6, 1)
+    sig = signal_date or date(2024, 6, 3)
     return AlertLifecycleService.build_record(
         user_id=USER,
         symbol=symbol,
@@ -74,7 +74,7 @@ def _record(
         stop_price=stop,
         target_price=target,
         entry_is_stop=True,
-        created_at=datetime(2024, 6, 1, 15, 0, tzinfo=timezone.utc),
+        created_at=datetime(2024, 6, 3, 15, 0, tzinfo=timezone.utc),
     )
 
 
@@ -202,6 +202,7 @@ class TestLifecycleNotifications:
         lifecycle: NotifyingAlertLifecycleService,
         notification_service: CompositeNotificationService,
     ) -> None:
+        created_at = datetime(2020, 1, 1, 21, 0, tzinfo=timezone.utc)
         record = AlertLifecycleService.build_record(
             user_id=USER,
             symbol="NVDA",
@@ -210,7 +211,7 @@ class TestLifecycleNotifications:
             stop_price=95.0,
             target_price=110.0,
             entry_is_stop=True,
-            created_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            created_at=created_at,
         )
         created = lifecycle.create_alert(record)
         lifecycle.update_with_latest_price(
@@ -218,7 +219,7 @@ class TestLifecycleNotifications:
             created.alert_id,
             symbol="NVDA",
             price=99.0,
-            timestamp=datetime(2025, 1, 2, 12, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2020, 1, 3, 21, 0, tzinfo=timezone.utc),
         )
         events = self._events(notification_service)
         assert MomentumBreakoutNotificationEventType.EXPIRED in events

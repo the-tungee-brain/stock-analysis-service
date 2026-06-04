@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from uuid import uuid4
 
@@ -111,15 +111,13 @@ def new_alert_id() -> str:
     return str(uuid4())
 
 
-def end_of_next_trading_day_expiry(
-    *,
-    signal_date: date,
-    created_at: datetime | None = None,
-) -> datetime:
-    """Expire at end of the calendar day after ``signal_date`` (UTC)."""
-    _ = created_at
-    next_day = signal_date + timedelta(days=1)
-    return datetime.combine(next_day, time(23, 59, 59), tzinfo=timezone.utc)
+class StaleMomentumSignalError(ValueError):
+    """Raised when the setup bar is too old to persist a new alert."""
+
+    def __init__(self, message: str | None = None) -> None:
+        from trade_planner.alerts.market_calendar import STALE_SIGNAL_MESSAGE
+
+        super().__init__(message or STALE_SIGNAL_MESSAGE)
 
 
 def long_return_pct(entry: float, exit_price: float) -> float:

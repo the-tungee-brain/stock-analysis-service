@@ -13,9 +13,13 @@ from trade_planner.alerts.lifecycle_models import (
     AlertLifecycleEventType,
     AlertLifecycleStatus,
     MomentumBreakoutAlertRecord,
-    end_of_next_trading_day_expiry,
+    StaleMomentumSignalError,
     long_return_pct,
     new_alert_id,
+)
+from trade_planner.alerts.market_calendar import (
+    end_of_next_trading_day_expiry,
+    validate_signal_date_freshness,
 )
 from trade_planner.alerts.lifecycle_store import (
     DuplicateActiveMomentumAlertError,
@@ -55,6 +59,15 @@ class AlertLifecycleService:
             record = replace(
                 record,
                 expires_at=record.expires_at.replace(tzinfo=timezone.utc),
+            )
+        if record.created_at.tzinfo is None:
+            record = replace(
+                record,
+                created_at=record.created_at.replace(tzinfo=timezone.utc),
+            )
+        if record.expires_at <= record.created_at:
+            raise ValueError(
+                "expires_at must be later than created_at for new alerts."
             )
 
         self._store.save(record.user_id, record)
@@ -272,6 +285,12 @@ class AlertLifecycleService:
         rs_percentile: float | None = None,
     ) -> MomentumBreakoutAlertRecord:
         now = created_at or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        stale_reason = validate_signal_date_freshness(signal_date, created_at=now)
+        if stale_reason is not None:
+            raise StaleMomentumSignalError(stale_reason)
+        expires_at = end_of_next_trading_day_expiry(created_at=now)
         return MomentumBreakoutAlertRecord(
             alert_id=new_alert_id(),
             user_id=user_id,
@@ -284,9 +303,7 @@ class AlertLifecycleService:
             target_price=target_price,
             entry_is_stop=entry_is_stop,
             status=AlertLifecycleStatus.PENDING_ENTRY,
-            expires_at=end_of_next_trading_day_expiry(
-                signal_date=signal_date, created_at=now
-            ),
+            expires_at=expires_at,
             risk_gate_action=risk_gate_action,
             risk_gate_reasons=tuple(risk_gate_reasons),
             historical_win_rate=historical_win_rate,

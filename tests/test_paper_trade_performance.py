@@ -28,6 +28,7 @@ from app.services.strategy.momentum_breakout_notification_emitter import (
 
 
 def _build_record(**kwargs):
+    created_at = datetime(2025, 1, 10, 21, 0, tzinfo=timezone.utc)
     defaults = dict(
         user_id="user-1",
         symbol="AAPL",
@@ -36,6 +37,7 @@ def _build_record(**kwargs):
         stop_price=95.0,
         target_price=110.0,
         entry_is_stop=True,
+        created_at=created_at,
         market_regime="RISK_ON",
         volume_ratio=1.8,
         rs_percentile=85.0,
