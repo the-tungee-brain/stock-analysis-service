@@ -25,6 +25,11 @@ class AppUserBuilder:
             self.app_user_cache.put(identity_sub, user)
         return user
 
+    def get_persisted_user_by_identity_sub(
+        self, identity_sub: str
+    ) -> Optional[AppUserItem]:
+        return self.app_user_adapter.get_by_identity_sub(identity_sub=identity_sub)
+
     def count_active_users(self) -> int:
         return self.app_user_adapter.count_active_users()
 

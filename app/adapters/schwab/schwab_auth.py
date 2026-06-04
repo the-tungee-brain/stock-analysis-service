@@ -1,6 +1,5 @@
 import requests
 import base64
-import os
 from dotenv import load_dotenv
 from urllib.parse import unquote
 
@@ -8,6 +7,7 @@ from urllib.parse import unquote
 class SchwabAuth:
 
     TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
+    TOKEN_REQUEST_TIMEOUT_SECONDS = 15
 
     def __init__(self, client_id: str, client_secret: str, redirect_uri: str):
         load_dotenv()
@@ -29,8 +29,12 @@ class SchwabAuth:
     def get_refreshed_access_token(self, refresh_token):
         headers = self._get_basic_auth_header()
         data = {"grant_type": "refresh_token", "refresh_token": refresh_token}
-        print(data, self.TOKEN_URL, headers)
-        response = requests.post(self.TOKEN_URL, headers=headers, data=data)
+        response = requests.post(
+            self.TOKEN_URL,
+            headers=headers,
+            data=data,
+            timeout=self.TOKEN_REQUEST_TIMEOUT_SECONDS,
+        )
         if response.status_code == 200:
             return response
         else:
@@ -43,7 +47,12 @@ class SchwabAuth:
             "code": unquote(auth_code),
             "redirect_uri": self.redirect_uri,
         }
-        response = requests.post(self.TOKEN_URL, headers=headers, data=data)
+        response = requests.post(
+            self.TOKEN_URL,
+            headers=headers,
+            data=data,
+            timeout=self.TOKEN_REQUEST_TIMEOUT_SECONDS,
+        )
         if response.status_code == 200:
             return response
         else:

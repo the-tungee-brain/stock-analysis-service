@@ -24,6 +24,13 @@ class UserService:
     def get_user_by_identity_sub(self, identity_sub: str) -> Optional[AppUserItem]:
         return self.app_user_builder.get_user_by_identity_sub(identity_sub=identity_sub)
 
+    def get_persisted_user_by_identity_sub(
+        self, identity_sub: str
+    ) -> Optional[AppUserItem]:
+        return self.app_user_builder.get_persisted_user_by_identity_sub(
+            identity_sub=identity_sub
+        )
+
     def create_or_link_user(self, payload: IdentityPayload) -> AppUserItem:
         existing = self.app_user_builder.get_user_by_identity_sub(
             identity_sub=payload.identity_sub

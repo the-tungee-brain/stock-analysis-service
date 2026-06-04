@@ -4,6 +4,8 @@ from jwt import InvalidTokenError
 from pydantic import BaseModel
 
 from app.auth.jwt_utils import create_access_token, verify_jwt_for_refresh
+from app.dependencies.service_dependencies import get_user_service
+from app.services.user_service import UserService
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -15,7 +17,10 @@ class AuthRefreshResponse(BaseModel):
 
 
 @router.post("/auth/refresh", response_model=AuthRefreshResponse)
-def refresh_access_token(token: str = Depends(oauth2_scheme)):
+def refresh_access_token(
+    token: str = Depends(oauth2_scheme),
+    user_service: UserService = Depends(get_user_service),
+):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -28,5 +33,8 @@ def refresh_access_token(token: str = Depends(oauth2_scheme)):
             raise credentials_exception
     except InvalidTokenError as exc:
         raise credentials_exception from exc
+
+    if user_service.get_persisted_user_by_identity_sub(user_id) is None:
+        raise credentials_exception
 
     return AuthRefreshResponse(access_token=create_access_token(user_id))
