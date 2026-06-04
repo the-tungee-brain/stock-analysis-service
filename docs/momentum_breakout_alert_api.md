@@ -356,6 +356,8 @@ Checks one ticker against Momentum Breakout rules (same engine as the market sca
 
 Returns `setupName: "Custom Trade Plan"`, entry/stop/target (2R), `warnings`, `educationalOnly: true`. Does not create a Momentum Breakout alert.
 
+**Entry trigger (LONG):** `max(latest close, 20-day high) + $0.01`. When price is below the 20-day high, `entryMethod` is `BREAKOUT_ABOVE_20D_HIGH` and the plan is inactive until that level is reached (`planActiveAtCurrentPrice: false`). Response also includes `currentPrice`, `distanceToEntryPct`, `entryExplanation`, and `latestBarDate`.
+
 ---
 
 ## Scan universe diagnostics

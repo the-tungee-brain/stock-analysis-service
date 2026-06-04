@@ -7,10 +7,13 @@ from data.loader import load_symbol
 from trade_planner.config import TradePlannerConfig
 from trade_planner.indicators import (
     average_true_range,
-    highest_high,
     prior_lowest_low,
     simple_moving_average,
     volume_expansion_ratio,
+)
+from app.services.strategy.custom_trade_plan_entry import (
+    derive_custom_long_entry,
+    entry_distance_warning,
 )
 from trade_planner.research.data import align_benchmark_to_stock, ohlcv_bars_from_dataframe
 from trade_planner.setups.base import long_target_from_rr
@@ -55,9 +58,13 @@ class CustomTradePlanService:
         if len(stock_bars) < 60:
             raise ValueError("Insufficient price history for a custom educational plan")
 
+        entry_info = derive_custom_long_entry(
+            stock_bars,
+            symbol=sym,
+            high_lookback_days=_HIGH_LOOKBACK,
+        )
+        entry = entry_info.entry_price
         last = stock_bars[-1]
-        period_high = highest_high(stock_bars, _HIGH_LOOKBACK) or last.high
-        entry = round(max(last.close, period_high) + 0.01, 4)
 
         swing_stop = prior_lowest_low(stock_bars, _SWING_LOOKBACK)
         atr = average_true_range(stock_bars, 14)
@@ -86,7 +93,7 @@ class CustomTradePlanService:
         warnings = self._build_warnings(
             data=data,
             stop_distance_pct=stop_distance_pct,
-            entry=entry,
+            distance_to_entry_pct=entry_info.distance_to_entry_pct,
         )
 
         return CustomTradePlanResponse(
@@ -94,6 +101,12 @@ class CustomTradePlanService:
             setupName=_CUSTOM_SETUP_NAME,
             direction="LONG",
             entryPrice=entry,
+            entryMethod=entry_info.entry_method,
+            currentPrice=entry_info.current_price,
+            distanceToEntryPct=entry_info.distance_to_entry_pct,
+            entryExplanation=entry_info.entry_explanation,
+            latestBarDate=entry_info.latest_bar_date,
+            planActiveAtCurrentPrice=entry_info.plan_active_at_current_price,
             stopPrice=stop,
             targetPrice=target,
             riskReward=round(risk_reward, 2),
@@ -106,9 +119,12 @@ class CustomTradePlanService:
         *,
         data: StockData,
         stop_distance_pct: float,
-        entry: float,
+        distance_to_entry_pct: float,
     ) -> list[str]:
         warnings: list[str] = []
+        entry_warn = entry_distance_warning(distance_to_entry_pct)
+        if entry_warn:
+            warnings.append(entry_warn)
         closes = [bar.close for bar in data.bars[-220:]]
         sma50 = simple_moving_average(closes, 50)
         sma200 = simple_moving_average(closes, 200)
@@ -135,7 +151,6 @@ class CustomTradePlanService:
                 "this plan is a separate custom educational outline."
             )
 
-        _ = entry
         deduped: list[str] = []
         seen: set[str] = set()
         for item in warnings:
