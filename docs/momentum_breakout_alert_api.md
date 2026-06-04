@@ -329,6 +329,35 @@ A `BlockedByRiskGate` notification is emitted when `allowed` is false (no alert 
 
 ---
 
+## Single-symbol setup check
+
+**`GET /api/v1/strategy/momentum-breakout/check/{symbol}`**
+
+Checks one ticker against Momentum Breakout rules (same engine as the market scan).
+
+| `status` | Meaning |
+|----------|---------|
+| `TRADABLE_BREAKOUT` | Valid setup + passes quality/safety filters |
+| `REJECTED_BREAKOUT` | Valid setup but failed tradable filters |
+| `NO_BREAKOUT_SETUP` | Does not meet breakout criteria (`failedSetupRules` in plain English) |
+| `DATA_UNAVAILABLE` | No local OHLCV for symbol |
+
+`canTrackBreakoutPlan` is true for tradable breakouts when alert creation is enabled; for `REJECTED_BREAKOUT` it is true only when `riskGate.allowed` is true.
+
+---
+
+## Custom educational plan (not Momentum Breakout)
+
+**`POST /api/v1/strategy/custom-trade-plan`**
+
+```json
+{ "symbol": "META", "direction": "LONG", "accountEquityUsd": null }
+```
+
+Returns `setupName: "Custom Trade Plan"`, entry/stop/target (2R), `warnings`, `educationalOnly: true`. Does not create a Momentum Breakout alert.
+
+---
+
 ## Scan universe diagnostics
 
 **`GET /api/v1/strategy/momentum-breakout/universe`**
