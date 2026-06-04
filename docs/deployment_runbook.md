@@ -45,9 +45,25 @@ If universe finished but ranking failed: run workflow mode **`bootstrap-resume`*
 
 **Automatic:** `ranking-pipeline-vm.yml` every **Tue–Sat 07:30 UTC**.
 
-**Manual:** same workflow → **daily**.
+**Manual:** same workflow → **daily** (runs `scripts/run_ranking_daily.py` then `scripts/run_portfolio_with_risk.py`).
 
 Deploy does **not** re-run ranking.
+
+### Momentum Breakout scanner dependency
+
+The default Momentum Breakout scan universe (`GET /api/v1/strategy/momentum-breakout/scan` without `symbols`) uses the **latest daily ranking run** in `data/ranking/ranking_pipeline.db` (`ranking_results` ordered by `rank`), intersected with local OHLCV parquet, then capped by `MB_SCAN_MAX_UNIVERSE` (default 500).
+
+| Requirement | Why |
+|-------------|-----|
+| Complete **daily ranking before US market open** | Scanner expects a fresh run for the latest completed bar day |
+| Persisted `ranking_pipeline.db` on the API volume | Same path as `RANKING_DB_PATH` / `data/ranking` mount |
+| `scripts/run_ranking_daily.py` success | Writes `ranking_runs` + `ranking_results` used for universe ordering |
+
+If ranking is **stale** (older than one trading day vs the latest bar, empty results, or no run created on the current trading day before the open), the scanner **falls back** to liquidity-sorted universe members and returns warning: `Ranking output is stale; scanner is using fallback universe.`
+
+Diagnostics: `GET /api/v1/strategy/momentum-breakout/universe` (fields: `universeSource`, `selectionMethod`, `rankingRunId`, `warning`, …).
+
+Config: `MB_SCAN_UNIVERSE_ORDER` — default `ranking_score` (`liquidity` \| `market_cap` \| `alphabetical` to override).
 
 ---
 

@@ -33,22 +33,22 @@ class MomentumBreakoutScanCandidateDto(BaseModel):
     risk_gate: AlertRiskGateResultDto = Field(alias="riskGate")
 
 
-UNIVERSE_SOURCE_DESCRIPTION = (
-    "ranking_pipeline.sqlite universe_members (active snapshot, passed_filters=1, "
-    "ORDER BY symbol ASC) intersected with local OHLCV parquet (data/raw); "
-    "capped by MB_SCAN_MAX_UNIVERSE (default 500)"
-)
-
-
 class MomentumBreakoutUniverseResponse(BaseModel):
     model_config = _STRATEGY_MODEL_CONFIG
 
-    total_available_symbols: int = Field(alias="totalAvailableSymbols")
+    universe_source: str = Field(alias="universeSource")
+    selection_method: str = Field(alias="selectionMethod")
+    ranking_run_id: str | None = Field(default=None, alias="rankingRunId")
+    ranking_snapshot_id: str | None = Field(default=None, alias="rankingSnapshotId")
+    ranking_generated_at: str | None = Field(default=None, alias="rankingGeneratedAt")
+    total_ranked_symbols: int = Field(alias="totalRankedSymbols")
+    total_eligible_symbols: int = Field(alias="totalEligibleSymbols")
     scan_cap: int = Field(alias="scanCap")
     symbols_scanned: int = Field(alias="symbolsScanned")
-    excluded_symbols: int = Field(alias="excludedSymbols")
-    universe_source: str = Field(alias="universeSource")
-    sample_symbols: list[str] = Field(alias="sampleSymbols")
+    excluded_by_cap: int = Field(alias="excludedByCap")
+    first_50_scanned_symbols: list[str] = Field(alias="first50ScannedSymbols")
+    top_excluded_sample: list[str] = Field(alias="topExcludedSample")
+    warning: str | None = None
 
 
 class MomentumBreakoutScanResponse(BaseModel):

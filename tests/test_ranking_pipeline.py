@@ -116,6 +116,10 @@ def test_sqlite_ranking_roundtrip(tmp_path: Path):
         ],
     )
     assert store.load_universe_symbols("2026-01-01") == ["AAPL"]
+    members = store.load_passed_universe_members("2026-01-01")
+    assert len(members) == 1
+    assert members[0].symbol == "AAPL"
+    assert members[0].avg_dollar_volume_20d == 1e9
     store.save_ranking_run(
         "run-1",
         "2026-01-02",
@@ -136,6 +140,14 @@ def test_sqlite_ranking_roundtrip(tmp_path: Path):
     rows = store.get_ranking_results("run-1", limit=5)
     assert rows[0]["symbol"] == "AAPL"
     assert rows[0]["contributions"]["trend"] == 0.5
+    with_rank = store.load_passed_universe_members("2026-01-01")
+    assert with_rank[0].ranking_score == 1.2
+    ordered = store.load_ranking_results_ordered("run-1")
+    assert ordered[0].symbol == "AAPL"
+    assert ordered[0].rank == 1
+    latest = store.get_latest_ranking_run()
+    assert latest is not None
+    assert latest.run_id == "run-1"
 
 
 def test_merge_ohlcv_dedupes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

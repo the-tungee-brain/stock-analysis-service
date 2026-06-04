@@ -61,6 +61,16 @@ def trading_days_apart(earlier: date, later: date) -> int:
     return count
 
 
+def is_before_regular_session_open(as_of: datetime) -> bool:
+    """True when ``as_of`` is a US trading weekday before 09:30 ET."""
+    if as_of.tzinfo is None:
+        instant = as_of.replace(tzinfo=timezone.utc)
+    else:
+        instant = as_of
+    et = instant.astimezone(_EASTERN)
+    return is_trading_day(et.date()) and et.time() < _REGULAR_OPEN
+
+
 def latest_completed_bar_trading_day(as_of: datetime) -> date:
     """
     Trading date of the latest completed daily bar at ``as_of`` (US regular session, ET).

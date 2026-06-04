@@ -7,6 +7,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Any, Iterator
 
 from data.paths import active_universe_pointer_path
@@ -15,6 +16,31 @@ from ranking_pipeline.config import RankingPipelineConfig
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass(frozen=True, slots=True)
+class UniverseMemberRecord:
+    symbol: str
+    market_cap: float | None
+    avg_dollar_volume_20d: float | None
+    ranking_score: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class LatestRankingRunMeta:
+    run_id: str
+    as_of_date: str
+    created_at: str
+    universe_snapshot_id: str | None
+    symbol_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class RankingResultRecord:
+    symbol: str
+    rank: int
+    final_score: float
+    composite_score: float | None
 
 
 class RankingStore:
@@ -101,6 +127,46 @@ class RankingStore:
                 (sid,),
             ).fetchall()
         return [r["symbol"] for r in rows]
+
+    def load_passed_universe_members(
+        self,
+        snapshot_id: str | None = None,
+        *,
+        ranking_run_id: str | None = None,
+    ) -> list[UniverseMemberRecord]:
+        """Passed universe members with liquidity metrics and optional latest ranking score."""
+        sid = snapshot_id or self.active_snapshot_id()
+        if not sid:
+            return []
+        run_id = ranking_run_id if ranking_run_id is not None else self.latest_run_id()
+        with self._connect() as conn:
+            if run_id:
+                rows = conn.execute(
+                    "SELECT um.symbol, um.market_cap, um.avg_dollar_volume_20d, "
+                    "rr.final_score AS ranking_score "
+                    "FROM universe_members um "
+                    "LEFT JOIN ranking_results rr "
+                    "ON rr.symbol = um.symbol AND rr.run_id = ? "
+                    "WHERE um.snapshot_id = ? AND um.passed_filters = 1",
+                    (run_id, sid),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT symbol, market_cap, avg_dollar_volume_20d, "
+                    "NULL AS ranking_score "
+                    "FROM universe_members "
+                    "WHERE snapshot_id = ? AND passed_filters = 1",
+                    (sid,),
+                ).fetchall()
+        return [
+            UniverseMemberRecord(
+                symbol=str(r["symbol"]).strip().upper(),
+                market_cap=r["market_cap"],
+                avg_dollar_volume_20d=r["avg_dollar_volume_20d"],
+                ranking_score=r["ranking_score"],
+            )
+            for r in rows
+        ]
 
     def upsert_ohlcv_sync(self, symbol: str, last_bar_date: str, row_count: int) -> None:
         with self._connect() as conn:
@@ -201,6 +267,39 @@ class RankingStore:
                 "SELECT run_id FROM ranking_runs ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
         return row["run_id"] if row else None
+
+    def get_latest_ranking_run(self) -> LatestRankingRunMeta | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT run_id, as_of_date, created_at, universe_snapshot_id, symbol_count "
+                "FROM ranking_runs ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+        if not row:
+            return None
+        return LatestRankingRunMeta(
+            run_id=row["run_id"],
+            as_of_date=row["as_of_date"],
+            created_at=row["created_at"],
+            universe_snapshot_id=row["universe_snapshot_id"],
+            symbol_count=int(row["symbol_count"]),
+        )
+
+    def load_ranking_results_ordered(self, run_id: str) -> list[RankingResultRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT symbol, rank, final_score, composite_score "
+                "FROM ranking_results WHERE run_id = ? ORDER BY rank ASC",
+                (run_id,),
+            ).fetchall()
+        return [
+            RankingResultRecord(
+                symbol=str(r["symbol"]).strip().upper(),
+                rank=int(r["rank"]),
+                final_score=float(r["final_score"]),
+                composite_score=r["composite_score"],
+            )
+            for r in rows
+        ]
 
     def get_symbol_ranking_row(
         self,

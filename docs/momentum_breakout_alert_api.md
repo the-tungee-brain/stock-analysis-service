@@ -329,6 +329,34 @@ A `BlockedByRiskGate` notification is emitted when `allowed` is false (no alert 
 
 ---
 
+## Scan universe diagnostics
+
+**`GET /api/v1/strategy/momentum-breakout/universe`**
+
+Describes which symbols the scanner evaluates when `symbols` is omitted on `/strategy/momentum-breakout/scan`.
+
+Default ordering uses the **latest daily ranking run** (`ranking_results` by `rank` / `final_score`). If that output is stale, the API falls back to liquidity-sorted `universe_members` and sets `warning`.
+
+| Field | Meaning |
+|-------|---------|
+| `universeSource` | `daily_ranking_results` or fallback/config source |
+| `selectionMethod` | Active sort description |
+| `rankingRunId` | Latest `ranking_runs.run_id` when present |
+| `rankingSnapshotId` | Universe snapshot id tied to the run |
+| `rankingGeneratedAt` | `ranking_runs.created_at` |
+| `totalRankedSymbols` | Rows in `ranking_results` for the latest run |
+| `totalEligibleSymbols` | Symbols with local OHLCV, before cap |
+| `scanCap` | `MB_SCAN_MAX_UNIVERSE` (default 500) |
+| `symbolsScanned` | Count after cap |
+| `excludedByCap` | Eligible symbols not scanned due to cap |
+| `first50ScannedSymbols` | First 50 in scan order |
+| `topExcludedSample` | Next symbols after the cap (up to 20) |
+| `warning` | Stale-ranking message when fallback is used |
+
+Env: `MB_SCAN_UNIVERSE_ORDER` (`ranking_score` \| `liquidity` \| `market_cap` \| `alphabetical`).
+
+---
+
 ## Ownership split
 
 | Layer | Responsibility |

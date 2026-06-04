@@ -10,9 +10,12 @@ from datetime import datetime, timezone
 
 from data.benchmarks import BENCHMARK_SYMBOL
 from data.loader import load_symbol
-from data.store import raw_exists
-from ranking_pipeline.config import default_config
-from ranking_pipeline.storage.sqlite import open_store
+from app.services.strategy.momentum_breakout_scan_universe import (
+    ScanUniverseOrder,
+    build_production_scan_universe,
+    load_production_scan_symbol_list,
+    max_scan_universe,
+)
 from trade_planner.alerts.risk_gate import AlertRiskGate
 from trade_planner.alerts.risk_models import AlertRiskContext, AlertRiskSettings
 from trade_planner.backtest.engine import BacktestEngine
@@ -30,16 +33,11 @@ from app.models.momentum_breakout_scan_models import (
     MomentumBreakoutScanCandidateDto,
     MomentumBreakoutScanResponse,
     MomentumBreakoutUniverseResponse,
-    UNIVERSE_SOURCE_DESCRIPTION,
 )
 
 logger = logging.getLogger(__name__)
 
 TOP_CANDIDATES_LIMIT = 20
-
-
-def _max_universe() -> int:
-    return int(os.environ.get("MB_SCAN_MAX_UNIVERSE", "500"))
 
 
 def _worker_count() -> int:
@@ -84,46 +82,6 @@ def _parse_symbols_param(symbols: str | None) -> list[str] | None:
             seen.add(sym)
             ordered.append(sym)
     return ordered
-
-
-def _ranking_universe_snapshot_symbols() -> tuple[str, list[str]]:
-    """Active ranking snapshot members that passed liquidity filters (alphabetical)."""
-    cfg = default_config()
-    store = open_store(cfg)
-    snapshot_id = store.active_snapshot_id()
-    if not snapshot_id:
-        raise LookupError("No active ranking universe snapshot")
-    universe = store.load_universe_symbols(snapshot_id)
-    if not universe:
-        raise LookupError("No active ranking universe")
-    return snapshot_id, universe
-
-
-def build_production_scan_universe(
-    *,
-    max_symbols: int | None = None,
-    sample_size: int = 50,
-) -> MomentumBreakoutUniverseResponse:
-    """Symbols the production scanner evaluates when `symbols` query param is omitted."""
-    cap = max(1, max_symbols if max_symbols is not None else _max_universe())
-    _snapshot_id, universe = _ranking_universe_snapshot_symbols()
-    with_data = [s.strip().upper() for s in universe if raw_exists(s.strip().upper())]
-    scanned = with_data[:cap]
-    total_available = len(with_data)
-    return MomentumBreakoutUniverseResponse(
-        totalAvailableSymbols=total_available,
-        scanCap=cap,
-        symbolsScanned=len(scanned),
-        excludedSymbols=max(0, total_available - len(scanned)),
-        universeSource=UNIVERSE_SOURCE_DESCRIPTION,
-        sampleSymbols=scanned[: max(0, sample_size)],
-    )
-
-
-def _load_ranking_universe(*, max_symbols: int) -> list[str]:
-    _snapshot_id, universe = _ranking_universe_snapshot_symbols()
-    with_data = [s.strip().upper() for s in universe if raw_exists(s.strip().upper())]
-    return with_data[: max(1, max_symbols)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,14 +147,10 @@ class MomentumBreakoutScannerService:
         explicit = _parse_symbols_param(symbols)
         if explicit is not None:
             return explicit
-        return _load_ranking_universe(max_symbols=_max_universe())
+        return load_production_scan_symbol_list(max_symbols=max_scan_universe())
 
-    def describe_production_universe(
-        self,
-        *,
-        sample_size: int = 50,
-    ) -> MomentumBreakoutUniverseResponse:
-        return build_production_scan_universe(sample_size=sample_size)
+    def describe_production_universe(self) -> MomentumBreakoutUniverseResponse:
+        return build_production_scan_universe()
 
     def evaluate_symbol(self, symbol: str) -> _ScanCandidate | None:
         sym = symbol.strip().upper()

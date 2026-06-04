@@ -26,6 +26,26 @@ Verify with launch readiness (`oracleAlertDdlApplied`, `oraclePaperDdlApplied`).
 | `MB_ADMIN_TOKEN` | Admin metrics / diagnostics header | Set secret |
 | `MB_LAUNCH_READINESS_PUBLIC` | Expose full readiness warnings | `false` in prod |
 | `MB_PRODUCTION` or `ENV=production` | Production safety warnings | Set in prod |
+| `MB_SCAN_MAX_UNIVERSE` | Max symbols evaluated per scan when `symbols` omitted | `500` |
+| `MB_SCAN_UNIVERSE_ORDER` | Universe ordering override | `ranking_score` (default) |
+
+## 2b. Daily ranking before market open
+
+Momentum Breakout **does not** run its own universe rank. Default scan selection depends on the nightly jobs:
+
+1. `scripts/run_ranking_daily.py` — OHLCV, features, cross-section rank → `ranking_pipeline.db`
+2. `scripts/run_portfolio_with_risk.py` — portfolio layer (separate from scan universe)
+
+**Operational rule:** The ranking workflow (GitHub Actions **Ranking pipeline (VM)** or equivalent cron) must **finish successfully before US market open** on trading days. If ranking is late or missing, the scanner still runs but uses a **liquidity fallback** universe and surfaces a stale-ranking warning on `GET /api/v1/strategy/momentum-breakout/universe`.
+
+Verify after daily job:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  https://<host>/api/v1/strategy/momentum-breakout/universe
+```
+
+Expect `universeSource: daily_ranking_results`, no `warning`, and a recent `rankingRunId` / `rankingGeneratedAt`.
 
 ## 3. Paper-trade backfill
 
