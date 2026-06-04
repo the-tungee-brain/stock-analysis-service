@@ -13,11 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.services.emerging_leaders_snapshot_service import (  # noqa: E402
-    capture_emerging_leaders_daily_snapshot,
-)
 from app.services.emerging_leaders_validation_service import (  # noqa: E402
-    backfill_emerging_leaders_forward_returns,
+    run_emerging_leaders_validation_job,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -47,20 +44,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    result: dict = {}
-    if not args.skip_snapshot:
-        snap = capture_emerging_leaders_daily_snapshot(
-            snapshot_date=args.snapshot_date,
-            force=args.force,
-        )
-        result["snapshot"] = snap
-        logger.info("Snapshot: %s", snap)
-
-    if not args.skip_backfill:
-        backfill = backfill_emerging_leaders_forward_returns()
-        result["backfill"] = backfill
-        logger.info("Backfill: %s", backfill)
-
+    result = run_emerging_leaders_validation_job(
+        snapshot_date=args.snapshot_date,
+        force=args.force,
+        skip_snapshot=args.skip_snapshot,
+        skip_backfill=args.skip_backfill,
+    )
     print(json.dumps(result, indent=2))
 
 

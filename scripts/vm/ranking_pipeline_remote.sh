@@ -47,7 +47,7 @@ run_bootstrap_resume() {
 }
 
 run_daily() {
-  echo "=== ranking daily + portfolio ==="
+  echo "=== ranking daily (incl. emerging leaders validation) + portfolio ==="
   exec_in python scripts/run_ranking_daily.py
   exec_in python scripts/run_portfolio_with_risk.py
   echo "=== daily complete ==="

@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any
 
 from app.services.emerging_leaders_forward_returns import (
     compute_forward_outcomes_for_snapshots,
 )
+from app.services.emerging_leaders_snapshot_service import (
+    capture_emerging_leaders_daily_snapshot,
+)
 from app.storage.emerging_leaders_validation_store import open_validation_store
+
+logger = logging.getLogger(__name__)
 
 STAGE_LABEL_MAP = {
     "BASE_BUILDING": "Stage 1",
@@ -21,6 +27,32 @@ def backfill_emerging_leaders_forward_returns() -> dict[str, int]:
     outcomes = compute_forward_outcomes_for_snapshots(pending)
     written = store.upsert_forward_outcomes(outcomes)
     return {"pending": len(pending), "outcomes_written": written}
+
+
+def run_emerging_leaders_validation_job(
+    *,
+    snapshot_date: str | None = None,
+    force: bool = False,
+    skip_snapshot: bool = False,
+    skip_backfill: bool = False,
+) -> dict[str, Any]:
+    """
+    Nightly validation: snapshot qualifying setups, then backfill forward returns.
+    Does not change live Emerging Leaders ranking.
+    """
+    result: dict[str, Any] = {}
+    if not skip_snapshot:
+        snap = capture_emerging_leaders_daily_snapshot(
+            snapshot_date=snapshot_date,
+            force=force,
+        )
+        result["snapshot"] = snap
+        logger.info("Emerging leaders validation snapshot: %s", snap)
+    if not skip_backfill:
+        backfill = backfill_emerging_leaders_forward_returns()
+        result["backfill"] = backfill
+        logger.info("Emerging leaders validation backfill: %s", backfill)
+    return result
 
 
 def _mean(values: list[float]) -> float | None:

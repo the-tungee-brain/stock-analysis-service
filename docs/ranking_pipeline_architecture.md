@@ -289,6 +289,7 @@ Artifacts: `artifacts/ranking_model/{backend}/` (classifier + regressor joblib +
 4. **Score:** composite (+ optional ML if artifact present).
 5. Rank by `final_score` descending; persist `ranking_runs` + `ranking_results`.
 6. Prune old runs (keep last N days).
+7. **Emerging Leaders validation** (`run_emerging_leaders_validation_job` via `scripts/run_ranking_daily.py`): daily snapshot of qualifying setups + backfill forward returns vs SPY (does not change live EL ranking).
 
 ```mermaid
 sequenceDiagram
@@ -305,6 +306,7 @@ sequenceDiagram
   end
   Daily->>Daily: cross-section score + rank
   Daily->>DB: write ranking_results
+  Daily->>DB: EL validation snapshot + forward outcomes
 ```
 
 ## Performance Considerations

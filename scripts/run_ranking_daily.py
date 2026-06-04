@@ -7,9 +7,13 @@ import argparse
 import logging
 import sys
 
+from app.services.emerging_leaders_validation_service import (
+    run_emerging_leaders_validation_job,
+)
 from ranking_pipeline.pipeline.daily import run_daily_pipeline
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -23,6 +27,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     result = run_daily_pipeline(symbols=args.symbols)
     print(result)
+
+    logger.info("Running emerging leaders validation job")
+    validation = run_emerging_leaders_validation_job()
+    print({"emerging_leaders_validation": validation})
+
     return 0
 
 
