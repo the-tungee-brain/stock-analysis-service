@@ -133,7 +133,7 @@ def evaluate_long_option(inputs: LongOptionGuidanceInputs) -> OptionPositionGuid
             urgency += p_pts
             scored_risks.append(label)
         elif inputs.pnl_pct <= -20:
-            p_pts = 24.0
+            p_pts = 30.0
             label = f"Drawdown ~{inputs.pnl_pct:.0f}% on this contract"
             contributors.append(
                 ScoreContributor(
@@ -227,10 +227,10 @@ def evaluate_long_option(inputs: LongOptionGuidanceInputs) -> OptionPositionGuid
         verdict=verdict,
         primary=primary_driver,
         secondary=secondary_driver,
-        dte=inputs.dte,
-        pnl_pct=inputs.pnl_pct,
+        tertiary=tertiary_driver,
+        contributors=contributors,
     )
-    risks = _merge_unique(risks, scored_risks)
+    del scored_risks
 
     confidence = _confidence(urgency_int, inputs.pnl_pct is not None, inputs.dte is not None)
     return OptionPositionGuidanceResult(
@@ -371,11 +371,10 @@ def evaluate_short_option(inputs: ShortOptionGuidanceInputs) -> OptionPositionGu
         verdict=verdict,
         primary=primary_driver,
         secondary=secondary_driver,
-        dte=inputs.dte,
-        assignment_risk=inputs.assignment_risk,
+        tertiary=tertiary_driver,
+        contributors=contributors,
     )
-    supporting = _merge_unique(supporting, scored_supporting, limit=3)
-    risks = _merge_unique(risks, scored_risks)
+    del scored_supporting, scored_risks
 
     confidence = _confidence(
         urgency_int,

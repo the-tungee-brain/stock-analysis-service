@@ -439,8 +439,9 @@ def _structured_symbol_analysis_v1_task(symbol: str) -> str:
             "Recommendation rationale" (prose, 2-3 sentences; no repeated path titles per line).
           · "Position snapshot" — size, P/L, key greeks/DTE if options.
           · "Recommendation rationale" — why this action vs alternatives (may include $ figures from JSON).
-            When POSITION GUIDANCE is provided, explain those per-leg verdicts; do not contradict them
-            without an explicit disagreement note in this section.
+            When POSITION GUIDANCE is provided, explain those verdicts as an explainer only — never
+            recommend an action stronger than guidance (no Hold→Close escalation). Note caveats in
+            prose if needed, but recommendedAction must match or be softer than guidance.
           · "Execution plan" — contracts, strikes, expirations, timing, limit-order guidance if helpful.
           · "Risk/reward" — what could go wrong and what changes your mind.
         """).strip()

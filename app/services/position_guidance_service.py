@@ -287,6 +287,7 @@ def build_symbol_position_guidance(
                     rs_vs_spy_21d=extras["rs_vs_spy_21d"],
                     rs_vs_spy_63d=extras["rs_vs_spy_63d"],
                     ranking_rank=rank,
+                    position_quantity=qty,
                 )
             )
             rel_rank = compute_relative_risk_rank(

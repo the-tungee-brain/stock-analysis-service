@@ -6,6 +6,7 @@ from app.builders.guidance_scoring_drivers import (
     build_equity_copy_from_drivers,
     contributors_to_drivers,
 )
+from app.builders.position_guidance_verdict_normalize import normalize_equity_verdict
 from app.builders.guidance_scoring_types import (
     GuidanceDriver,
     ScoreContributor,
@@ -37,6 +38,7 @@ class EquityExitGuidanceInputs:
     rs_vs_spy_21d: float | None = None
     rs_vs_spy_63d: float | None = None
     ranking_rank: int | None = None
+    position_quantity: float | None = None
 
 
 @dataclass(frozen=True)
@@ -158,14 +160,9 @@ def evaluate_equity_exit_guidance(inputs: EquityExitGuidanceInputs) -> EquityExi
         signals=inputs.signals,
         alert_reasons=inputs.alert_reasons,
     )
+    verdict = normalize_equity_verdict(verdict, inputs.position_quantity)
 
     confidence = _confidence(inputs, trade_score, regime_env)
-
-    critical_signal = None
-    for signal in inputs.signals:
-        if signal.severity == "critical":
-            critical_signal = signal.message
-            break
 
     primary_driver, secondary_driver, tertiary_driver = contributors_to_drivers(
         contributors,
@@ -176,12 +173,7 @@ def evaluate_equity_exit_guidance(inputs: EquityExitGuidanceInputs) -> EquityExi
         primary=primary_driver,
         secondary=secondary_driver,
         tertiary=tertiary_driver,
-        weight_pct=inputs.position_weight_pct,
-        pnl_pct=inputs.open_profit_loss_pct,
-        regime_env=regime_env,
-        trade_score=trade_score,
-        regime_id=td.regime.regime_id,
-        critical_signal=critical_signal,
+        contributors=contributors,
     )
     improve = _would_improve(inputs, regime_env, trade_score)
     worsen = _would_worsen(inputs, regime_env)
@@ -355,7 +347,7 @@ def _signal_stress_contributors(
 ) -> tuple[float, list[ScoreContributor]]:
     severity_pts = {"critical": 10.0, "warning": 7.0, "watch": 4.0, "info": 0.0}
     driver_map = {
-        "drawdown": "LARGE_DRAWDOWN",
+        "drawdown": "TREND_DETERIORATION",
         "concentration": "EXCESSIVE_CONCENTRATION",
         "position_size": "EXCESSIVE_CONCENTRATION",
         "earnings": "EARNINGS_RISK",

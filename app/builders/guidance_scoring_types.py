@@ -36,8 +36,10 @@ JUSTIFICATION_LABELS: dict[VerdictJustification, str] = {
     "STABLE_POSITION": "Stable position",
 }
 
-# P/L worse than this cannot justify "Large drawdown" as a top driver.
-MEANINGFUL_LOSS_PCT = -5.0
+# P/L must be at or below this for unrealized_loss to justify "Large drawdown".
+LARGE_DRAWDOWN_MIN_PCT = -10.0
+MEANINGFUL_LOSS_PCT = LARGE_DRAWDOWN_MIN_PCT  # alias for tests
+UNREALIZED_LOSS_BUCKET = "unrealized_loss"
 
 VerdictT = TypeVar("VerdictT", EquityVerdict, LongOptionVerdict, ShortOptionVerdict)
 

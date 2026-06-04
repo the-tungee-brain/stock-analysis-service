@@ -3,12 +3,13 @@ from __future__ import annotations
 from app.models.position_guidance_models import SymbolPositionGuidanceResponse
 
 _POSITION_GUIDANCE_AI_RULES = """
-POSITION GUIDANCE (AUTHORITATIVE — per-leg verdicts from deterministic scoring):
-- Treat each leg's verdict, primaryDriver, and primaryReason as the source of truth for that position.
-- Your recommendedAction MUST align with the highest-urgency leg unless you explicitly explain a disagreement in "Recommendation rationale".
-- Do NOT silently override a TRIM, REVIEW_SELL, EXIT, REVIEW_CLOSE, or CLOSE verdict with Hold.
-- Explain WHY using the provided drivers (primaryDriver / secondaryDriver), not invented signals.
-- If you disagree with a verdict, state "Position Guidance says X because …; I suggest Y because …" — never hide the conflict.
+POSITION GUIDANCE (AUTHORITATIVE — deterministic per-leg verdicts):
+- You are an explainer, not a decision engine. Do not invent or escalate actions.
+- Each leg's verdict, primaryDriver, and primaryReason are final — explain them; never contradict.
+- recommendedAction must NOT be stronger than Position Guidance (e.g. do not recommend Close/Exit if guidance is Hold).
+- Do not upgrade TRIM to EXIT, REVIEW_CLOSE to CLOSE, or Hold to Trim/Close unless guidance already says so.
+- Use primaryDriver / secondaryDriver labels and primaryReason text — do not invent competing signals.
+- If your view differs, state it as commentary only: "Guidance says X because …; one caveat is …" — never override.
 """.strip()
 
 
