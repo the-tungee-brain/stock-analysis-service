@@ -77,6 +77,36 @@ Push to `main` → `deploy.yml`:
 
 Existing Parquet/SQLite on the volume are unchanged.
 
+### Oracle watchlist workspace migration
+
+Existing Oracle databases created before watchlist workspace versioning need one additive
+table migration before deploying the API image that reads/writes watchlist versions.
+The script is idempotent and only creates `WATCHLIST_WORKSPACE` when it is missing;
+it does not drop, truncate, rewrite, or backfill `WATCHLIST_FOLDER` or
+`WATCHLIST_ITEM`.
+
+Run on the production VM with the same Oracle credentials used by the API:
+
+```bash
+cd /path/to/stock-analysis
+sqlplus -s "$POWERPOCKETDB_USER/$POWERPOCKETDB_PASSWORD@$POWERPOCKETDB_TP_TNS" <<'SQL'
+whenever sqlerror exit sql.sqlcode
+@app/sql/migrations/20260604_watchlist_workspace.sql
+exit
+SQL
+```
+
+It is safe to run the script more than once. Verify the table exists:
+
+```sql
+select table_name
+from user_tables
+where table_name = 'WATCHLIST_WORKSPACE';
+```
+
+Then deploy/restart the API. Old web and iOS clients can continue syncing without
+`baseVersion`; optimistic concurrency is enforced only for clients that send it.
+
 ---
 
 ## D. Monitoring

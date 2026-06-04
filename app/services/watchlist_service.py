@@ -106,7 +106,9 @@ class WatchlistService:
     def get_workspace(
         self, *, user_id: str, include_quotes: bool = True
     ) -> WatchlistWorkspaceResponse:
-        folders = self.watchlist_adapter.list_workspace(user_id)
+        folders, workspace_version = self.watchlist_adapter.get_workspace_snapshot(
+            user_id
+        )
         symbols = self._collect_symbols(folders)
         titles = self._titles_for_symbols(symbols)
         quote_map = self._quotes_for_symbols(symbols) if include_quotes else None
@@ -114,13 +116,18 @@ class WatchlistService:
             folders,
             titles_by_symbol=titles,
             quotes_by_symbol=quote_map,
+            workspace_version=workspace_version,
         )
 
     def sync_workspace(
         self, *, user_id: str, payload: WatchlistWorkspaceSyncRequest
     ) -> WatchlistWorkspaceResponse:
         folders = self._normalize_folders(payload.folders)
-        saved = self.watchlist_adapter.sync_workspace(user_id, folders)
+        saved, workspace_version = self.watchlist_adapter.sync_workspace(
+            user_id,
+            folders,
+            base_version=payload.base_version,
+        )
         symbols = self._collect_symbols(saved)
         titles = self._titles_for_symbols(symbols)
         quote_map = self._quotes_for_symbols(symbols)
@@ -128,4 +135,5 @@ class WatchlistService:
             saved,
             titles_by_symbol=titles,
             quotes_by_symbol=quote_map,
+            workspace_version=workspace_version,
         )

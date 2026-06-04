@@ -5,6 +5,7 @@ import asyncio
 import oracledb
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.adapters.user.watchlist_adapter import WatchlistVersionConflictError
 from app.auth.dependencies import get_current_user_id
 from app.dependencies.service_dependencies import get_watchlist_service
 from app.models.watchlist_models import (
@@ -64,6 +65,16 @@ async def sync_watchlist_workspace(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except WatchlistVersionConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "watchlist_version_conflict",
+                "message": "Watchlist has changed since this workspace was loaded.",
+                "currentVersion": exc.current_version,
+                "baseVersion": exc.base_version,
+            },
+        ) from exc
     except Exception as exc:
         _raise_watchlist_storage_error(exc)
         raise

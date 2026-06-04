@@ -47,3 +47,10 @@ create index idx_watchlist_item_user on
       user_id,
       symbol
    );
+
+create table watchlist_workspace (
+   user_id     varchar2(64) primary key,
+   version     number default 0 not null,
+   created_at  timestamp with time zone default systimestamp not null,
+   updated_at  timestamp with time zone default systimestamp not null
+);

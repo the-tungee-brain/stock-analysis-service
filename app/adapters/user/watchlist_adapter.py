@@ -19,11 +19,21 @@ _MAX_SYMBOLS_PER_FOLDER = 100
 _MAX_TOTAL_SYMBOLS = 500
 
 
+class WatchlistVersionConflictError(RuntimeError):
+    def __init__(self, *, current_version: int, base_version: int):
+        self.current_version = current_version
+        self.base_version = base_version
+        super().__init__(
+            f"Watchlist version conflict: current={current_version}, base={base_version}"
+        )
+
+
 class WatchlistAdapter:
     def __init__(self, client: oracledb.ConnectionPool):
         self.client = client
         self.folder_table = "WATCHLIST_FOLDER"
         self.item_table = "WATCHLIST_ITEM"
+        self.workspace_table = "WATCHLIST_WORKSPACE"
 
     @staticmethod
     def _normalize_symbol(symbol: str) -> str:
@@ -66,6 +76,14 @@ class WatchlistAdapter:
             raise ValueError(f"At most {_MAX_TOTAL_SYMBOLS} total symbols allowed")
 
     def list_workspace(self, user_id: str) -> list[WatchlistFolderRecord]:
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            return self._list_workspace(cur, user_id)
+        finally:
+            self.client.release(con)
+
+    def _list_workspace(self, cur, user_id: str) -> list[WatchlistFolderRecord]:
         folder_sql = f"""
             SELECT id, name, icon_name, swatch_id, accent_hex,
                    is_pinned, is_collapsed, sort_order, created_at
@@ -80,16 +98,11 @@ class WatchlistAdapter:
             ORDER BY sort_order ASC, symbol ASC
         """
 
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
-            cur.execute(folder_sql, {"user_id": user_id})
-            folder_rows = cur.fetchall()
+        cur.execute(folder_sql, {"user_id": user_id})
+        folder_rows = cur.fetchall()
 
-            cur.execute(item_sql, {"user_id": user_id})
-            item_rows = cur.fetchall()
-        finally:
-            self.client.release(con)
+        cur.execute(item_sql, {"user_id": user_id})
+        item_rows = cur.fetchall()
 
         items_by_folder: dict[str, list[WatchlistSymbolRecord]] = {}
         for item_id, folder_id, symbol, sort_order, created_at in item_rows:
@@ -130,9 +143,103 @@ class WatchlistAdapter:
             )
         return folders
 
+    def get_workspace_snapshot(
+        self, user_id: str
+    ) -> tuple[list[WatchlistFolderRecord], int]:
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            cur.execute("SET TRANSACTION READ ONLY")
+            folders = self._list_workspace(cur, user_id)
+            workspace_version = self._get_workspace_version(cur, user_id)
+            con.commit()
+            return folders, workspace_version
+        except Exception:
+            con.rollback()
+            raise
+        finally:
+            self.client.release(con)
+
+    def get_workspace_version(self, user_id: str) -> int:
+        con = self.client.acquire()
+        try:
+            cur = con.cursor()
+            return self._get_workspace_version(cur, user_id)
+        finally:
+            self.client.release(con)
+
+    def _get_workspace_version(self, cur, user_id: str) -> int:
+        cur.execute(
+            f"""
+            SELECT version
+            FROM {self.workspace_table}
+            WHERE user_id = :user_id
+            """,
+            {"user_id": user_id},
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+    @staticmethod
+    def _is_unique_constraint_error(exc: Exception) -> bool:
+        error = exc.args[0] if getattr(exc, "args", None) else None
+        code = getattr(error, "code", None)
+        return code == 1 or "ORA-00001" in str(exc)
+
+    def _select_workspace_version_for_update(self, cur, user_id: str) -> int | None:
+        cur.execute(
+            f"""
+            SELECT version
+            FROM {self.workspace_table}
+            WHERE user_id = :user_id
+            FOR UPDATE
+            """,
+            {"user_id": user_id},
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row else None
+
+    def _get_or_create_workspace_version_for_update(self, cur, user_id: str) -> int:
+        current_version = self._select_workspace_version_for_update(cur, user_id)
+        if current_version is not None:
+            return current_version
+
+        try:
+            cur.execute(
+                f"""
+                INSERT INTO {self.workspace_table} (user_id, version)
+                VALUES (:user_id, 0)
+                """,
+                {"user_id": user_id},
+            )
+            return 0
+        except oracledb.DatabaseError as exc:
+            if not self._is_unique_constraint_error(exc):
+                raise
+
+        current_version = self._select_workspace_version_for_update(cur, user_id)
+        if current_version is None:
+            raise RuntimeError("Workspace version row was not available after insert")
+        return current_version
+
+    def _set_workspace_version(self, cur, user_id: str, version: int) -> None:
+        cur.execute(
+            f"""
+            UPDATE {self.workspace_table}
+            SET version = :version,
+                updated_at = systimestamp
+            WHERE user_id = :user_id
+            """,
+            {"user_id": user_id, "version": version},
+        )
+
     def sync_workspace(
-        self, user_id: str, folders: list[WatchlistFolderRecord]
-    ) -> list[WatchlistFolderRecord]:
+        self,
+        user_id: str,
+        folders: list[WatchlistFolderRecord],
+        *,
+        base_version: int | None = None,
+    ) -> tuple[list[WatchlistFolderRecord], int]:
         self._validate_workspace(folders)
 
         incoming_folder_ids = {folder.id for folder in folders}
@@ -143,6 +250,15 @@ class WatchlistAdapter:
         con = self.client.acquire()
         try:
             cur = con.cursor()
+            current_version = self._get_or_create_workspace_version_for_update(
+                cur, user_id
+            )
+            if base_version is not None and base_version != current_version:
+                raise WatchlistVersionConflictError(
+                    current_version=current_version,
+                    base_version=base_version,
+                )
+            next_version = current_version + 1
 
             if incoming_folder_ids:
                 folder_placeholders = ", ".join(
@@ -166,8 +282,9 @@ class WatchlistAdapter:
                     f"DELETE FROM {self.folder_table} WHERE user_id = :user_id",
                     {"user_id": user_id},
                 )
+                self._set_workspace_version(cur, user_id, next_version)
                 con.commit()
-                return []
+                return [], next_version
 
             merge_folder_sql = f"""
                 MERGE INTO {self.folder_table} t
@@ -289,6 +406,8 @@ class WatchlistAdapter:
                     {"user_id": user_id, **global_item_params},
                 )
 
+            self._set_workspace_version(cur, user_id, next_version)
+            saved = self._list_workspace(cur, user_id)
             con.commit()
         except Exception:
             con.rollback()
@@ -296,7 +415,7 @@ class WatchlistAdapter:
         finally:
             self.client.release(con)
 
-        return self.list_workspace(user_id)
+        return saved, next_version
 
     def delete_by_user_id(self, user_id: str) -> None:
         con = self.client.acquire()
@@ -308,6 +427,10 @@ class WatchlistAdapter:
             )
             cur.execute(
                 f"DELETE FROM {self.folder_table} WHERE user_id = :user_id",
+                {"user_id": user_id},
+            )
+            cur.execute(
+                f"DELETE FROM {self.workspace_table} WHERE user_id = :user_id",
                 {"user_id": user_id},
             )
             con.commit()
@@ -323,6 +446,7 @@ class WatchlistAdapter:
         *,
         titles_by_symbol: dict[str, str],
         quotes_by_symbol: dict[str, tuple[float, float, float]] | None = None,
+        workspace_version: int = 0,
     ) -> WatchlistWorkspaceResponse:
         from datetime import datetime, timezone
 
@@ -366,4 +490,5 @@ class WatchlistAdapter:
         return WatchlistWorkspaceResponse(
             folders=response_folders,
             asOf=datetime.now(timezone.utc),
+            workspaceVersion=workspace_version,
         )

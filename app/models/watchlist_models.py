@@ -33,6 +33,7 @@ class WatchlistWorkspaceSyncRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     folders: list[WatchlistFolderRecord] = Field(default_factory=list)
+    base_version: int | None = Field(default=None, alias="baseVersion")
 
 
 class WatchlistSymbolResponse(BaseModel):
@@ -68,3 +69,4 @@ class WatchlistWorkspaceResponse(BaseModel):
 
     folders: list[WatchlistFolderResponse] = Field(default_factory=list)
     as_of: datetime = Field(alias="asOf")
+    workspace_version: int = Field(default=0, alias="workspaceVersion")
