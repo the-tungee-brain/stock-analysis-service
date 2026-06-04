@@ -5,6 +5,10 @@ from pydantic import BaseModel, Field
 from app.models.momentum_breakout_alert_models import AlertRiskGateResultDto
 from app.models.strategy_models import _STRATEGY_MODEL_CONFIG
 
+DEFAULT_MIN_HISTORICAL_PROFIT_FACTOR = 1.2
+DEFAULT_MIN_HISTORICAL_TRADES = 20
+DEFAULT_MAX_STOP_DISTANCE_PCT = 8.0
+
 
 class MomentumBreakoutScanCandidateDto(BaseModel):
     model_config = _STRATEGY_MODEL_CONFIG
@@ -22,6 +26,7 @@ class MomentumBreakoutScanCandidateDto(BaseModel):
         default=None, alias="historicalTotalTrades"
     )
     setup_score: float = Field(alias="setupScore")
+    stop_distance_pct: float = Field(alias="stopDistancePct")
     volume_ratio: float | None = Field(default=None, alias="volumeRatio")
     rs_percentile: float | None = Field(default=None, alias="rsPercentile")
     market_regime: str | None = Field(default=None, alias="marketRegime")
@@ -33,5 +38,11 @@ class MomentumBreakoutScanResponse(BaseModel):
 
     scan_time: str = Field(alias="scanTime")
     total_symbols_scanned: int = Field(alias="totalSymbolsScanned")
-    candidates_found: int = Field(alias="candidatesFound")
+    valid_setups_found: int = Field(alias="validSetupsFound")
+    tradable_candidates_found: int = Field(alias="tradableCandidatesFound")
+    blocked_candidates_count: int = Field(alias="blockedCandidatesCount")
+    candidates_found: int = Field(
+        alias="candidatesFound",
+        description="Number of candidates returned in this response (after limit)",
+    )
     candidates: list[MomentumBreakoutScanCandidateDto]

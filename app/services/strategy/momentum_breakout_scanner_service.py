@@ -24,6 +24,9 @@ from trade_planner.types import OHLCVBar, StockData
 
 from app.models.momentum_breakout_alert_models import AlertRiskGateResultDto
 from app.models.momentum_breakout_scan_models import (
+    DEFAULT_MAX_STOP_DISTANCE_PCT,
+    DEFAULT_MIN_HISTORICAL_PROFIT_FACTOR,
+    DEFAULT_MIN_HISTORICAL_TRADES,
     MomentumBreakoutScanCandidateDto,
     MomentumBreakoutScanResponse,
 )
@@ -39,6 +42,33 @@ def _max_universe() -> int:
 
 def _worker_count() -> int:
     return int(os.environ.get("MB_SCAN_WORKERS", "8"))
+
+
+def compute_stop_distance_pct(entry_price: float, stop_price: float) -> float:
+    """Percent distance from entry to stop (long setups)."""
+    if entry_price <= 0:
+        return 0.0
+    return round(abs(entry_price - stop_price) / entry_price * 100.0, 4)
+
+
+def is_tradable_candidate(
+    candidate: "_ScanCandidate",
+    *,
+    min_historical_profit_factor: float = DEFAULT_MIN_HISTORICAL_PROFIT_FACTOR,
+    min_historical_trades: int = DEFAULT_MIN_HISTORICAL_TRADES,
+    max_stop_distance_pct: float = DEFAULT_MAX_STOP_DISTANCE_PCT,
+) -> bool:
+    if not candidate.risk_gate.allowed:
+        return False
+    profit_factor = candidate.historical_profit_factor
+    if profit_factor is None or profit_factor < min_historical_profit_factor:
+        return False
+    total_trades = candidate.historical_total_trades
+    if total_trades is None or total_trades < min_historical_trades:
+        return False
+    if candidate.stop_distance_pct > max_stop_distance_pct:
+        return False
+    return True
 
 
 def _parse_symbols_param(symbols: str | None) -> list[str] | None:
@@ -75,6 +105,7 @@ class _ScanCandidate:
     historical_profit_factor: float | None
     historical_total_trades: int | None
     setup_score: float
+    stop_distance_pct: float
     volume_ratio: float | None
     rs_percentile: float | None
     market_regime: str | None
@@ -190,6 +221,9 @@ class MomentumBreakoutScannerService:
             historical_profit_factor=stats.profit_factor if stats.total_trades else None,
             historical_total_trades=stats.total_trades or None,
             setup_score=plan.confidence_score,
+            stop_distance_pct=compute_stop_distance_pct(
+                plan.entry_price, plan.stop_price
+            ),
             volume_ratio=snapshot.volume_ratio,
             rs_percentile=snapshot.rs_percentile,
             market_regime=regime,
@@ -201,20 +235,54 @@ class MomentumBreakoutScannerService:
         *,
         symbols: str | None = None,
         limit: int = 50,
+        tradable_only: bool = False,
+        min_historical_profit_factor: float = DEFAULT_MIN_HISTORICAL_PROFIT_FACTOR,
+        min_historical_trades: int = DEFAULT_MIN_HISTORICAL_TRADES,
+        max_stop_distance_pct: float = DEFAULT_MAX_STOP_DISTANCE_PCT,
     ) -> MomentumBreakoutScanResponse:
         symbol_list = self.resolve_symbol_list(symbols)
-        candidates = self._collect_candidates(symbol_list)
-        candidates.sort(key=_candidate_sort_key)
-        capped = candidates[: max(1, limit)]
+        valid_candidates = self._collect_candidates(symbol_list)
+        valid_candidates.sort(key=_candidate_sort_key)
+
+        tradable_candidates = [
+            candidate
+            for candidate in valid_candidates
+            if is_tradable_candidate(
+                candidate,
+                min_historical_profit_factor=min_historical_profit_factor,
+                min_historical_trades=min_historical_trades,
+                max_stop_distance_pct=max_stop_distance_pct,
+            )
+        ]
+
+        pool = tradable_candidates if tradable_only else valid_candidates
+        capped = pool[: max(1, limit)]
+
         return MomentumBreakoutScanResponse(
             scanTime=datetime.now(timezone.utc).isoformat(),
             totalSymbolsScanned=len(symbol_list),
-            candidatesFound=len(candidates),
+            validSetupsFound=len(valid_candidates),
+            tradableCandidatesFound=len(tradable_candidates),
+            blockedCandidatesCount=len(valid_candidates) - len(tradable_candidates),
+            candidatesFound=len(capped),
             candidates=[self._to_dto(c) for c in capped],
         )
 
-    def top_candidates(self) -> MomentumBreakoutScanResponse:
-        return self.scan(limit=TOP_CANDIDATES_LIMIT)
+    def top_candidates(
+        self,
+        *,
+        tradable_only: bool = False,
+        min_historical_profit_factor: float = DEFAULT_MIN_HISTORICAL_PROFIT_FACTOR,
+        min_historical_trades: int = DEFAULT_MIN_HISTORICAL_TRADES,
+        max_stop_distance_pct: float = DEFAULT_MAX_STOP_DISTANCE_PCT,
+    ) -> MomentumBreakoutScanResponse:
+        return self.scan(
+            limit=TOP_CANDIDATES_LIMIT,
+            tradable_only=tradable_only,
+            min_historical_profit_factor=min_historical_profit_factor,
+            min_historical_trades=min_historical_trades,
+            max_stop_distance_pct=max_stop_distance_pct,
+        )
 
     def _collect_candidates(self, symbol_list: list[str]) -> list[_ScanCandidate]:
         if not symbol_list:
@@ -256,6 +324,7 @@ class MomentumBreakoutScannerService:
             historicalProfitFactor=candidate.historical_profit_factor,
             historicalTotalTrades=candidate.historical_total_trades,
             setupScore=candidate.setup_score,
+            stopDistancePct=candidate.stop_distance_pct,
             volumeRatio=candidate.volume_ratio,
             rsPercentile=candidate.rs_percentile,
             marketRegime=candidate.market_regime,
