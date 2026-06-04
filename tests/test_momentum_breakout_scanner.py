@@ -15,6 +15,7 @@ from app.services.strategy.momentum_breakout_scanner_service import (
     MomentumBreakoutScannerService,
     _candidate_sort_key,
     _ScanCandidate,
+    build_production_scan_universe,
     compute_stop_distance_pct,
     is_tradable_candidate,
 )
@@ -49,6 +50,88 @@ def scanner() -> MomentumBreakoutScannerService:
 
 def test_resolve_explicit_symbols(scanner: MomentumBreakoutScannerService) -> None:
     assert scanner.resolve_symbol_list("aapl,msft,AAPL") == ["AAPL", "MSFT"]
+
+
+def test_build_production_scan_universe_alphabetical_cap_and_raw_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MB_SCAN_MAX_UNIVERSE", "2")
+
+    class _FakeStore:
+        def active_snapshot_id(self) -> str:
+            return "2026-01-01"
+
+        def load_universe_symbols(self, snapshot_id: str | None = None) -> list[str]:
+            assert snapshot_id == "2026-01-01"
+            return ["ZZZ", "AAA", "BBB", "CCC"]
+
+    def _raw_exists(symbol: str) -> bool:
+        return symbol in {"AAA", "BBB", "CCC"}
+
+    monkeypatch.setattr(
+        "app.services.strategy.momentum_breakout_scanner_service.open_store",
+        lambda _cfg: _FakeStore(),
+    )
+    monkeypatch.setattr(
+        "app.services.strategy.momentum_breakout_scanner_service.raw_exists",
+        _raw_exists,
+    )
+
+    info = build_production_scan_universe(sample_size=50)
+    assert info.total_available_symbols == 3
+    assert info.scan_cap == 2
+    assert info.symbols_scanned == 2
+    assert info.excluded_symbols == 1
+    assert info.sample_symbols == ["AAA", "BBB"]
+    assert "ranking_pipeline.sqlite" in info.universe_source
+
+
+def test_universe_api_returns_diagnostics(
+    scanner: MomentumBreakoutScannerService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MB_ALERTS_ENABLED", "true")
+
+    class _FakeStore:
+        def active_snapshot_id(self) -> str:
+            return "snap"
+
+        def load_universe_symbols(self, snapshot_id: str | None = None) -> list[str]:
+            return [f"SYM{i:02d}" for i in range(60)]
+
+    monkeypatch.setattr(
+        "app.services.strategy.momentum_breakout_scanner_service.open_store",
+        lambda _cfg: _FakeStore(),
+    )
+    monkeypatch.setattr(
+        "app.services.strategy.momentum_breakout_scanner_service.raw_exists",
+        lambda _symbol: True,
+    )
+    monkeypatch.setenv("MB_SCAN_MAX_UNIVERSE", "500")
+
+    class _FakeUser:
+        identity_sub = "user-1"
+
+    async def _user() -> _FakeUser:
+        return _FakeUser()
+
+    app.dependency_overrides[get_current_user] = _user
+    app.dependency_overrides[get_momentum_breakout_scanner_service] = lambda: scanner
+
+    client = TestClient(app)
+    try:
+        response = client.get("/api/v1/strategy/momentum-breakout/universe")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["totalAvailableSymbols"] == 60
+        assert body["scanCap"] == 500
+        assert body["symbolsScanned"] == 60
+        assert body["excludedSymbols"] == 0
+        assert len(body["sampleSymbols"]) == 50
+        assert body["sampleSymbols"][0] == "SYM00"
+        assert body["sampleSymbols"][49] == "SYM49"
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_candidates_sort_by_setup_score_then_profit_factor() -> None:

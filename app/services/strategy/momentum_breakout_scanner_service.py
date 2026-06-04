@@ -29,6 +29,8 @@ from app.models.momentum_breakout_scan_models import (
     DEFAULT_MIN_HISTORICAL_TRADES,
     MomentumBreakoutScanCandidateDto,
     MomentumBreakoutScanResponse,
+    MomentumBreakoutUniverseResponse,
+    UNIVERSE_SOURCE_DESCRIPTION,
 )
 
 logger = logging.getLogger(__name__)
@@ -84,12 +86,42 @@ def _parse_symbols_param(symbols: str | None) -> list[str] | None:
     return ordered
 
 
-def _load_ranking_universe(*, max_symbols: int) -> list[str]:
+def _ranking_universe_snapshot_symbols() -> tuple[str, list[str]]:
+    """Active ranking snapshot members that passed liquidity filters (alphabetical)."""
     cfg = default_config()
     store = open_store(cfg)
-    universe = store.load_universe_symbols()
+    snapshot_id = store.active_snapshot_id()
+    if not snapshot_id:
+        raise LookupError("No active ranking universe snapshot")
+    universe = store.load_universe_symbols(snapshot_id)
     if not universe:
         raise LookupError("No active ranking universe")
+    return snapshot_id, universe
+
+
+def build_production_scan_universe(
+    *,
+    max_symbols: int | None = None,
+    sample_size: int = 50,
+) -> MomentumBreakoutUniverseResponse:
+    """Symbols the production scanner evaluates when `symbols` query param is omitted."""
+    cap = max(1, max_symbols if max_symbols is not None else _max_universe())
+    _snapshot_id, universe = _ranking_universe_snapshot_symbols()
+    with_data = [s.strip().upper() for s in universe if raw_exists(s.strip().upper())]
+    scanned = with_data[:cap]
+    total_available = len(with_data)
+    return MomentumBreakoutUniverseResponse(
+        totalAvailableSymbols=total_available,
+        scanCap=cap,
+        symbolsScanned=len(scanned),
+        excludedSymbols=max(0, total_available - len(scanned)),
+        universeSource=UNIVERSE_SOURCE_DESCRIPTION,
+        sampleSymbols=scanned[: max(0, sample_size)],
+    )
+
+
+def _load_ranking_universe(*, max_symbols: int) -> list[str]:
+    _snapshot_id, universe = _ranking_universe_snapshot_symbols()
     with_data = [s.strip().upper() for s in universe if raw_exists(s.strip().upper())]
     return with_data[: max(1, max_symbols)]
 
@@ -158,6 +190,13 @@ class MomentumBreakoutScannerService:
         if explicit is not None:
             return explicit
         return _load_ranking_universe(max_symbols=_max_universe())
+
+    def describe_production_universe(
+        self,
+        *,
+        sample_size: int = 50,
+    ) -> MomentumBreakoutUniverseResponse:
+        return build_production_scan_universe(sample_size=sample_size)
 
     def evaluate_symbol(self, symbol: str) -> _ScanCandidate | None:
         sym = symbol.strip().upper()

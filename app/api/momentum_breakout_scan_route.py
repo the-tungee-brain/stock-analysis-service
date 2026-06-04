@@ -11,12 +11,27 @@ from app.models.momentum_breakout_scan_models import (
     DEFAULT_MIN_HISTORICAL_PROFIT_FACTOR,
     DEFAULT_MIN_HISTORICAL_TRADES,
     MomentumBreakoutScanResponse,
+    MomentumBreakoutUniverseResponse,
 )
 from app.services.strategy.momentum_breakout_scanner_service import (
     MomentumBreakoutScannerService,
 )
 
 router = APIRouter(dependencies=[Depends(require_mb_alerts_enabled)])
+
+
+@router.get(
+    "/strategy/momentum-breakout/universe",
+    response_model=MomentumBreakoutUniverseResponse,
+    response_model_by_alias=True,
+)
+async def get_momentum_breakout_scan_universe(
+    service: MomentumBreakoutScannerService = Depends(get_momentum_breakout_scanner_service),
+) -> MomentumBreakoutUniverseResponse:
+    try:
+        return await asyncio.to_thread(service.describe_production_universe)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get(
