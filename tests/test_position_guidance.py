@@ -88,6 +88,21 @@ def test_long_call_conflicts_with_bearish_thesis():
         )
     )
     assert result.verdict in {"REVIEW_CLOSE", "CLOSE"}
+    assert result.primary_driver.code in {"LARGE_DRAWDOWN", "THETA_DECAY", "THESIS_CONFLICT"}
+
+
+def test_long_call_minus_20_review_close():
+    result = evaluate_long_option(
+        LongOptionGuidanceInputs(
+            position_kind="LONG_CALL",
+            thesis="BULLISH",
+            dte=30,
+            pnl_pct=-21.0,
+            moneyness="OTM",
+            alert_reasons=[],
+        )
+    )
+    assert result.verdict in {"REVIEW_CLOSE", "CLOSE"}
 
 
 def test_short_option_assignment_risk():

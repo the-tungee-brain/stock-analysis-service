@@ -23,6 +23,15 @@ _DISCLAIMER = (
 )
 
 
+class GuidanceDriverModel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    code: str
+    label: str
+    points: float
+    detail: str | None = None
+
+
 class SymbolThesisBlock(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -51,7 +60,15 @@ class PositionGuidanceItem(BaseModel):
     verdict: PositionVerdict
     confidence: GuidanceConfidence
     urgency: int = Field(ge=0, le=100)
+    relative_risk_rank: int = Field(default=0, ge=0, le=100, alias="relativeRiskRank")
     justification: str
+    primary_driver: GuidanceDriverModel = Field(alias="primaryDriver")
+    secondary_driver: GuidanceDriverModel | None = Field(
+        default=None, alias="secondaryDriver"
+    )
+    tertiary_driver: GuidanceDriverModel | None = Field(
+        default=None, alias="tertiaryDriver"
+    )
     primary_reason: str = Field(alias="primaryReason")
     supporting_factors: list[str] = Field(
         default_factory=list, alias="supportingFactors"
@@ -83,6 +100,7 @@ class PortfolioExitAttentionItem(BaseModel):
     verdict: PositionVerdict
     confidence: GuidanceConfidence
     urgency: int = Field(ge=0, le=100)
+    relative_risk_rank: int = Field(default=0, ge=0, le=100, alias="relativeRiskRank")
     primary_reason: str = Field(alias="primaryReason")
 
 

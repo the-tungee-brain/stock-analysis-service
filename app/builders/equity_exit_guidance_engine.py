@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.builders.guidance_verdict_copy import (
+from app.builders.guidance_scoring_drivers import (
+    build_equity_copy_from_drivers,
+    contributors_to_drivers,
+)
+from app.builders.guidance_scoring_types import (
+    GuidanceDriver,
+    ScoreContributor,
     VerdictJustification,
-    build_equity_verdict_copy,
-    detect_equity_justification,
-
 )
 from app.models.position_guidance_models import GuidanceConfidence, EquityVerdict
+from app.models.intelligence_models import IntelligenceSignal
+from app.models.trade_decision_models import TradeDecision, TradeEnvironment
 
 ExitConfidence = GuidanceConfidence
 ExitVerdict = EquityVerdict
@@ -16,8 +21,6 @@ ExitVerdict = EquityVerdict
 _EXIT_DISCLAIMER = (
     "Decision support only — not investment advice or a trade recommendation."
 )
-from app.models.intelligence_models import IntelligenceSignal
-from app.models.trade_decision_models import TradeDecision, TradeEnvironment
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,10 @@ class EquityExitGuidanceResult:
     confidence: ExitConfidence
     exit_urgency: int
     justification: VerdictJustification
+    primary_driver: GuidanceDriver
+    secondary_driver: GuidanceDriver | None
+    tertiary_driver: GuidanceDriver | None
+    contributors: tuple[ScoreContributor, ...]
     primary_reason: str
     supporting_factors: list[str]
     risk_factors: list[str]
@@ -57,24 +64,79 @@ def evaluate_equity_exit_guidance(inputs: EquityExitGuidanceInputs) -> EquityExi
     regime_env = td.regime.trade_environment
     trade_score = td.trade_quality_score
 
+    contributors: list[ScoreContributor] = []
+
     regime_pts = _regime_stress(regime_env)
-    position_pts = _position_stress(
+    if regime_pts > 0:
+        contributors.append(
+            ScoreContributor(
+                bucket="regime",
+                points=regime_pts,
+                label=f"Regime {td.regime.regime_id} is {regime_env.lower()}",
+                driver="UNFAVORABLE_REGIME" if regime_env != "FAVORABLE" else None,
+            )
+        )
+
+    position_pts, pos_contribs = _position_stress_contributors(
         weight_pct=inputs.position_weight_pct,
         pnl_pct=inputs.open_profit_loss_pct,
     )
+    contributors.extend(pos_contribs)
+
     technical_pts = min(25, max(0, 100 - trade_score) * 0.25)
     if inputs.failed_breakout:
         technical_pts = min(25, technical_pts + 10)
     if _is_late_trend(td, inputs):
         technical_pts = min(25, technical_pts + 8)
+    if technical_pts > 0:
+        contributors.append(
+            ScoreContributor(
+                bucket="technical",
+                points=technical_pts,
+                label=f"Trade quality {trade_score}/100 — technical pressure",
+                driver="TREND_DETERIORATION",
+            )
+        )
 
     rs_pts = _rs_stress(td, inputs)
+    if rs_pts > 0:
+        contributors.append(
+            ScoreContributor(
+                bucket="relative_strength",
+                points=rs_pts,
+                label="Relative strength vs market has weakened",
+                driver="WEAKENING_RELATIVE_STRENGTH",
+            )
+        )
+
     volume_pts = _volume_stress(inputs)
-    signal_pts = _signal_stress(inputs.signals, inputs.alert_reasons)
+    if volume_pts > 0:
+        contributors.append(
+            ScoreContributor(
+                bucket="volume",
+                points=volume_pts,
+                label="Volume/momentum deterioration",
+                driver="TREND_DETERIORATION",
+            )
+        )
+
+    signal_pts, signal_contribs = _signal_stress_contributors(
+        inputs.signals, inputs.alert_reasons
+    )
+    contributors.extend(signal_contribs)
 
     urgency = min(
         100,
-        int(round(regime_pts + position_pts + technical_pts + rs_pts + volume_pts + signal_pts)),
+        int(
+            round(
+                regime_pts
+                + position_pts
+                + technical_pts
+                + rs_pts
+                + volume_pts
+                + signal_pts
+            )
+        ),
     )
 
     verdict = _verdict_from_urgency(urgency)
@@ -92,6 +154,7 @@ def evaluate_equity_exit_guidance(inputs: EquityExitGuidanceInputs) -> EquityExi
         verdict=verdict,
         trade_score=trade_score,
         weight_pct=inputs.position_weight_pct,
+        pnl_pct=inputs.open_profit_loss_pct,
         signals=inputs.signals,
         alert_reasons=inputs.alert_reasons,
     )
@@ -104,18 +167,15 @@ def evaluate_equity_exit_guidance(inputs: EquityExitGuidanceInputs) -> EquityExi
             critical_signal = signal.message
             break
 
-    justification = detect_equity_justification(
-        signals=inputs.signals,
-        alert_reasons=inputs.alert_reasons,
-        weight_pct=inputs.position_weight_pct,
+    primary_driver, secondary_driver, tertiary_driver = contributors_to_drivers(
+        contributors,
         pnl_pct=inputs.open_profit_loss_pct,
-        regime_env=regime_env,
-        failed_breakout=inputs.failed_breakout,
-        trend_bias=inputs.trend_bias,
     )
-    primary, supporting, risks = build_equity_verdict_copy(
+    primary, supporting, risks = build_equity_copy_from_drivers(
         verdict=verdict,
-        justification=justification,
+        primary=primary_driver,
+        secondary=secondary_driver,
+        tertiary=tertiary_driver,
         weight_pct=inputs.position_weight_pct,
         pnl_pct=inputs.open_profit_loss_pct,
         regime_env=regime_env,
@@ -132,7 +192,11 @@ def evaluate_equity_exit_guidance(inputs: EquityExitGuidanceInputs) -> EquityExi
         verdict=verdict,
         confidence=confidence,
         exit_urgency=urgency,
-        justification=justification,
+        justification=primary_driver.code,
+        primary_driver=primary_driver,
+        secondary_driver=secondary_driver,
+        tertiary_driver=tertiary_driver,
+        contributors=tuple(contributors),
         primary_reason=primary,
         supporting_factors=supporting,
         risk_factors=risks,
@@ -149,23 +213,82 @@ def _regime_stress(env: TradeEnvironment) -> float:
     return 0.0
 
 
-def _position_stress(*, weight_pct: float | None, pnl_pct: float | None) -> float:
+def _position_stress_contributors(
+    *,
+    weight_pct: float | None,
+    pnl_pct: float | None,
+) -> tuple[float, list[ScoreContributor]]:
+    contribs: list[ScoreContributor] = []
     pts = 0.0
     if weight_pct is not None:
         if weight_pct >= 30:
-            pts += 25.0
+            w_pts = 25.0
+            contribs.append(
+                ScoreContributor(
+                    bucket="concentration",
+                    points=w_pts,
+                    label=f"Portfolio weight {weight_pct:.1f}% is very high",
+                    driver="EXCESSIVE_CONCENTRATION",
+                )
+            )
+            pts = max(pts, w_pts)
         elif weight_pct >= 20:
-            pts += 15.0
+            w_pts = 15.0
+            contribs.append(
+                ScoreContributor(
+                    bucket="concentration",
+                    points=w_pts,
+                    label=f"Portfolio weight {weight_pct:.1f}% is elevated",
+                    driver="EXCESSIVE_CONCENTRATION",
+                )
+            )
+            pts = max(pts, w_pts)
         elif weight_pct >= 15:
-            pts += 8.0
+            w_pts = 8.0
+            contribs.append(
+                ScoreContributor(
+                    bucket="concentration",
+                    points=w_pts,
+                    label=f"Portfolio weight {weight_pct:.1f}%",
+                    driver="EXCESSIVE_CONCENTRATION",
+                )
+            )
+            pts = max(pts, w_pts)
     if pnl_pct is not None:
         if pnl_pct <= -30:
-            pts = max(pts, 25.0)
+            l_pts = 25.0
+            contribs.append(
+                ScoreContributor(
+                    bucket="unrealized_loss",
+                    points=l_pts,
+                    label=f"Unrealized loss ~{pnl_pct:.0f}%",
+                    driver="LARGE_DRAWDOWN",
+                )
+            )
+            pts = max(pts, l_pts)
         elif pnl_pct <= -20:
-            pts = max(pts, 18.0)
+            l_pts = 18.0
+            contribs.append(
+                ScoreContributor(
+                    bucket="unrealized_loss",
+                    points=l_pts,
+                    label=f"Unrealized loss ~{pnl_pct:.0f}%",
+                    driver="LARGE_DRAWDOWN",
+                )
+            )
+            pts = max(pts, l_pts)
         elif pnl_pct <= -10:
-            pts = max(pts, 8.0)
-    return min(25.0, pts)
+            l_pts = 8.0
+            contribs.append(
+                ScoreContributor(
+                    bucket="unrealized_loss",
+                    points=l_pts,
+                    label=f"Unrealized loss ~{pnl_pct:.0f}%",
+                    driver="LARGE_DRAWDOWN",
+                )
+            )
+            pts = max(pts, l_pts)
+    return min(25.0, pts), contribs
 
 
 def _rs_stress(td: TradeDecision, inputs: EquityExitGuidanceInputs) -> float:
@@ -226,27 +349,47 @@ def _volume_stress(inputs: EquityExitGuidanceInputs) -> float:
     return min(10.0, pts)
 
 
-def _signal_stress(
+def _signal_stress_contributors(
     signals: list[IntelligenceSignal],
     alert_reasons: list[str],
-) -> float:
+) -> tuple[float, list[ScoreContributor]]:
     severity_pts = {"critical": 10.0, "warning": 7.0, "watch": 4.0, "info": 0.0}
-    pts = 0.0
-    stress_kinds = {
-        "drawdown",
-        "concentration",
-        "position_size",
-        "earnings",
-        "thesis_drift",
-        "valuation",
-        "momentum",
+    driver_map = {
+        "drawdown": "LARGE_DRAWDOWN",
+        "concentration": "EXCESSIVE_CONCENTRATION",
+        "position_size": "EXCESSIVE_CONCENTRATION",
+        "earnings": "EARNINGS_RISK",
+        "thesis_drift": "TREND_DETERIORATION",
+        "valuation": "TREND_DETERIORATION",
+        "momentum": "WEAKENING_RELATIVE_STRENGTH",
     }
+    contribs: list[ScoreContributor] = []
+    pts = 0.0
+    stress_kinds = set(driver_map.keys())
     for signal in signals:
         if signal.kind in stress_kinds:
-            pts = max(pts, severity_pts.get(signal.severity, 0.0))
+            s_pts = severity_pts.get(signal.severity, 0.0)
+            if s_pts > 0:
+                contribs.append(
+                    ScoreContributor(
+                        bucket=f"signal_{signal.kind}",
+                        points=s_pts,
+                        label=signal.message,
+                        driver=driver_map.get(signal.kind),
+                    )
+                )
+                pts = max(pts, s_pts)
     if alert_reasons and pts < 7.0:
         pts = max(pts, 7.0)
-    return min(10.0, pts)
+        contribs.append(
+            ScoreContributor(
+                bucket="alerts",
+                points=7.0,
+                label=alert_reasons[0],
+                driver="TREND_DETERIORATION",
+            )
+        )
+    return min(10.0, pts), contribs
 
 
 def _verdict_from_urgency(urgency: int) -> ExitVerdict:
@@ -314,18 +457,28 @@ def _apply_ceilings(
     verdict: ExitVerdict,
     trade_score: int,
     weight_pct: float | None,
+    pnl_pct: float | None,
     signals: list[IntelligenceSignal],
     alert_reasons: list[str],
 ) -> ExitVerdict:
     if verdict in {"REVIEW_SELL", "EXIT"}:
         return verdict
+    has_stress = bool(alert_reasons) or any(
+        s.severity in {"critical", "warning"} for s in signals
+    )
+    heavy_weight = weight_pct is not None and weight_pct >= 20
+    tiny_loss = (
+        pnl_pct is not None
+        and pnl_pct > -5.0
+        and (weight_pct is None or weight_pct < 15.0)
+    )
+    if verdict == "TRIM" and tiny_loss and not has_stress and not heavy_weight:
+        return "HOLD"
     if trade_score < 80:
         return verdict
-    if weight_pct is not None and weight_pct >= 20:
+    if heavy_weight:
         return verdict
-    if alert_reasons:
-        return verdict
-    if any(s.severity in {"critical", "warning"} for s in signals):
+    if has_stress:
         return verdict
     return "HOLD"
 

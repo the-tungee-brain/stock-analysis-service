@@ -6,7 +6,8 @@ from app.builders.equity_exit_guidance_engine import (
     EquityExitGuidanceInputs,
     evaluate_equity_exit_guidance,
 )
-from app.builders.guidance_verdict_copy import build_equity_verdict_copy
+from app.builders.guidance_scoring_drivers import build_equity_copy_from_drivers
+from app.builders.guidance_scoring_types import GuidanceDriver
 from app.models.intelligence_models import IntelligenceSignal
 from app.models.trade_decision_models import (
     TradeDecision,
@@ -14,7 +15,6 @@ from app.models.trade_decision_models import (
     TradeDecisionRegime,
 )
 
-_HOLD_PHRASES = ("no major exit pressures", "continue monitoring", "thesis remains intact")
 _TRIM_FORBIDDEN = ("no major exit pressures", "continue monitoring only")
 
 
@@ -79,10 +79,17 @@ def test_hold_verdict_copy_supports_monitoring():
     assert "monitor" in result.primary_reason.lower() or "intact" in result.primary_reason.lower()
 
 
-def test_primary_reason_leads_with_justification_label():
-    primary, supporting, _ = build_equity_verdict_copy(
+def test_primary_reason_leads_with_driver_label():
+    primary, supporting, _ = build_equity_copy_from_drivers(
         verdict="TRIM",
-        justification="EXCESSIVE_CONCENTRATION",
+        primary=GuidanceDriver(
+            code="EXCESSIVE_CONCENTRATION",
+            label="Excessive concentration",
+            points=15.0,
+            detail="Portfolio weight 24.0% is elevated",
+        ),
+        secondary=None,
+        tertiary=None,
         weight_pct=24.0,
         pnl_pct=-5.0,
         regime_env="FAVORABLE",
@@ -92,4 +99,4 @@ def test_primary_reason_leads_with_justification_label():
     )
     assert primary.startswith("Excessive concentration:")
     assert "reducing exposure" in primary.lower()
-    assert any("weakened" in s.lower() or "reducing" in s.lower() for s in supporting)
+    assert any("weakened" in s.lower() or "reducing" in s.lower() or "24" in s for s in supporting)

@@ -607,6 +607,28 @@ class PortfolioAnalysisService:
             underlying_price=underlying_price,
         )
 
+        position_guidance_block = None
+        try:
+            from app.builders.position_guidance_analysis_block import (
+                format_position_guidance_analysis_block,
+            )
+            from app.services.position_guidance_service import (
+                build_symbol_position_guidance,
+            )
+
+            guidance = build_symbol_position_guidance(
+                symbol=symbol,
+                positions=positions,
+                account=account,
+                research_service=self.company_research_service,
+                all_positions=positions,
+            )
+            position_guidance_block = format_position_guidance_analysis_block(guidance)
+        except Exception:
+            logger.debug(
+                "Position guidance block skipped for %s", symbol, exc_info=True
+            )
+
         return SymbolContext(
             symbol=symbol,
             account=account,
@@ -624,6 +646,7 @@ class PortfolioAnalysisService:
             assignment_risk_block=assignment_risk_block,
             analysis_since=analysis_since,
             precomputed=precomputed,
+            position_guidance_block=position_guidance_block,
         )
 
     @staticmethod

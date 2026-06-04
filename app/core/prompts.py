@@ -158,6 +158,7 @@ class SymbolContext(BaseAnalysisContext):
     recent_transactions: Optional[str] = None
     analysis_since: Optional[datetime] = None
     precomputed: SymbolAnalysisPrecomputed | None = None
+    position_guidance_block: Optional[str] = None
 
 
 OPTION_PREMIUM_GUIDANCE = (
@@ -438,6 +439,8 @@ def _structured_symbol_analysis_v1_task(symbol: str) -> str:
             "Recommendation rationale" (prose, 2-3 sentences; no repeated path titles per line).
           · "Position snapshot" — size, P/L, key greeks/DTE if options.
           · "Recommendation rationale" — why this action vs alternatives (may include $ figures from JSON).
+            When POSITION GUIDANCE is provided, explain those per-leg verdicts; do not contradict them
+            without an explicit disagreement note in this section.
           · "Execution plan" — contracts, strikes, expirations, timing, limit-order guidance if helpful.
           · "Risk/reward" — what could go wrong and what changes your mind.
         """).strip()
@@ -1642,6 +1645,13 @@ def build_symbol_prompt(
       {precomputed_json}
         """).strip() + "\n\n"
 
+    position_guidance_section = ""
+    if ctx.position_guidance_block:
+        position_guidance_section = dedent(f"""
+      === POSITION GUIDANCE (AUTHORITATIVE PER-LEG VERDICTS) ===
+      {ctx.position_guidance_block}
+        """).strip() + "\n\n"
+
     return dedent(f"""
       Today is {now_iso}.
 
@@ -1671,7 +1681,7 @@ def build_symbol_prompt(
       === PRECOMPUTED INTELLIGENCE (SIGNALS, PEERS, TIMELINE) ===
       {intelligence_block or "No precomputed intelligence signals provided."}
 
-      {transactions_section}{assignment_section}{profile_section}{precomputed_section}=== OPTION DATA (HELD CONTRACTS + CHAIN) ===
+      {transactions_section}{assignment_section}{profile_section}{precomputed_section}{position_guidance_section}=== OPTION DATA (HELD CONTRACTS + CHAIN) ===
       {option_block}
 
       === YOUR TASK ===

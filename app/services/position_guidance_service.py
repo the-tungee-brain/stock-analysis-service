@@ -26,11 +26,13 @@ from app.builders.position_guidance_support import (
     position_quantity,
     positions_for_symbol,
 )
-from app.builders.guidance_verdict_copy import justification_label
+from app.builders.guidance_scoring_types import GuidanceDriver, justification_label
+from app.builders.position_guidance_relative_risk import compute_relative_risk_rank
 from app.builders.symbol_thesis_engine import evaluate_symbol_thesis
 from app.builders.trade_decision_engine import inputs_from_chart_payload
 from app.models.intelligence_models import IntelligenceSignal, ProactiveAlert
 from app.models.position_guidance_models import (
+    GuidanceDriverModel,
     PortfolioExitAttentionItem,
     PortfolioExitAttentionResponse,
     PositionGuidanceItem,
@@ -56,6 +58,15 @@ _ATTENTION_VERDICTS: frozenset[PositionVerdict] = frozenset({
     "ROLL",
     "REVIEW_ASSIGNMENT_RISK",
 })
+
+def _driver_model(driver: GuidanceDriver) -> GuidanceDriverModel:
+    return GuidanceDriverModel(
+        code=driver.code,
+        label=driver.label,
+        points=driver.points,
+        detail=driver.detail,
+    )
+
 
 _VERDICT_LABELS: dict[str, str] = {
     "HOLD": "Hold",
@@ -278,6 +289,13 @@ def build_symbol_position_guidance(
                     ranking_rank=rank,
                 )
             )
+            rel_rank = compute_relative_risk_rank(
+                position_kind=kind,
+                verdict=equity_result.verdict,
+                urgency=equity_result.exit_urgency,
+                open_profit_loss_pct=metrics.pnl_pct,
+                position_weight_pct=metrics.weight_pct,
+            )
             items.append(
                 PositionGuidanceItem(
                     position_key=key,
@@ -291,7 +309,19 @@ def build_symbol_position_guidance(
                     verdict=equity_result.verdict,
                     confidence=equity_result.confidence,
                     urgency=equity_result.exit_urgency,
+                    relative_risk_rank=rel_rank,
                     justification=justification_label(equity_result.justification),
+                    primary_driver=_driver_model(equity_result.primary_driver),
+                    secondary_driver=(
+                        _driver_model(equity_result.secondary_driver)
+                        if equity_result.secondary_driver
+                        else None
+                    ),
+                    tertiary_driver=(
+                        _driver_model(equity_result.tertiary_driver)
+                        if equity_result.tertiary_driver
+                        else None
+                    ),
                     primary_reason=equity_result.primary_reason,
                     supporting_factors=equity_result.supporting_factors,
                     risk_factors=equity_result.risk_factors,
@@ -374,7 +404,7 @@ def build_symbol_position_guidance(
         if underlying_price is None and is_short_option(position):
             data_gaps.append(f"{key}:underlying_price")
 
-    items.sort(key=lambda row: (-row.urgency, row.display_label))
+    items.sort(key=lambda row: (-row.relative_risk_rank, -row.urgency, row.display_label))
     narrative, prompt = _build_synthesis(
         symbol_upper=symbol_upper,
         thesis_block=thesis_block,
@@ -405,6 +435,12 @@ def _option_item(
     put_call: str | None,
     result,
 ) -> PositionGuidanceItem:
+    rel_rank = compute_relative_risk_rank(
+        position_kind=kind,
+        verdict=result.verdict,
+        urgency=result.urgency,
+        open_profit_loss_pct=metrics.pnl_pct,
+    )
     return PositionGuidanceItem(
         position_key=key,
         position_kind=kind,
@@ -420,7 +456,15 @@ def _option_item(
         verdict=result.verdict,
         confidence=result.confidence,
         urgency=result.urgency,
+        relative_risk_rank=rel_rank,
         justification=justification_label(result.justification),
+        primary_driver=_driver_model(result.primary_driver),
+        secondary_driver=(
+            _driver_model(result.secondary_driver) if result.secondary_driver else None
+        ),
+        tertiary_driver=(
+            _driver_model(result.tertiary_driver) if result.tertiary_driver else None
+        ),
         primary_reason=result.primary_reason,
         supporting_factors=result.supporting_factors,
         risk_factors=result.risk_factors,
@@ -465,11 +509,19 @@ def build_portfolio_exit_attention(
                     verdict=row.verdict,
                     confidence=row.confidence,
                     urgency=row.urgency,
+                    relative_risk_rank=row.relative_risk_rank,
                     primary_reason=row.primary_reason,
                 )
             )
 
-    items.sort(key=lambda row: (-row.urgency, row.symbol, row.display_label))
+    items.sort(
+        key=lambda row: (
+            -row.relative_risk_rank,
+            -row.urgency,
+            row.symbol,
+            row.display_label,
+        )
+    )
     return PortfolioExitAttentionResponse(items=items[: max(1, limit)])
 
 
