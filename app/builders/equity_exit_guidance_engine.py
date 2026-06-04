@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.models.equity_exit_guidance_models import ExitConfidence, ExitVerdict
+from app.models.position_guidance_models import GuidanceConfidence, EquityVerdict
+
+ExitConfidence = GuidanceConfidence
+ExitVerdict = EquityVerdict
 
 _EXIT_DISCLAIMER = (
     "Decision support only — not investment advice or a trade recommendation."
