@@ -36,9 +36,12 @@ JUSTIFICATION_LABELS: dict[VerdictJustification, str] = {
     "STABLE_POSITION": "Stable position",
 }
 
-# P/L must be at or below this for unrealized_loss to justify "Large drawdown".
-LARGE_DRAWDOWN_MIN_PCT = -10.0
-MEANINGFUL_LOSS_PCT = LARGE_DRAWDOWN_MIN_PCT  # alias for tests
+# Equity: unrealized_loss top contributor must have P/L at or below this for Large drawdown.
+EQUITY_LARGE_DRAWDOWN_MIN_PCT = -10.0
+# Long option: stricter threshold for Large drawdown label.
+OPTION_LARGE_DRAWDOWN_MIN_PCT = -20.0
+LARGE_DRAWDOWN_MIN_PCT = EQUITY_LARGE_DRAWDOWN_MIN_PCT
+MEANINGFUL_LOSS_PCT = EQUITY_LARGE_DRAWDOWN_MIN_PCT
 UNREALIZED_LOSS_BUCKET = "unrealized_loss"
 
 VerdictT = TypeVar("VerdictT", EquityVerdict, LongOptionVerdict, ShortOptionVerdict)

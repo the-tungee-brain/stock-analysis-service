@@ -61,6 +61,7 @@ class PositionGuidanceItem(BaseModel):
     confidence: GuidanceConfidence
     urgency: int = Field(ge=0, le=100)
     relative_risk_rank: int = Field(default=0, ge=0, le=100, alias="relativeRiskRank")
+    cross_leg_sanity: bool = Field(default=False, alias="crossLegSanity")
     justification: str
     primary_driver: GuidanceDriverModel = Field(alias="primaryDriver")
     secondary_driver: GuidanceDriverModel | None = Field(

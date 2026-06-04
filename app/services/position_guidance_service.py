@@ -27,6 +27,7 @@ from app.builders.position_guidance_support import (
     positions_for_symbol,
 )
 from app.builders.guidance_scoring_types import GuidanceDriver, justification_label
+from app.builders.position_guidance_cross_leg import apply_cross_leg_sanity
 from app.builders.position_guidance_relative_risk import compute_relative_risk_rank
 from app.builders.symbol_thesis_engine import evaluate_symbol_thesis
 from app.builders.trade_decision_engine import inputs_from_chart_payload
@@ -405,7 +406,7 @@ def build_symbol_position_guidance(
         if underlying_price is None and is_short_option(position):
             data_gaps.append(f"{key}:underlying_price")
 
-    items.sort(key=lambda row: (-row.relative_risk_rank, -row.urgency, row.display_label))
+    items = apply_cross_leg_sanity(items)
     narrative, prompt = _build_synthesis(
         symbol_upper=symbol_upper,
         thesis_block=thesis_block,

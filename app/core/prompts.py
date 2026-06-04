@@ -424,6 +424,29 @@ def _structured_portfolio_analysis_v1_task(
         """).strip()
 
 
+def _structured_symbol_guidance_explainer_task(symbol: str) -> str:
+    return dedent(f"""
+        Explain Position Guidance for {symbol}. You are NOT a decision engine.
+
+        CRITICAL — no trade actions:
+        - Do NOT recommend close, trim, hold, roll, buy, sell, or any trade.
+        - Do NOT invent actions (e.g. "close the call", "trim shares").
+        - All actions live in Position Guidance only; you explain why those verdicts were scored.
+
+        Populate the JSON schema:
+        - summary: 2-3 sentences restating each leg's Position Guidance verdict and top driver.
+        - recommendedAction.title: use exactly "See Position Guidance for actions"
+        - recommendedAction.reason: one sentence — trading decisions come from Position Guidance
+          per-leg verdicts above; this section explains drivers only.
+        - recommendedAction.symbol: ""
+        - sections (plain-text titles only — no # or ###):
+          · "Position snapshot" — size, P/L, DTE/greeks from data (no action advice).
+          · "Why each verdict" — map each leg to primaryDriver / secondaryDriver from POSITION GUIDANCE.
+          · "What would change the picture" — factors that would change scored drivers (no trade orders).
+        Do NOT include "Execution plan" or "Recommendation rationale" with trade instructions.
+        """).strip()
+
+
 def _structured_symbol_analysis_v1_task(symbol: str) -> str:
     return dedent(f"""
         Analyze {symbol} and recommend exactly ONE primary action using the decision framework
@@ -439,9 +462,6 @@ def _structured_symbol_analysis_v1_task(symbol: str) -> str:
             "Recommendation rationale" (prose, 2-3 sentences; no repeated path titles per line).
           · "Position snapshot" — size, P/L, key greeks/DTE if options.
           · "Recommendation rationale" — why this action vs alternatives (may include $ figures from JSON).
-            When POSITION GUIDANCE is provided, explain those verdicts as an explainer only — never
-            recommend an action stronger than guidance (no Hold→Close escalation). Note caveats in
-            prose if needed, but recommendedAction must match or be softer than guidance.
           · "Execution plan" — contracts, strikes, expirations, timing, limit-order guidance if helpful.
           · "Risk/reward" — what could go wrong and what changes your mind.
         """).strip()
@@ -1377,6 +1397,7 @@ def _build_action_prompt(
     analysis_since: Optional[datetime] = None,
     json_response: bool = False,
     natural_delivery: bool = False,
+    position_guidance_authoritative: bool = False,
 ) -> str:
     if natural_delivery:
         return _build_natural_action_prompt(
@@ -1433,6 +1454,8 @@ def _build_action_prompt(
                 """).strip()
 
         if json_response:
+            if position_guidance_authoritative:
+                return _structured_symbol_guidance_explainer_task(symbol=symbol)
             return _structured_symbol_analysis_v1_task(symbol=symbol)
         return _structured_symbol_analysis_task(symbol=symbol)
 
@@ -1585,6 +1608,7 @@ def build_symbol_prompt(
         analysis_since=ctx.analysis_since,
         json_response=json_response,
         natural_delivery=natural_delivery,
+        position_guidance_authoritative=bool(ctx.position_guidance_block),
     )
     if natural_delivery:
         action_block = f"{action_block}\n\n{_NATURAL_DELIVERY_FOOTER}"

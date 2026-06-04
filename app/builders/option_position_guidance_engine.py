@@ -133,7 +133,7 @@ def evaluate_long_option(inputs: LongOptionGuidanceInputs) -> OptionPositionGuid
             urgency += p_pts
             scored_risks.append(label)
         elif inputs.pnl_pct <= -20:
-            p_pts = 30.0
+            p_pts = 38.0
             label = f"Drawdown ~{inputs.pnl_pct:.0f}% on this contract"
             contributors.append(
                 ScoreContributor(
@@ -146,14 +146,14 @@ def evaluate_long_option(inputs: LongOptionGuidanceInputs) -> OptionPositionGuid
             urgency += p_pts
             scored_risks.append(label)
         elif inputs.pnl_pct <= -10:
-            p_pts = 10.0
+            p_pts = 12.0
             label = f"Open loss ~{inputs.pnl_pct:.0f}%"
             contributors.append(
                 ScoreContributor(
                     bucket="unrealized_loss",
                     points=p_pts,
                     label=label,
-                    driver="LARGE_DRAWDOWN",
+                    driver="TREND_DETERIORATION",
                 )
             )
             urgency += p_pts
@@ -222,6 +222,7 @@ def evaluate_long_option(inputs: LongOptionGuidanceInputs) -> OptionPositionGuid
     primary_driver, secondary_driver, tertiary_driver = contributors_to_drivers(
         contributors,
         pnl_pct=inputs.pnl_pct,
+        position_kind=inputs.position_kind,
     )
     primary, supporting, risks = build_long_option_copy_from_drivers(
         verdict=verdict,
@@ -366,6 +367,7 @@ def evaluate_short_option(inputs: ShortOptionGuidanceInputs) -> OptionPositionGu
     primary_driver, secondary_driver, tertiary_driver = contributors_to_drivers(
         contributors,
         pnl_pct=inputs.pnl_pct,
+        position_kind=inputs.position_kind,
     )
     primary, supporting, risks = build_short_option_copy_from_drivers(
         verdict=verdict,

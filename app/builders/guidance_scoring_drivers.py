@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from app.builders.guidance_scoring_types import (
-    LARGE_DRAWDOWN_MIN_PCT,
+    EQUITY_LARGE_DRAWDOWN_MIN_PCT,
+    OPTION_LARGE_DRAWDOWN_MIN_PCT,
     UNREALIZED_LOSS_BUCKET,
     GuidanceDriver,
     ScoreContributor,
@@ -11,11 +12,24 @@ from app.builders.guidance_scoring_types import (
 from app.models.position_guidance_models import (
     EquityVerdict,
     LongOptionVerdict,
+    PositionKind,
     ShortOptionVerdict,
 )
 
-def _loss_allows_large_drawdown(pnl_pct: float | None) -> bool:
-    return pnl_pct is not None and pnl_pct <= LARGE_DRAWDOWN_MIN_PCT
+def _large_drawdown_threshold(position_kind: PositionKind | None) -> float:
+    if position_kind in {"LONG_CALL", "LONG_PUT"}:
+        return OPTION_LARGE_DRAWDOWN_MIN_PCT
+    return EQUITY_LARGE_DRAWDOWN_MIN_PCT
+
+
+def _loss_allows_large_drawdown(
+    pnl_pct: float | None,
+    *,
+    position_kind: PositionKind | None,
+) -> bool:
+    if pnl_pct is None:
+        return False
+    return pnl_pct <= _large_drawdown_threshold(position_kind)
 
 
 def _resolve_driver_code(
@@ -23,6 +37,7 @@ def _resolve_driver_code(
     *,
     top: ScoreContributor | None,
     pnl_pct: float | None,
+    position_kind: PositionKind | None,
 ) -> VerdictJustification:
     code = contributor.driver or "STABLE_POSITION"
     if code != "LARGE_DRAWDOWN":
@@ -31,7 +46,7 @@ def _resolve_driver_code(
         return "TREND_DETERIORATION"
     if top is None or top.bucket != UNREALIZED_LOSS_BUCKET:
         return "STABLE_POSITION"
-    if not _loss_allows_large_drawdown(pnl_pct):
+    if not _loss_allows_large_drawdown(pnl_pct, position_kind=position_kind):
         return "STABLE_POSITION"
     return "LARGE_DRAWDOWN"
 
@@ -41,8 +56,11 @@ def _contributor_to_driver(
     *,
     top: ScoreContributor | None,
     pnl_pct: float | None,
+    position_kind: PositionKind | None,
 ) -> GuidanceDriver:
-    code = _resolve_driver_code(contributor, top=top, pnl_pct=pnl_pct)
+    code = _resolve_driver_code(
+        contributor, top=top, pnl_pct=pnl_pct, position_kind=position_kind
+    )
     return GuidanceDriver(
         code=code,
         label=justification_label(code),
@@ -55,8 +73,9 @@ def contributors_to_drivers(
     contributors: list[ScoreContributor],
     *,
     pnl_pct: float | None = None,
+    position_kind: PositionKind | None = None,
 ) -> tuple[GuidanceDriver, GuidanceDriver | None, GuidanceDriver | None]:
-    """Primary driver = highest-point contributor; no narrative remapping."""
+    """Primary = highest-point contributor; secondary/tertiary = next by points."""
     ranked = sorted(
         [c for c in contributors if c.points > 0],
         key=lambda c: (-c.points, c.bucket),
@@ -71,12 +90,16 @@ def contributors_to_drivers(
         return stable, None, None
 
     top = ranked[0]
-    primary = _contributor_to_driver(top, top=top, pnl_pct=pnl_pct)
+    primary = _contributor_to_driver(
+        top, top=top, pnl_pct=pnl_pct, position_kind=position_kind
+    )
 
     secondary: GuidanceDriver | None = None
     tertiary: GuidanceDriver | None = None
     for c in ranked[1:]:
-        driver = _contributor_to_driver(c, top=top, pnl_pct=pnl_pct)
+        driver = _contributor_to_driver(
+            c, top=top, pnl_pct=pnl_pct, position_kind=position_kind
+        )
         if secondary is None:
             secondary = driver
         elif tertiary is None:
@@ -93,7 +116,6 @@ def build_strict_guidance_copy(
     tertiary: GuidanceDriver | None,
     contributors: list[ScoreContributor],
 ) -> tuple[str, list[str], list[str]]:
-    """Copy is strictly derived from scored contributors — no freeform narrative."""
     detail = primary.detail or primary.label
     primary_reason = f"{primary.label}: {detail}"
 
@@ -113,9 +135,6 @@ def build_strict_guidance_copy(
     risks: list[str] = []
     if tertiary and tertiary.detail and tertiary.detail not in supporting:
         risks.append(tertiary.detail)
-    elif secondary and secondary.detail and secondary.detail not in supporting:
-        if len(supporting) >= 2:
-            risks.append(secondary.detail)
 
     return primary_reason, supporting[:3], risks[:3]
 
@@ -127,14 +146,9 @@ def build_equity_copy_from_drivers(
     secondary: GuidanceDriver | None,
     tertiary: GuidanceDriver | None,
     contributors: list[ScoreContributor],
-    weight_pct: float | None = None,
-    pnl_pct: float | None = None,
-    regime_env: str | None = None,
-    trade_score: int | None = None,
-    regime_id: str | None = None,
-    critical_signal: str | None = None,
+    **_: object,
 ) -> tuple[str, list[str], list[str]]:
-    del verdict, weight_pct, pnl_pct, regime_env, trade_score, regime_id, critical_signal
+    del verdict
     return build_strict_guidance_copy(
         primary=primary,
         secondary=secondary,
@@ -150,10 +164,9 @@ def build_long_option_copy_from_drivers(
     secondary: GuidanceDriver | None,
     tertiary: GuidanceDriver | None,
     contributors: list[ScoreContributor],
-    dte: int | None = None,
-    pnl_pct: float | None = None,
+    **_: object,
 ) -> tuple[str, list[str], list[str]]:
-    del verdict, dte, pnl_pct
+    del verdict
     return build_strict_guidance_copy(
         primary=primary,
         secondary=secondary,
@@ -169,10 +182,9 @@ def build_short_option_copy_from_drivers(
     secondary: GuidanceDriver | None,
     tertiary: GuidanceDriver | None,
     contributors: list[ScoreContributor],
-    dte: int | None = None,
-    assignment_risk: str | None = None,
+    **_: object,
 ) -> tuple[str, list[str], list[str]]:
-    del verdict, dte, assignment_risk
+    del verdict
     return build_strict_guidance_copy(
         primary=primary,
         secondary=secondary,

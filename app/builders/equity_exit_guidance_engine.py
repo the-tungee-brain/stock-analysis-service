@@ -160,6 +160,13 @@ def evaluate_equity_exit_guidance(inputs: EquityExitGuidanceInputs) -> EquityExi
         signals=inputs.signals,
         alert_reasons=inputs.alert_reasons,
     )
+    verdict = _apply_tiny_equity_guardrail(
+        verdict=verdict,
+        quantity=inputs.position_quantity,
+        weight_pct=inputs.position_weight_pct,
+        pnl_pct=inputs.open_profit_loss_pct,
+        signals=inputs.signals,
+    )
     verdict = normalize_equity_verdict(verdict, inputs.position_quantity)
 
     confidence = _confidence(inputs, trade_score, regime_env)
@@ -167,6 +174,7 @@ def evaluate_equity_exit_guidance(inputs: EquityExitGuidanceInputs) -> EquityExi
     primary_driver, secondary_driver, tertiary_driver = contributors_to_drivers(
         contributors,
         pnl_pct=inputs.open_profit_loss_pct,
+        position_kind="EQUITY_LONG",
     )
     primary, supporting, risks = build_equity_copy_from_drivers(
         verdict=verdict,
@@ -442,6 +450,39 @@ def _apply_floors(
         result = _max_verdict(result, "TRIM")
 
     return result
+
+
+def _has_critical_risk_signal(signals: list[IntelligenceSignal]) -> bool:
+    return any(s.severity == "critical" for s in signals)
+
+
+def _apply_tiny_equity_guardrail(
+    *,
+    verdict: ExitVerdict,
+    quantity: float | None,
+    weight_pct: float | None,
+    pnl_pct: float | None,
+    signals: list[IntelligenceSignal],
+) -> ExitVerdict:
+    """
+    Tiny equity (<=1 share or weight <1%) with P/L in [-5%, +5%]: cap to HOLD unless
+    P/L <= -10%, weight >= 10%, or critical risk signal.
+    """
+    tiny_qty = quantity is not None and quantity <= 1.0
+    tiny_weight = weight_pct is not None and weight_pct < 1.0
+    if not (tiny_qty or tiny_weight):
+        return verdict
+    if pnl_pct is None or pnl_pct < -5.0 or pnl_pct > 5.0:
+        return verdict
+    if pnl_pct <= -10.0:
+        return verdict
+    if weight_pct is not None and weight_pct >= 10.0:
+        return verdict
+    if _has_critical_risk_signal(signals):
+        return verdict
+    if verdict in {"TRIM", "REVIEW_SELL", "EXIT"}:
+        return "HOLD"
+    return verdict
 
 
 def _apply_ceilings(
