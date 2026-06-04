@@ -19,6 +19,10 @@ from trade_planner.research.models import MarketRegime
 from trade_planner.research.regime import classify_market_regime
 from trade_planner.alerts.lifecycle_service import AlertLifecycleService
 from trade_planner.alerts.lifecycle_store import DuplicateActiveMomentumAlertError
+from trade_planner.alerts.risk_models import AlertGateAction
+from app.services.strategy.momentum_breakout_notification_emitter import (
+    MomentumBreakoutNotificationEmitter,
+)
 from trade_planner.backtest.engine import BacktestEngine
 from trade_planner.service import TradePlannerService
 from trade_planner.setups.momentum_breakout import MomentumBreakoutSetup
@@ -48,6 +52,7 @@ class MomentumBreakoutAlertService:
         risk_gate: AlertRiskGate | None = None,
         alert_engine: AlertEngine | None = None,
         lifecycle_service: AlertLifecycleService | None = None,
+        notification_emitter: MomentumBreakoutNotificationEmitter | None = None,
     ) -> None:
         self._planner = planner_service or TradePlannerService(
             statistics_store=None,
@@ -55,6 +60,7 @@ class MomentumBreakoutAlertService:
         self._risk_gate = risk_gate or AlertRiskGate()
         self._alert_engine = alert_engine or AlertEngine()
         self._lifecycle = lifecycle_service or AlertLifecycleService()
+        self._emitter = notification_emitter
         self._setup = MomentumBreakoutSetup(TradePlannerConfig().momentum)
 
     @property
@@ -132,6 +138,18 @@ class MomentumBreakoutAlertService:
         )
         decision = self._risk_gate.evaluate(context)
 
+        if user_id and self._emitter is not None and not decision.allowed:
+            self._emitter.on_risk_gate_blocked(
+                user_id,
+                symbol=symbol,
+                setup_name=plan.setup_name,
+                reasons=tuple(decision.reasons),
+                entry_price=plan.entry_price,
+                stop_price=plan.stop_price,
+                target_price=plan.target_price,
+                risk_gate_action=decision.action.value,
+            )
+
         price_alerts = self._alert_engine.evaluate(
             plan=plan,
             stock_data=data,
@@ -161,6 +179,22 @@ class MomentumBreakoutAlertService:
                 created = self._lifecycle.create_alert(record)
                 alert_id = created.alert_id
                 lifecycle_status = created.status.value
+                if (
+                    self._emitter is not None
+                    and decision.action
+                    in {AlertGateAction.WARN, AlertGateAction.SIZE_DOWN}
+                ):
+                    self._emitter.on_risk_gate_warning(
+                        user_id,
+                        symbol=symbol,
+                        setup_name=plan.setup_name,
+                        reasons=tuple(decision.reasons),
+                        entry_price=plan.entry_price,
+                        stop_price=plan.stop_price,
+                        target_price=plan.target_price,
+                        risk_gate_action=decision.action.value,
+                        alert_id=alert_id,
+                    )
             except DuplicateActiveMomentumAlertError as exc:
                 price_alerts = [
                     *price_alerts,

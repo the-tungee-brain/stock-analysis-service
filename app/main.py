@@ -61,6 +61,9 @@ from app.api.strategy_playbook_ask_route import router as strategy_playbook_ask_
 from app.api.momentum_breakout_alert_route import (
     router as momentum_breakout_alert_router,
 )
+from app.api.momentum_breakout_notification_route import (
+    router as momentum_breakout_notification_router,
+)
 from app.api.momentum_breakout_research_route import (
     router as momentum_breakout_research_router,
 )
@@ -133,6 +136,7 @@ protected_api.include_router(strategy_playbook_ask_router)
 protected_api.include_router(wheel_backtest_router)
 protected_api.include_router(momentum_breakout_research_router)
 protected_api.include_router(momentum_breakout_alert_router)
+protected_api.include_router(momentum_breakout_notification_router)
 protected_api.include_router(watchlist_router)
 protected_api.include_router(get_symbol_intelligence_router)
 protected_api.include_router(get_research_overview_bundle_router)

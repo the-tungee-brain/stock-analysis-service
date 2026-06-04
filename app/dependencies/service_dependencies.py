@@ -33,6 +33,7 @@ from app.services.strategy.strategy_stock_screener_service import (
 from app.services.strategy.strategy_stock_suggestion_service import (
     StrategyStockSuggestionService,
 )
+from app.notifications.composite_service import CompositeNotificationService
 from app.services.strategy.momentum_breakout_alert_refresh_service import (
     MomentumBreakoutAlertRefreshService,
 )
@@ -190,6 +191,12 @@ def get_momentum_breakout_alert_refresh_service(
     request: Request,
 ) -> MomentumBreakoutAlertRefreshService:
     return request.app.state.momentum_breakout_alert_refresh_service
+
+
+def get_momentum_breakout_notification_service(
+    request: Request,
+) -> CompositeNotificationService:
+    return request.app.state.momentum_breakout_notification_service
 
 
 def get_research_overview_service(request: Request) -> ResearchOverviewService:

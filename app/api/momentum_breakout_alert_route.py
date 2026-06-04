@@ -12,7 +12,7 @@ from app.dependencies.service_dependencies import (
 from app.models.momentum_breakout_alert_models import (
     AlertStatusChangeDto,
     MomentumBreakoutAlertListResponse,
-    MomentumBreakoutAlertRecordDto,
+    MomentumBreakoutAlertDto,
     MomentumBreakoutAlertRequest,
     MomentumBreakoutAlertResponse,
     MomentumBreakoutAlertRefreshResponse,
@@ -102,7 +102,7 @@ async def get_momentum_breakout_alert_history(
 
 @router.post(
     "/strategy/momentum-breakout/alerts/{alert_id}/price-update",
-    response_model=MomentumBreakoutAlertRecordDto,
+    response_model=MomentumBreakoutAlertDto,
     response_model_by_alias=True,
 )
 async def post_momentum_breakout_alert_price_update(
@@ -110,7 +110,7 @@ async def post_momentum_breakout_alert_price_update(
     body: MomentumBreakoutPriceUpdateRequest,
     user_id: str = Depends(get_current_user_id),
     service: MomentumBreakoutAlertService = Depends(get_momentum_breakout_alert_service),
-) -> MomentumBreakoutAlertRecordDto:
+) -> MomentumBreakoutAlertDto:
     lifecycle = service.lifecycle_service
     try:
         updated = await asyncio.to_thread(

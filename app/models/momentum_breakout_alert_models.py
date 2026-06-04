@@ -124,19 +124,23 @@ class AlertLifecycleEventDto(BaseModel):
     message: str
 
 
-class MomentumBreakoutAlertRecordDto(BaseModel):
+class MomentumBreakoutAlertDto(BaseModel):
+    """API contract for a persisted Momentum Breakout lifecycle alert."""
+
     model_config = _STRATEGY_MODEL_CONFIG
 
-    alert_id: str = Field(alias="alertId")
+    alert_id: str | None = Field(default=None, alias="alertId")
     symbol: str
     setup_name: str = Field(alias="setupName")
+    direction: str = "LONG"
+    status: str
     created_at: datetime = Field(alias="createdAt")
     signal_date: date = Field(alias="signalDate")
     entry_price: float = Field(alias="entryPrice")
     stop_price: float = Field(alias="stopPrice")
     target_price: float = Field(alias="targetPrice")
+    risk_reward: float = Field(alias="riskReward")
     entry_is_stop: bool = Field(alias="entryIsStop")
-    status: str
     expires_at: datetime = Field(alias="expiresAt")
     triggered_at: datetime | None = Field(default=None, alias="triggeredAt")
     exit_at: datetime | None = Field(default=None, alias="exitAt")
@@ -144,6 +148,7 @@ class MomentumBreakoutAlertRecordDto(BaseModel):
     outcome_return_pct: float | None = Field(default=None, alias="outcomeReturnPct")
     risk_gate_action: str = Field(alias="riskGateAction")
     risk_gate_reasons: list[str] = Field(alias="riskGateReasons")
+    priority: str
     historical_win_rate: float | None = Field(default=None, alias="historicalWinRate")
     historical_profit_factor: float | None = Field(
         default=None, alias="historicalProfitFactor"
@@ -151,16 +156,21 @@ class MomentumBreakoutAlertRecordDto(BaseModel):
     historical_total_trades: int | None = Field(
         default=None, alias="historicalTotalTrades"
     )
+    next_action_message: str = Field(alias="nextActionMessage")
     lifecycle_events: list[AlertLifecycleEventDto] = Field(
         default_factory=list, alias="lifecycleEvents"
     )
+
+
+# Backward-compatible alias for internal imports during migration.
+MomentumBreakoutAlertRecordDto = MomentumBreakoutAlertDto
 
 
 class MomentumBreakoutAlertListResponse(BaseModel):
     model_config = _STRATEGY_MODEL_CONFIG
 
     disclaimer: str
-    alerts: list[MomentumBreakoutAlertRecordDto]
+    alerts: list[MomentumBreakoutAlertDto]
 
 
 class AlertStatusChangeDto(BaseModel):
@@ -181,7 +191,7 @@ class MomentumBreakoutAlertRefreshResponse(BaseModel):
     skipped_market_hours: bool = Field(alias="skippedMarketHours")
     warnings: list[str]
     changes: list[AlertStatusChangeDto]
-    alerts: list[MomentumBreakoutAlertRecordDto]
+    alerts: list[MomentumBreakoutAlertDto]
 
 
 class MomentumBreakoutPriceUpdateRequest(BaseModel):

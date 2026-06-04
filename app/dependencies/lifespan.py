@@ -105,7 +105,6 @@ from app.services.strategy.strategy_stock_screener_service import (
 from app.services.strategy.strategy_stock_suggestion_service import (
     StrategyStockSuggestionService,
 )
-from trade_planner.alerts.lifecycle_service import AlertLifecycleService
 from app.adapters.strategy.momentum_breakout_alert_store_factory import (
     build_momentum_breakout_alert_store,
 )
@@ -117,8 +116,15 @@ from app.jobs.momentum_breakout_alert_scheduler import (
 from app.services.strategy.momentum_breakout_alert_price_provider import (
     FinnhubMomentumBreakoutPriceProvider,
 )
+from app.notifications.composite_service import CompositeNotificationService
 from app.services.strategy.momentum_breakout_alert_refresh_service import (
     MomentumBreakoutAlertRefreshService,
+)
+from app.services.strategy.momentum_breakout_notification_emitter import (
+    MomentumBreakoutNotificationEmitter,
+)
+from app.services.strategy.notifying_alert_lifecycle_service import (
+    NotifyingAlertLifecycleService,
 )
 from app.services.strategy.momentum_breakout_alert_service import (
     MomentumBreakoutAlertService,
@@ -429,7 +435,14 @@ async def lifespan(app: FastAPI):
     wheel_backtest_service = WheelBacktestService(yfinance_adapter=yfinance_adapter)
     momentum_breakout_research_service = MomentumBreakoutResearchService()
     mb_alert_store = build_momentum_breakout_alert_store(powerpocketdb_client)
-    momentum_breakout_alert_lifecycle_service = AlertLifecycleService(mb_alert_store)
+    momentum_breakout_notification_service = CompositeNotificationService()
+    momentum_breakout_notification_emitter = MomentumBreakoutNotificationEmitter(
+        momentum_breakout_notification_service
+    )
+    momentum_breakout_alert_lifecycle_service = NotifyingAlertLifecycleService(
+        mb_alert_store,
+        momentum_breakout_notification_emitter,
+    )
     momentum_breakout_alert_price_provider = FinnhubMomentumBreakoutPriceProvider(
         finnhub_builder
     )
@@ -439,6 +452,7 @@ async def lifespan(app: FastAPI):
     )
     momentum_breakout_alert_service = MomentumBreakoutAlertService(
         lifecycle_service=momentum_breakout_alert_lifecycle_service,
+        notification_emitter=momentum_breakout_notification_emitter,
     )
 
     try:
@@ -494,6 +508,9 @@ async def lifespan(app: FastAPI):
     app.state.momentum_breakout_alert_service = momentum_breakout_alert_service
     app.state.momentum_breakout_alert_refresh_service = (
         momentum_breakout_alert_refresh_service
+    )
+    app.state.momentum_breakout_notification_service = (
+        momentum_breakout_notification_service
     )
 
     scheduler_task = None
