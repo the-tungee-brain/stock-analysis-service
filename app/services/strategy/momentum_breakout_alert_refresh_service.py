@@ -10,6 +10,10 @@ from trade_planner.alerts.lifecycle_models import AlertLifecycleStatus
 from trade_planner.alerts.lifecycle_service import AlertLifecycleService
 
 from app.core.market_hours import is_us_regular_market_hours
+from app.core.momentum_breakout_monitoring import log_mb_event
+from app.services.strategy.momentum_breakout_ops_metrics import (
+    get_momentum_breakout_ops_metrics,
+)
 from app.services.strategy.momentum_breakout_alert_price_provider import (
     MomentumBreakoutPriceProvider,
 )
@@ -57,10 +61,19 @@ class MomentumBreakoutAlertRefreshService:
                 warnings=(),
                 changes=(),
             )
-        return self._refresh_records(
+        result = self._refresh_records(
             self._lifecycle.store.list_all_active(),
             force=force,
         )
+        log_mb_event(
+            "scheduler_refresh_completed",
+            processed=result.processed,
+            updated=result.updated,
+            changes=len(result.changes),
+            skipped_market_hours=result.skipped_market_hours,
+        )
+        get_momentum_breakout_ops_metrics().record_scheduler_success()
+        return result
 
     def refresh_user_active_alerts(
         self,

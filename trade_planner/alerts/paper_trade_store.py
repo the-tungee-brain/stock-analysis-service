@@ -16,6 +16,12 @@ class PaperTradePerformanceStore(Protocol):
         self, user_id: str, *, limit: int = 500
     ) -> tuple[PaperTradePerformanceRecord, ...]: ...
 
+    def list_all(
+        self, *, limit: int = 10_000
+    ) -> tuple[PaperTradePerformanceRecord, ...]: ...
+
+    def count_all(self) -> int: ...
+
 
 class InMemoryPaperTradePerformanceStore:
     def __init__(self) -> None:
@@ -37,3 +43,13 @@ class InMemoryPaperTradePerformanceStore:
         ]
         rows.sort(key=lambda row: row.created_at, reverse=True)
         return tuple(rows[:limit])
+
+    def list_all(
+        self, *, limit: int = 10_000
+    ) -> tuple[PaperTradePerformanceRecord, ...]:
+        rows = list(self._records.values())
+        rows.sort(key=lambda row: row.created_at, reverse=True)
+        return tuple(rows[:limit])
+
+    def count_all(self) -> int:
+        return len(self._records)

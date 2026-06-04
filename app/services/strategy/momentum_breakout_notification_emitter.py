@@ -10,7 +10,12 @@ from trade_planner.alerts.lifecycle_models import (
 )
 from trade_planner.alerts.risk_models import AlertGateAction
 
+from app.core.momentum_breakout_feature_flags import mb_alert_notifications_enabled
+from app.core.momentum_breakout_monitoring import log_mb_event
 from app.notifications.composite_service import CompositeNotificationService
+from app.services.strategy.momentum_breakout_ops_metrics import (
+    get_momentum_breakout_ops_metrics,
+)
 from app.notifications.momentum_breakout_models import (
     MomentumBreakoutNotificationEventType,
     MomentumBreakoutUserNotification,
@@ -69,6 +74,12 @@ class MomentumBreakoutNotificationEmitter:
                 stop_price=record.stop_price,
                 target_price=record.target_price,
             )
+            log_mb_event(
+                "entry_triggered",
+                alert_id=record.alert_id,
+                user_id=record.user_id,
+                symbol=record.symbol,
+            )
             self._publish(
                 record,
                 event_type=MomentumBreakoutNotificationEventType.ENTRY_TRIGGERED,
@@ -77,6 +88,12 @@ class MomentumBreakoutNotificationEmitter:
             return
 
         if new_status == AlertLifecycleStatus.TARGET_HIT:
+            log_mb_event(
+                "target_hit",
+                alert_id=record.alert_id,
+                user_id=record.user_id,
+                symbol=record.symbol,
+            )
             payload = payload_target_hit(record.symbol, setup_name=record.setup_name)
             self._publish(
                 record,
@@ -86,6 +103,12 @@ class MomentumBreakoutNotificationEmitter:
             return
 
         if new_status == AlertLifecycleStatus.STOP_HIT:
+            log_mb_event(
+                "stop_hit",
+                alert_id=record.alert_id,
+                user_id=record.user_id,
+                symbol=record.symbol,
+            )
             payload = payload_stop_hit(record.symbol, setup_name=record.setup_name)
             self._publish(
                 record,
@@ -95,6 +118,12 @@ class MomentumBreakoutNotificationEmitter:
             return
 
         if new_status == AlertLifecycleStatus.EXPIRED:
+            log_mb_event(
+                "expired",
+                alert_id=record.alert_id,
+                user_id=record.user_id,
+                symbol=record.symbol,
+            )
             payload = payload_expired(record.symbol, setup_name=record.setup_name)
             self._publish(
                 record,
@@ -114,6 +143,13 @@ class MomentumBreakoutNotificationEmitter:
         target_price: float,
         risk_gate_action: str = AlertGateAction.BLOCK.value,
     ) -> None:
+        log_mb_event(
+            "risk_gate_blocked",
+            user_id=user_id,
+            symbol=symbol.upper(),
+            setup_name=setup_name,
+            risk_gate_action=risk_gate_action,
+        )
         payload = payload_blocked_by_risk_gate(
             symbol, reasons, setup_name=setup_name
         )
@@ -187,6 +223,8 @@ class MomentumBreakoutNotificationEmitter:
         payload,
         alert_id: str | None = None,
     ) -> None:
+        if not mb_alert_notifications_enabled():
+            return
         alert_dto = record_to_alert_dto(record)
         notification = MomentumBreakoutUserNotification(
             notification_id=MomentumBreakoutUserNotification.new_id(),
@@ -203,3 +241,11 @@ class MomentumBreakoutNotificationEmitter:
             alert_snapshot_json=alert_dto_to_storage_dict(alert_dto),
         )
         self._notifications.publish(notification)
+        log_mb_event(
+            "notification_emitted",
+            user_id=record.user_id,
+            symbol=record.symbol,
+            event_type=event_type.value,
+            notification_id=notification.notification_id,
+        )
+        get_momentum_breakout_ops_metrics().record_notification_emitted()

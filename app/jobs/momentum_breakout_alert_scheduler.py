@@ -6,8 +6,13 @@ import asyncio
 import logging
 import os
 
+from app.core.momentum_breakout_feature_flags import mb_alerts_enabled
+from app.core.momentum_breakout_monitoring import log_mb_event
 from app.services.strategy.momentum_breakout_alert_refresh_service import (
     MomentumBreakoutAlertRefreshService,
+)
+from app.services.strategy.momentum_breakout_ops_metrics import (
+    get_momentum_breakout_ops_metrics,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,6 +47,9 @@ async def run_momentum_breakout_alert_scheduler(
         "Momentum Breakout alert scheduler started (interval=%ss)", interval
     )
     while True:
+        if not mb_alerts_enabled():
+            await asyncio.sleep(interval)
+            continue
         try:
             result = await asyncio.to_thread(
                 refresh_service.refresh_all_active_alerts,
@@ -61,6 +69,10 @@ async def run_momentum_breakout_alert_scheduler(
         except asyncio.CancelledError:
             logger.info("Momentum Breakout alert scheduler stopped")
             raise
-        except Exception:
+        except Exception as exc:
+            log_mb_event("scheduler_refresh_failed", error=str(exc))
+            get_momentum_breakout_ops_metrics().record_scheduler_failure(
+                error=str(exc),
+            )
             logger.exception("Momentum Breakout alert scheduler iteration failed")
         await asyncio.sleep(interval)

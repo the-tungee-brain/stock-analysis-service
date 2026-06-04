@@ -8,10 +8,7 @@ from trade_planner.alerts.lifecycle_models import (
     AlertLifecycleStatus,
     MomentumBreakoutAlertRecord,
 )
-from trade_planner.alerts.paper_trade_models import (
-    PAPER_TRADE_TRACKED_STATUSES,
-    PaperTradePerformanceRecord,
-)
+from trade_planner.alerts.paper_trade_models import PaperTradePerformanceRecord
 from trade_planner.alerts.paper_trade_store import (
     InMemoryPaperTradePerformanceStore,
     PaperTradePerformanceStore,
@@ -47,28 +44,57 @@ class PaperTradePerformanceService:
         return self._store
 
     def sync_from_alert(self, alert: MomentumBreakoutAlertRecord) -> None:
+        from trade_planner.alerts.paper_trade_models import PAPER_TRADE_TRACKED_STATUSES
+
         if alert.status not in PAPER_TRADE_TRACKED_STATUSES:
             return
+        self._upsert_from_alert(alert)
+
+    def backfill_from_alert(self, alert: MomentumBreakoutAlertRecord) -> None:
+        """Create or refresh a paper row from any alert lifecycle state."""
+        self._upsert_from_alert(alert)
+
+    def _upsert_from_alert(self, alert: MomentumBreakoutAlertRecord) -> None:
         existing = self._store.get(alert.user_id, alert.alert_id)
         created_at = existing.created_at if existing else alert.created_at
         regime = alert.market_regime
         if regime is not None and hasattr(regime, "value"):
             regime = regime.value
+
+        entry_triggered_at = alert.triggered_at
+        exit_at = alert.exit_at
+        exit_price = alert.exit_price
+        outcome_return_pct = alert.outcome_return_pct
+
+        if alert.status in {
+            AlertLifecycleStatus.PENDING_ENTRY,
+            AlertLifecycleStatus.EXPIRED,
+        }:
+            if alert.status == AlertLifecycleStatus.PENDING_ENTRY:
+                entry_triggered_at = None
+                exit_at = None
+                exit_price = None
+                outcome_return_pct = None
+            elif alert.status == AlertLifecycleStatus.EXPIRED and entry_triggered_at is None:
+                exit_at = exit_at or alert.expires_at
+                exit_price = None
+                outcome_return_pct = None
+
         record = PaperTradePerformanceRecord(
             alert_id=alert.alert_id,
             user_id=alert.user_id,
             symbol=alert.symbol.upper(),
             setup_name=alert.setup_name,
             signal_date=alert.signal_date,
-            entry_triggered_at=alert.triggered_at,
+            entry_triggered_at=entry_triggered_at,
             entry_price=alert.entry_price,
             stop_price=alert.stop_price,
             target_price=alert.target_price,
-            exit_at=alert.exit_at,
-            exit_price=alert.exit_price,
+            exit_at=exit_at,
+            exit_price=exit_price,
             status=alert.status.value,
-            outcome_return_pct=alert.outcome_return_pct,
-            holding_days=compute_holding_days(alert.triggered_at, alert.exit_at),
+            outcome_return_pct=outcome_return_pct,
+            holding_days=compute_holding_days(entry_triggered_at, exit_at),
             risk_gate_action=alert.risk_gate_action,
             market_regime=str(regime) if regime else None,
             volume_ratio=alert.volume_ratio,

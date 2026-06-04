@@ -180,6 +180,23 @@ class OracleMomentumBreakoutAlertStore:
         rows = self._fetchall(sql, params)
         return tuple(record_from_row(self._alert_row_dict(row)) for row in rows)
 
+    def list_all_alerts(
+        self, *, limit: int = 10_000
+    ) -> tuple[MomentumBreakoutAlertRecord, ...]:
+        sql = f"""
+            SELECT alert_id, user_id, symbol, setup_name, created_at, signal_date,
+                   entry_price, stop_price, target_price, entry_is_stop, status,
+                   expires_at, triggered_at, exit_at, exit_price, outcome_return_pct,
+                   risk_gate_action, risk_gate_reasons, historical_win_rate,
+                   historical_profit_factor, historical_total_trades,
+                   market_regime, volume_ratio, rs_percentile
+            FROM {_ALERT_TABLE}
+            ORDER BY created_at DESC
+            FETCH FIRST :limit ROWS ONLY
+        """
+        rows = self._fetchall(sql, {"limit": limit})
+        return tuple(record_from_row(self._alert_row_dict(row)) for row in rows)
+
     def list_history(
         self, user_id: str, *, limit: int = 100
     ) -> tuple[MomentumBreakoutAlertRecord, ...]:

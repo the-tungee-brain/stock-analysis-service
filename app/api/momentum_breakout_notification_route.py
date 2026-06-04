@@ -4,6 +4,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.api.momentum_breakout_feature_guards import require_mb_alerts_enabled
 from app.auth.dependencies import get_current_user_id
 from app.dependencies.service_dependencies import (
     get_momentum_breakout_notification_service,
@@ -18,7 +19,7 @@ from app.services.strategy.momentum_breakout_notification_app import (
     notification_to_dto,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_mb_alerts_enabled)])
 
 
 @router.get(

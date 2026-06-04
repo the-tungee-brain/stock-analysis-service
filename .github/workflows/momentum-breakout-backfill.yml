@@ -1,0 +1,60 @@
+name: Momentum Breakout paper-trade backfill
+
+# Manual only — do not run on push or schedule.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment (secrets for Oracle)
+        type: choice
+        required: true
+        options:
+          - staging
+          - production
+      dry_run:
+        description: Preview missing rows without writing
+        type: boolean
+        required: true
+        default: true
+
+jobs:
+  backfill:
+    name: Backfill (${{ inputs.environment }}${{ inputs.dry_run && ', dry-run' || '' }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies and run backfill
+        env:
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_PASSWORD: ${{ secrets.ORACLE_PASSWORD }}
+          ORACLE_DSN: ${{ secrets.ORACLE_DSN }}
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt
+
+          missing=0
+          for var in ORACLE_USER ORACLE_PASSWORD ORACLE_DSN; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::Missing ${var} — configure it on the GitHub '${{ inputs.environment }}' environment."
+              missing=1
+            fi
+          done
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+          args=(--environment "${{ inputs.environment }}")
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          .venv/bin/python scripts/backfill_momentum_breakout_paper_trades.py "${args[@]}"

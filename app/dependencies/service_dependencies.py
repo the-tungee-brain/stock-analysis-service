@@ -207,6 +207,22 @@ def get_paper_trade_analytics_service(request: Request):
     return request.app.state.paper_trade_analytics_service
 
 
+def get_momentum_breakout_launch_readiness_service(request: Request):
+    from app.services.strategy.momentum_breakout_launch_readiness_service import (
+        MomentumBreakoutLaunchReadinessService,
+    )
+
+    return request.app.state.momentum_breakout_launch_readiness_service
+
+
+def get_momentum_breakout_admin_metrics_service(request: Request):
+    from app.services.strategy.momentum_breakout_admin_metrics_service import (
+        MomentumBreakoutAdminMetricsService,
+    )
+
+    return request.app.state.momentum_breakout_admin_metrics_service
+
+
 def get_research_overview_service(request: Request) -> ResearchOverviewService:
     return request.app.state.research_overview_service
 

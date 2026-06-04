@@ -39,6 +39,10 @@ class MomentumBreakoutAlertStore(Protocol):
 
     def list_all_active(self) -> tuple[MomentumBreakoutAlertRecord, ...]: ...
 
+    def list_all_alerts(
+        self, *, limit: int = 10_000
+    ) -> tuple[MomentumBreakoutAlertRecord, ...]: ...
+
 
 class InMemoryMomentumBreakoutAlertStore:
     def __init__(self) -> None:
@@ -101,6 +105,12 @@ class InMemoryMomentumBreakoutAlertStore:
             if record.status in ACTIVE_STATUSES
         ]
         return tuple(sorted(active, key=lambda r: r.created_at, reverse=True))
+
+    def list_all_alerts(
+        self, *, limit: int = 10_000
+    ) -> tuple[MomentumBreakoutAlertRecord, ...]:
+        records = sorted(self._records.values(), key=lambda r: r.created_at, reverse=True)
+        return tuple(records[:limit])
 
     def clear_user(self, user_id: str) -> None:
         for aid in list(self._history_ids.get(user_id, [])):

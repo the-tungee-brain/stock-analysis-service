@@ -214,6 +214,20 @@ class SqliteMomentumBreakoutAlertStore:
             ).fetchall()
         return tuple(record_from_row(dict(row)) for row in rows)
 
+    def list_all_alerts(
+        self, *, limit: int = 10_000
+    ) -> tuple[MomentumBreakoutAlertRecord, ...]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM momentum_breakout_alert
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return tuple(record_from_row(dict(row)) for row in rows)
+
     def list_history(
         self, user_id: str, *, limit: int = 100
     ) -> tuple[MomentumBreakoutAlertRecord, ...]:
@@ -260,3 +274,12 @@ class SqliteMomentumBreakoutAlertStore:
                 (user_id, alert_id),
             ).fetchall()
         return tuple(event_from_row(dict(row)) for row in rows)
+
+    def latest_updated_at(self) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT MAX(updated_at) AS latest FROM momentum_breakout_alert"
+            ).fetchone()
+        if row is None or row["latest"] is None:
+            return None
+        return str(row["latest"])

@@ -4,6 +4,10 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.api.momentum_breakout_feature_guards import (
+    require_mb_alert_creation_enabled,
+    require_mb_alerts_enabled,
+)
 from app.auth.dependencies import get_current_user_id
 from app.dependencies.service_dependencies import (
     get_momentum_breakout_alert_refresh_service,
@@ -29,7 +33,7 @@ from app.services.strategy.momentum_breakout_alert_service import (
     MomentumBreakoutAlertService,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_mb_alerts_enabled)])
 
 
 @router.post(
@@ -45,6 +49,8 @@ async def post_momentum_breakout_trade_plan_alert(
     symbol = body.symbol.strip()
     if not symbol:
         raise HTTPException(status_code=400, detail="symbol is required")
+    if body.persist_alert:
+        require_mb_alert_creation_enabled()
 
     try:
         return await asyncio.to_thread(service.evaluate, body, user_id=user_id)

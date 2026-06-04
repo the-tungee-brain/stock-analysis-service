@@ -144,3 +144,33 @@ class SqlitePaperTradePerformanceStore:
                 (user_id, limit),
             ).fetchall()
         return tuple(record_from_row(dict(row)) for row in rows)
+
+    def list_all(
+        self, *, limit: int = 10_000
+    ) -> tuple[PaperTradePerformanceRecord, ...]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM momentum_breakout_paper_trade
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return tuple(record_from_row(dict(row)) for row in rows)
+
+    def count_all(self) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM momentum_breakout_paper_trade"
+            ).fetchone()
+        return int(row["cnt"]) if row else 0
+
+    def latest_updated_at(self) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT MAX(updated_at) AS latest FROM momentum_breakout_paper_trade"
+            ).fetchone()
+        if row is None or row["latest"] is None:
+            return None
+        return str(row["latest"])

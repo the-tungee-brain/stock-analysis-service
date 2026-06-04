@@ -64,6 +64,15 @@ from app.api.momentum_breakout_alert_route import (
 from app.api.momentum_breakout_notification_route import (
     router as momentum_breakout_notification_router,
 )
+from app.api.momentum_breakout_admin_metrics_route import (
+    router as momentum_breakout_admin_metrics_router,
+)
+from app.api.momentum_breakout_feature_status_route import (
+    router as momentum_breakout_feature_status_router,
+)
+from app.api.momentum_breakout_launch_readiness_route import (
+    router as momentum_breakout_launch_readiness_router,
+)
 from app.api.momentum_breakout_performance_route import (
     router as momentum_breakout_performance_router,
 )
@@ -141,6 +150,9 @@ protected_api.include_router(momentum_breakout_research_router)
 protected_api.include_router(momentum_breakout_alert_router)
 protected_api.include_router(momentum_breakout_notification_router)
 protected_api.include_router(momentum_breakout_performance_router)
+protected_api.include_router(momentum_breakout_feature_status_router)
+protected_api.include_router(momentum_breakout_launch_readiness_router)
+protected_api.include_router(momentum_breakout_admin_metrics_router)
 protected_api.include_router(watchlist_router)
 protected_api.include_router(get_symbol_intelligence_router)
 protected_api.include_router(get_research_overview_bundle_router)

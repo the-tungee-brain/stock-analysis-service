@@ -4,6 +4,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends
 
+from app.api.momentum_breakout_feature_guards import require_mb_paper_analytics_enabled
 from app.auth.dependencies import get_current_user_id
 from app.dependencies.service_dependencies import get_paper_trade_analytics_service
 from app.models.momentum_breakout_performance_models import (
@@ -22,7 +23,7 @@ from app.services.strategy.paper_trade_analytics_service import (
 )
 from trade_planner.alerts.paper_trade_models import PaperTradePerformanceRecord
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_mb_paper_analytics_enabled)])
 
 
 def _meta() -> PaperTradePerformanceMetaDto:

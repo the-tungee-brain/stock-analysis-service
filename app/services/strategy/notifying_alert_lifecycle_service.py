@@ -11,8 +11,12 @@ from trade_planner.alerts.lifecycle_models import (
 from trade_planner.alerts.lifecycle_service import AlertLifecycleService
 from trade_planner.alerts.lifecycle_store import MomentumBreakoutAlertStore
 
+from app.core.momentum_breakout_monitoring import log_mb_event
 from app.services.strategy.momentum_breakout_notification_emitter import (
     MomentumBreakoutNotificationEmitter,
+)
+from app.services.strategy.momentum_breakout_ops_metrics import (
+    get_momentum_breakout_ops_metrics,
 )
 
 
@@ -29,6 +33,14 @@ class NotifyingAlertLifecycleService(AlertLifecycleService):
         self, record: MomentumBreakoutAlertRecord
     ) -> MomentumBreakoutAlertRecord:
         created = super().create_alert(record)
+        log_mb_event(
+            "alert_created",
+            alert_id=created.alert_id,
+            user_id=created.user_id,
+            symbol=created.symbol,
+            setup_name=created.setup_name,
+        )
+        get_momentum_breakout_ops_metrics().record_alert_created()
         self._emitter.on_alert_created(created)
         return created
 

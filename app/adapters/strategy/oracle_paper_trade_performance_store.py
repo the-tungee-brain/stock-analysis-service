@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 import oracledb
@@ -114,6 +114,34 @@ class OraclePaperTradePerformanceStore:
         """
         rows = self._fetchall(sql, {"user_id": user_id, "limit": limit})
         return tuple(record_from_row(self._row_dict(row)) for row in rows)
+
+    def list_all(
+        self, *, limit: int = 10_000
+    ) -> tuple[PaperTradePerformanceRecord, ...]:
+        sql = f"""
+            SELECT alert_id, user_id, symbol, setup_name, signal_date,
+                   entry_triggered_at, entry_price, stop_price, target_price,
+                   exit_at, exit_price, status, outcome_return_pct, holding_days,
+                   risk_gate_action, market_regime, volume_ratio, rs_percentile,
+                   created_at
+            FROM {_TABLE}
+            ORDER BY created_at DESC
+            FETCH FIRST :limit ROWS ONLY
+        """
+        rows = self._fetchall(sql, {"limit": limit})
+        return tuple(record_from_row(self._row_dict(row)) for row in rows)
+
+    def count_all(self) -> int:
+        sql = f"SELECT COUNT(*) FROM {_TABLE}"
+        row = self._fetchone(sql, {})
+        return int(row[0]) if row else 0
+
+    def latest_updated_at(self) -> datetime | None:
+        sql = f"SELECT MAX(updated_at) FROM {_TABLE}"
+        row = self._fetchone(sql, {})
+        if row is None or row[0] is None:
+            return None
+        return row[0]
 
     def _execute(self, sql: str, params: dict[str, Any]) -> None:
         with self._client.acquire() as conn:

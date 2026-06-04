@@ -111,6 +111,7 @@ from app.adapters.strategy.momentum_breakout_alert_store_factory import (
 from app.adapters.strategy.paper_trade_performance_store_factory import (
     build_paper_trade_performance_store,
 )
+from app.core.momentum_breakout_feature_flags import mb_alerts_enabled
 from app.jobs.momentum_breakout_alert_scheduler import (
     is_scheduler_enabled,
     resolve_refresh_interval_sec,
@@ -134,6 +135,12 @@ from app.services.strategy.paper_trade_performance_service import (
 )
 from app.services.strategy.paper_trade_recording_lifecycle_service import (
     PaperTradeRecordingLifecycleService,
+)
+from app.services.strategy.momentum_breakout_admin_metrics_service import (
+    MomentumBreakoutAdminMetricsService,
+)
+from app.services.strategy.momentum_breakout_launch_readiness_service import (
+    MomentumBreakoutLaunchReadinessService,
 )
 from app.services.strategy.momentum_breakout_alert_service import (
     MomentumBreakoutAlertService,
@@ -469,6 +476,16 @@ async def lifespan(app: FastAPI):
         lifecycle_service=momentum_breakout_alert_lifecycle_service,
         notification_emitter=momentum_breakout_notification_emitter,
     )
+    momentum_breakout_launch_readiness_service = MomentumBreakoutLaunchReadinessService(
+        alert_store=mb_alert_store,
+        paper_store=mb_paper_trade_store,
+        price_provider=momentum_breakout_alert_price_provider,
+        db_pool=powerpocketdb_client,
+    )
+    momentum_breakout_admin_metrics_service = MomentumBreakoutAdminMetricsService(
+        alert_store=mb_alert_store,
+        paper_store=mb_paper_trade_store,
+    )
 
     try:
         from models.prediction_service import load_deployed_model
@@ -529,9 +546,15 @@ async def lifespan(app: FastAPI):
     )
     app.state.paper_trade_performance_service = paper_trade_performance_service
     app.state.paper_trade_analytics_service = paper_trade_analytics_service
+    app.state.momentum_breakout_launch_readiness_service = (
+        momentum_breakout_launch_readiness_service
+    )
+    app.state.momentum_breakout_admin_metrics_service = (
+        momentum_breakout_admin_metrics_service
+    )
 
     scheduler_task = None
-    if is_scheduler_enabled():
+    if is_scheduler_enabled() and mb_alerts_enabled():
         scheduler_task = asyncio.create_task(
             run_momentum_breakout_alert_scheduler(
                 momentum_breakout_alert_refresh_service,
