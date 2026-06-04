@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.builders.guidance_verdict_copy import (
+    VerdictJustification,
+    build_equity_verdict_copy,
+    detect_equity_justification,
+
+)
 from app.models.position_guidance_models import GuidanceConfidence, EquityVerdict
 
 ExitConfidence = GuidanceConfidence
@@ -37,6 +43,7 @@ class EquityExitGuidanceResult:
     verdict: ExitVerdict
     confidence: ExitConfidence
     exit_urgency: int
+    justification: VerdictJustification
     primary_reason: str
     supporting_factors: list[str]
     risk_factors: list[str]
@@ -90,14 +97,32 @@ def evaluate_equity_exit_guidance(inputs: EquityExitGuidanceInputs) -> EquityExi
     )
 
     confidence = _confidence(inputs, trade_score, regime_env)
-    primary = _primary_reason(
-        inputs=inputs,
+
+    critical_signal = None
+    for signal in inputs.signals:
+        if signal.severity == "critical":
+            critical_signal = signal.message
+            break
+
+    justification = detect_equity_justification(
+        signals=inputs.signals,
+        alert_reasons=inputs.alert_reasons,
+        weight_pct=inputs.position_weight_pct,
+        pnl_pct=inputs.open_profit_loss_pct,
+        regime_env=regime_env,
+        failed_breakout=inputs.failed_breakout,
+        trend_bias=inputs.trend_bias,
+    )
+    primary, supporting, risks = build_equity_verdict_copy(
+        verdict=verdict,
+        justification=justification,
+        weight_pct=inputs.position_weight_pct,
+        pnl_pct=inputs.open_profit_loss_pct,
         regime_env=regime_env,
         trade_score=trade_score,
-        urgency=urgency,
+        regime_id=td.regime.regime_id,
+        critical_signal=critical_signal,
     )
-    supporting = _supporting_factors(inputs, td, regime_env, trade_score)
-    risks = _risk_factors(inputs, td, regime_env, trade_score)
     improve = _would_improve(inputs, regime_env, trade_score)
     worsen = _would_worsen(inputs, regime_env)
 
@@ -107,9 +132,10 @@ def evaluate_equity_exit_guidance(inputs: EquityExitGuidanceInputs) -> EquityExi
         verdict=verdict,
         confidence=confidence,
         exit_urgency=urgency,
+        justification=justification,
         primary_reason=primary,
-        supporting_factors=supporting[:3],
-        risk_factors=risks[:3],
+        supporting_factors=supporting,
+        risk_factors=risks,
         would_improve=improve[:3],
         would_worsen=worsen[:3],
     )
@@ -352,84 +378,6 @@ def _confidence(
     if stress_kinds >= 1 or inputs.alert_reasons:
         return "medium"
     return "medium"
-
-
-def _primary_reason(
-    *,
-    inputs: EquityExitGuidanceInputs,
-    regime_env: TradeEnvironment,
-    trade_score: int,
-    urgency: int,
-) -> str:
-    if inputs.alert_reasons:
-        return inputs.alert_reasons[0]
-    for signal in inputs.signals:
-        if signal.severity == "critical":
-            return signal.message
-    if inputs.position_weight_pct is not None and inputs.position_weight_pct >= 20:
-        return (
-            f"Position weight is {inputs.position_weight_pct:.1f}% of portfolio — "
-            "elevated concentration."
-        )
-    if inputs.open_profit_loss_pct is not None and inputs.open_profit_loss_pct <= -20:
-        return (
-            f"Unrealized loss ~{inputs.open_profit_loss_pct:.0f}% — "
-            "thesis and sizing review recommended."
-        )
-    if regime_env == "AVOID":
-        rid = inputs.trade_decision.regime.regime_id or "unfavorable"
-        return f"Unfavorable market regime ({rid}) increases hold risk."
-    if trade_score < 50:
-        return f"Technical quality weakened (trade quality {trade_score}/100)."
-    if urgency >= 45:
-        return "Multiple risk factors are stacking — review whether to reduce exposure."
-    return "No major exit pressures; continue monitoring hold quality."
-
-
-def _supporting_factors(
-    inputs: EquityExitGuidanceInputs,
-    td: TradeDecision,
-    regime_env: TradeEnvironment,
-    trade_score: int,
-) -> list[str]:
-    items: list[str] = []
-    if regime_env == "FAVORABLE":
-        rid = td.regime.regime_id or "favorable"
-        items.append(f"Favorable regime ({rid})")
-    if trade_score >= 70:
-        items.append(f"Trade quality score still {trade_score}/100")
-    if inputs.open_profit_loss_pct is not None and inputs.open_profit_loss_pct > 5:
-        items.append(f"Position up ~{inputs.open_profit_loss_pct:.0f}% unrealized")
-    if inputs.position_weight_pct is not None and inputs.position_weight_pct < 15:
-        items.append(f"Portfolio weight {inputs.position_weight_pct:.1f}% is within range")
-    for line in td.reason_breakdown.secondary_factors:
-        if line not in items:
-            items.append(line)
-    return items
-
-
-def _risk_factors(
-    inputs: EquityExitGuidanceInputs,
-    td: TradeDecision,
-    regime_env: TradeEnvironment,
-    trade_score: int,
-) -> list[str]:
-    items: list[str] = []
-    for signal in inputs.signals:
-        if signal.severity in {"warning", "critical"} and signal.message not in items:
-            items.append(signal.message)
-    for blocker in td.reason_breakdown.hard_blockers:
-        if blocker not in items:
-            items.append(blocker)
-    if td.reason_breakdown.primary_weakness and td.reason_breakdown.primary_weakness not in items:
-        items.append(td.reason_breakdown.primary_weakness)
-    if regime_env == "AVOID" and not any("regime" in x.lower() for x in items):
-        items.append("Macro regime gate is unfavorable for holding risk assets")
-    if inputs.failed_breakout and not any("breakout" in x.lower() for x in items):
-        items.append("Failed or weakening breakout structure")
-    if trade_score < 60 and not any("quality" in x.lower() for x in items):
-        items.append(f"Trade quality score only {trade_score}/100")
-    return items
 
 
 def _would_improve(

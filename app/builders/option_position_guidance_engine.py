@@ -3,6 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.broker.option_utils import AssignmentRiskLevel, Moneyness
+from app.builders.guidance_verdict_copy import (
+    VerdictJustification,
+    build_long_option_verdict_copy,
+    build_short_option_verdict_copy,
+    detect_long_option_justification,
+    detect_short_option_justification,
+)
 from app.models.position_guidance_models import (
     GuidanceConfidence,
     LongOptionVerdict,
@@ -21,6 +28,7 @@ class OptionPositionGuidanceResult:
     verdict: LongOptionVerdict | ShortOptionVerdict
     confidence: GuidanceConfidence
     urgency: int
+    justification: VerdictJustification
     primary_reason: str
     supporting_factors: list[str]
     risk_factors: list[str]
@@ -49,40 +57,51 @@ class ShortOptionGuidanceInputs:
     alert_reasons: list[str]
 
 
+def _merge_unique(base: list[str], extra: list[str], limit: int = 3) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for line in base + extra:
+        if line in seen:
+            continue
+        seen.add(line)
+        out.append(line)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def evaluate_long_option(inputs: LongOptionGuidanceInputs) -> OptionPositionGuidanceResult:
     urgency = 0.0
-    risks: list[str] = []
-    supporting: list[str] = []
+    scored_risks: list[str] = []
 
     if inputs.dte is not None:
         if inputs.dte <= 2:
             urgency += 22
-            risks.append(f"Expires in {inputs.dte} session(s) — gamma/theta risk elevated.")
+            scored_risks.append(
+                f"Expires in {inputs.dte} session(s) — gamma/theta risk elevated."
+            )
         elif inputs.dte <= 7:
             urgency += 12
-            risks.append(f"{inputs.dte} days to expiration — time decay accelerates.")
+            scored_risks.append(f"{inputs.dte} days to expiration — time decay accelerates.")
 
     if inputs.pnl_pct is not None:
         if inputs.pnl_pct <= -40:
             urgency += 28
-            risks.append(f"Large unrealized loss (~{inputs.pnl_pct:.0f}%).")
+            scored_risks.append(f"Large unrealized loss (~{inputs.pnl_pct:.0f}%).")
         elif inputs.pnl_pct <= -20:
             urgency += 14
-            risks.append(f"Drawdown ~{inputs.pnl_pct:.0f}% on this contract.")
+            scored_risks.append(f"Drawdown ~{inputs.pnl_pct:.0f}% on this contract.")
 
-    if inputs.position_kind == "LONG_CALL" and inputs.thesis == "BEARISH":
+    thesis_conflict = (
+        inputs.position_kind == "LONG_CALL" and inputs.thesis == "BEARISH"
+    ) or (inputs.position_kind == "LONG_PUT" and inputs.thesis == "BULLISH")
+    if thesis_conflict:
         urgency += 18
-        risks.append("Bearish symbol thesis conflicts with long call exposure.")
-    if inputs.position_kind == "LONG_PUT" and inputs.thesis == "BULLISH":
-        urgency += 16
-        risks.append("Bullish symbol thesis conflicts with long put exposure.")
+        scored_risks.append("Symbol thesis conflicts with this long option direction.")
 
     if inputs.moneyness == "OTM" and inputs.dte is not None and inputs.dte <= 5:
         urgency += 10
-        risks.append("Out of the money with little time left.")
-
-    if inputs.moneyness == "ITM" and inputs.pnl_pct is not None and inputs.pnl_pct > 15:
-        supporting.append("In the money with positive open P/L — intrinsic value supports holding.")
+        scored_risks.append("Out of the money with little time left.")
 
     if inputs.alert_reasons:
         urgency += 8
@@ -96,29 +115,40 @@ def evaluate_long_option(inputs: LongOptionGuidanceInputs) -> OptionPositionGuid
         and inputs.dte <= 5
     ):
         verdict = "CLOSE"
-        primary = "Elevated loss and time risk — consider closing the long option."
     elif urgency_int >= 30:
         verdict = "REVIEW_CLOSE"
-        primary = "Thesis, P/L, or expiry pressure warrants a close review."
     else:
         verdict = "HOLD"
-        primary = "No urgent close signal — continue monitoring theta and thesis alignment."
+
+    justification = detect_long_option_justification(
+        thesis_conflict=thesis_conflict,
+        dte=inputs.dte,
+        pnl_pct=inputs.pnl_pct,
+    )
+    primary, supporting, risks = build_long_option_verdict_copy(
+        verdict=verdict,
+        justification=justification,
+        dte=inputs.dte,
+        pnl_pct=inputs.pnl_pct,
+    )
+    risks = _merge_unique(risks, scored_risks)
 
     confidence = _confidence(urgency_int, inputs.pnl_pct is not None, inputs.dte is not None)
     return OptionPositionGuidanceResult(
         verdict=verdict,
         confidence=confidence,
         urgency=urgency_int,
+        justification=justification,
         primary_reason=primary,
-        supporting_factors=supporting[:3],
-        risk_factors=risks[:3],
+        supporting_factors=supporting,
+        risk_factors=risks,
     )
 
 
 def evaluate_short_option(inputs: ShortOptionGuidanceInputs) -> OptionPositionGuidanceResult:
     urgency = 0.0
-    risks: list[str] = []
-    supporting: list[str] = []
+    scored_risks: list[str] = []
+    scored_supporting: list[str] = []
 
     risk_rank = {
         "critical": 40,
@@ -132,22 +162,30 @@ def evaluate_short_option(inputs: ShortOptionGuidanceInputs) -> OptionPositionGu
     if inputs.dte is not None:
         if inputs.dte <= 2:
             urgency += 15
-            risks.append(f"Expires in {inputs.dte} session(s) — assignment window is immediate.")
+            scored_risks.append(
+                f"Expires in {inputs.dte} session(s) — assignment window is immediate."
+            )
         elif inputs.dte <= 7:
             urgency += 8
 
     if inputs.moneyness == "ITM":
-        risks.append("Contract is in the money — assignment or call-away risk is live.")
+        scored_risks.append(
+            "Contract is in the money — assignment or call-away risk is live."
+        )
     elif inputs.moneyness == "ATM":
-        risks.append("At the money — pin risk into expiration.")
+        scored_risks.append("At the money — pin risk into expiration.")
 
     if inputs.pnl_pct is not None and inputs.pnl_pct <= -25:
         urgency += 12
-        risks.append(f"Short option underwater ~{inputs.pnl_pct:.0f}% — buy-to-close cost rose.")
+        scored_risks.append(
+            f"Short option underwater ~{inputs.pnl_pct:.0f}% — buy-to-close cost rose."
+        )
 
     strategy = (inputs.option_strategy or "").lower()
     if "cash_secured_put" in strategy and inputs.moneyness == "ITM":
-        supporting.append("Cash-secured put is ITM — ensure assignment cash is reserved.")
+        scored_supporting.append(
+            "Cash-secured put is ITM — ensure assignment cash is reserved."
+        )
 
     if inputs.alert_reasons:
         urgency += 6
@@ -157,18 +195,28 @@ def evaluate_short_option(inputs: ShortOptionGuidanceInputs) -> OptionPositionGu
 
     if inputs.assignment_risk == "critical":
         verdict = "CLOSE"
-        primary = "Critical assignment risk — close or prepare for assignment immediately."
     elif inputs.assignment_risk == "high" or (
         inputs.moneyness == "ITM" and inputs.dte is not None and inputs.dte <= 5
     ):
         verdict = "REVIEW_ASSIGNMENT_RISK"
-        primary = "Assignment risk is high — review shares/cash and defensive actions."
     elif urgency_int >= 35 and inputs.dte is not None and inputs.dte <= 14:
         verdict = "ROLL"
-        primary = "Roll candidate — extend time or move strike to reduce assignment pressure."
     else:
         verdict = "HOLD"
-        primary = "Short option risk is manageable — continue monitoring moneyness and DTE."
+
+    justification = detect_short_option_justification(
+        assignment_risk=inputs.assignment_risk,
+        moneyness=inputs.moneyness,
+        dte=inputs.dte,
+    )
+    primary, supporting, risks = build_short_option_verdict_copy(
+        verdict=verdict,
+        justification=justification,
+        dte=inputs.dte,
+        assignment_risk=inputs.assignment_risk,
+    )
+    supporting = _merge_unique(supporting, scored_supporting, limit=3)
+    risks = _merge_unique(risks, scored_risks)
 
     confidence = _confidence(
         urgency_int,
@@ -179,9 +227,10 @@ def evaluate_short_option(inputs: ShortOptionGuidanceInputs) -> OptionPositionGu
         verdict=verdict,
         confidence=confidence,
         urgency=urgency_int,
+        justification=justification,
         primary_reason=primary,
-        supporting_factors=supporting[:3],
-        risk_factors=risks[:3],
+        supporting_factors=supporting,
+        risk_factors=risks,
     )
 
 

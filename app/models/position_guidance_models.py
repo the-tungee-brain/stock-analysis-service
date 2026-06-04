@@ -51,6 +51,7 @@ class PositionGuidanceItem(BaseModel):
     verdict: PositionVerdict
     confidence: GuidanceConfidence
     urgency: int = Field(ge=0, le=100)
+    justification: str
     primary_reason: str = Field(alias="primaryReason")
     supporting_factors: list[str] = Field(
         default_factory=list, alias="supportingFactors"

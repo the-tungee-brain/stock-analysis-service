@@ -26,6 +26,7 @@ from app.builders.position_guidance_support import (
     position_quantity,
     positions_for_symbol,
 )
+from app.builders.guidance_verdict_copy import justification_label
 from app.builders.symbol_thesis_engine import evaluate_symbol_thesis
 from app.builders.trade_decision_engine import inputs_from_chart_payload
 from app.models.intelligence_models import IntelligenceSignal, ProactiveAlert
@@ -290,6 +291,7 @@ def build_symbol_position_guidance(
                     verdict=equity_result.verdict,
                     confidence=equity_result.confidence,
                     urgency=equity_result.exit_urgency,
+                    justification=justification_label(equity_result.justification),
                     primary_reason=equity_result.primary_reason,
                     supporting_factors=equity_result.supporting_factors,
                     risk_factors=equity_result.risk_factors,
@@ -418,6 +420,7 @@ def _option_item(
         verdict=result.verdict,
         confidence=result.confidence,
         urgency=result.urgency,
+        justification=justification_label(result.justification),
         primary_reason=result.primary_reason,
         supporting_factors=result.supporting_factors,
         risk_factors=result.risk_factors,
