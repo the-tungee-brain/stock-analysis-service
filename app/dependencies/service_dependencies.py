@@ -199,6 +199,14 @@ def get_momentum_breakout_notification_service(
     return request.app.state.momentum_breakout_notification_service
 
 
+def get_paper_trade_analytics_service(request: Request):
+    from app.services.strategy.paper_trade_analytics_service import (
+        PaperTradeAnalyticsService,
+    )
+
+    return request.app.state.paper_trade_analytics_service
+
+
 def get_research_overview_service(request: Request) -> ResearchOverviewService:
     return request.app.state.research_overview_service
 

@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS momentum_breakout_alert (
     historical_win_rate REAL,
     historical_profit_factor REAL,
     historical_total_trades INTEGER,
+    market_regime TEXT,
+    volume_ratio REAL,
+    rs_percentile REAL,
     updated_at TEXT NOT NULL
 );
 
@@ -88,6 +91,17 @@ class SqliteMomentumBreakoutAlertStore:
     def _init_schema(self) -> None:
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            for column, col_type in (
+                ("market_regime", "TEXT"),
+                ("volume_ratio", "REAL"),
+                ("rs_percentile", "REAL"),
+            ):
+                try:
+                    conn.execute(
+                        f"ALTER TABLE momentum_breakout_alert ADD COLUMN {column} {col_type}"
+                    )
+                except sqlite3.OperationalError:
+                    pass
             conn.commit()
 
     def get(self, user_id: str, alert_id: str) -> MomentumBreakoutAlertRecord | None:
@@ -119,13 +133,15 @@ class SqliteMomentumBreakoutAlertStore:
                     entry_price, stop_price, target_price, entry_is_stop, status,
                     expires_at, triggered_at, exit_at, exit_price, outcome_return_pct,
                     risk_gate_action, risk_gate_reasons, historical_win_rate,
-                    historical_profit_factor, historical_total_trades, updated_at
+                    historical_profit_factor, historical_total_trades,
+                    market_regime, volume_ratio, rs_percentile, updated_at
                 ) VALUES (
                     :alert_id, :user_id, :symbol, :setup_name, :created_at, :signal_date,
                     :entry_price, :stop_price, :target_price, :entry_is_stop, :status,
                     :expires_at, :triggered_at, :exit_at, :exit_price, :outcome_return_pct,
                     :risk_gate_action, :risk_gate_reasons, :historical_win_rate,
-                    :historical_profit_factor, :historical_total_trades, :updated_at
+                    :historical_profit_factor, :historical_total_trades,
+                    :market_regime, :volume_ratio, :rs_percentile, :updated_at
                 )
                 ON CONFLICT(alert_id) DO UPDATE SET
                     symbol = excluded.symbol,
@@ -145,6 +161,9 @@ class SqliteMomentumBreakoutAlertStore:
                     historical_win_rate = excluded.historical_win_rate,
                     historical_profit_factor = excluded.historical_profit_factor,
                     historical_total_trades = excluded.historical_total_trades,
+                    market_regime = excluded.market_regime,
+                    volume_ratio = excluded.volume_ratio,
+                    rs_percentile = excluded.rs_percentile,
                     updated_at = excluded.updated_at
                 """,
                 payload,

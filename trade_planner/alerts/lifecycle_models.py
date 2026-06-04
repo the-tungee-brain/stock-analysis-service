@@ -82,6 +82,9 @@ class MomentumBreakoutAlertRecord:
     historical_win_rate: float | None = None
     historical_profit_factor: float | None = None
     historical_total_trades: int | None = None
+    market_regime: str | None = None
+    volume_ratio: float | None = None
+    rs_percentile: float | None = None
 
     def with_status(
         self,

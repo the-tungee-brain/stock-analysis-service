@@ -20,6 +20,9 @@ create table momentum_breakout_alert (
     historical_win_rate      number(8, 4),
     historical_profit_factor number(12, 4),
     historical_total_trades  number(10),
+    market_regime            varchar2(16),
+    volume_ratio             number(12, 4),
+    rs_percentile            number(8, 2),
     updated_at               timestamp with time zone default systimestamp not null
 );
 

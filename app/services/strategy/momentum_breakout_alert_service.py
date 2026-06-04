@@ -175,6 +175,9 @@ class MomentumBreakoutAlertService:
                     if stats.total_trades
                     else None,
                     historical_total_trades=stats.total_trades or None,
+                    market_regime=regime.value,
+                    volume_ratio=volume_ratio,
+                    rs_percentile=snapshot.rs_percentile,
                 )
                 created = self._lifecycle.create_alert(record)
                 alert_id = created.alert_id

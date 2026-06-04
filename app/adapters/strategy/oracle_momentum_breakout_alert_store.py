@@ -33,7 +33,8 @@ class OracleMomentumBreakoutAlertStore:
                    entry_price, stop_price, target_price, entry_is_stop, status,
                    expires_at, triggered_at, exit_at, exit_price, outcome_return_pct,
                    risk_gate_action, risk_gate_reasons, historical_win_rate,
-                   historical_profit_factor, historical_total_trades
+                   historical_profit_factor, historical_total_trades,
+                   market_regime, volume_ratio, rs_percentile
             FROM {_ALERT_TABLE}
             WHERE user_id = :user_id AND alert_id = :alert_id
         """
@@ -69,7 +70,10 @@ class OracleMomentumBreakoutAlertStore:
                     :risk_gate_reasons AS risk_gate_reasons,
                     :historical_win_rate AS historical_win_rate,
                     :historical_profit_factor AS historical_profit_factor,
-                    :historical_total_trades AS historical_total_trades
+                    :historical_total_trades AS historical_total_trades,
+                    :market_regime AS market_regime,
+                    :volume_ratio AS volume_ratio,
+                    :rs_percentile AS rs_percentile
                 FROM dual
             ) s
             ON (t.alert_id = s.alert_id)
@@ -91,19 +95,24 @@ class OracleMomentumBreakoutAlertStore:
                 t.historical_win_rate = s.historical_win_rate,
                 t.historical_profit_factor = s.historical_profit_factor,
                 t.historical_total_trades = s.historical_total_trades,
+                t.market_regime = s.market_regime,
+                t.volume_ratio = s.volume_ratio,
+                t.rs_percentile = s.rs_percentile,
                 t.updated_at = systimestamp
             WHEN NOT MATCHED THEN INSERT (
                 alert_id, user_id, symbol, setup_name, created_at, signal_date,
                 entry_price, stop_price, target_price, entry_is_stop, status,
                 expires_at, triggered_at, exit_at, exit_price, outcome_return_pct,
                 risk_gate_action, risk_gate_reasons, historical_win_rate,
-                historical_profit_factor, historical_total_trades
+                historical_profit_factor, historical_total_trades,
+                market_regime, volume_ratio, rs_percentile
             ) VALUES (
                 s.alert_id, s.user_id, s.symbol, s.setup_name, s.created_at, s.signal_date,
                 s.entry_price, s.stop_price, s.target_price, s.entry_is_stop, s.status,
                 s.expires_at, s.triggered_at, s.exit_at, s.exit_price, s.outcome_return_pct,
                 s.risk_gate_action, s.risk_gate_reasons, s.historical_win_rate,
-                s.historical_profit_factor, s.historical_total_trades
+                s.historical_profit_factor, s.historical_total_trades,
+                s.market_regime, s.volume_ratio, s.rs_percentile
             )
         """
         self._execute(sql, payload)
@@ -140,7 +149,8 @@ class OracleMomentumBreakoutAlertStore:
                    entry_price, stop_price, target_price, entry_is_stop, status,
                    expires_at, triggered_at, exit_at, exit_price, outcome_return_pct,
                    risk_gate_action, risk_gate_reasons, historical_win_rate,
-                   historical_profit_factor, historical_total_trades
+                   historical_profit_factor, historical_total_trades,
+                   market_regime, volume_ratio, rs_percentile
             FROM {_ALERT_TABLE}
             WHERE user_id = :user_id
               AND status IN ({placeholders})
@@ -160,7 +170,8 @@ class OracleMomentumBreakoutAlertStore:
                    entry_price, stop_price, target_price, entry_is_stop, status,
                    expires_at, triggered_at, exit_at, exit_price, outcome_return_pct,
                    risk_gate_action, risk_gate_reasons, historical_win_rate,
-                   historical_profit_factor, historical_total_trades
+                   historical_profit_factor, historical_total_trades,
+                   market_regime, volume_ratio, rs_percentile
             FROM {_ALERT_TABLE}
             WHERE status IN ({placeholders})
             ORDER BY created_at DESC
@@ -177,7 +188,8 @@ class OracleMomentumBreakoutAlertStore:
                    entry_price, stop_price, target_price, entry_is_stop, status,
                    expires_at, triggered_at, exit_at, exit_price, outcome_return_pct,
                    risk_gate_action, risk_gate_reasons, historical_win_rate,
-                   historical_profit_factor, historical_total_trades
+                   historical_profit_factor, historical_total_trades,
+                   market_regime, volume_ratio, rs_percentile
             FROM {_ALERT_TABLE}
             WHERE user_id = :user_id
             ORDER BY created_at DESC
@@ -258,6 +270,9 @@ class OracleMomentumBreakoutAlertStore:
             historical_win_rate,
             historical_profit_factor,
             historical_total_trades,
+            market_regime,
+            volume_ratio,
+            rs_percentile,
         ) = row
         return {
             "alert_id": alert_id,
@@ -281,6 +296,9 @@ class OracleMomentumBreakoutAlertStore:
             "historical_win_rate": historical_win_rate,
             "historical_profit_factor": historical_profit_factor,
             "historical_total_trades": historical_total_trades,
+            "market_regime": market_regime,
+            "volume_ratio": volume_ratio,
+            "rs_percentile": rs_percentile,
         }
 
     @staticmethod

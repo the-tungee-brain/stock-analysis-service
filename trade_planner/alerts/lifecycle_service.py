@@ -267,6 +267,9 @@ class AlertLifecycleService:
         historical_profit_factor: float | None = None,
         historical_total_trades: int | None = None,
         setup_name: str | None = None,
+        market_regime: str | None = None,
+        volume_ratio: float | None = None,
+        rs_percentile: float | None = None,
     ) -> MomentumBreakoutAlertRecord:
         now = created_at or datetime.now(timezone.utc)
         return MomentumBreakoutAlertRecord(
@@ -289,6 +292,9 @@ class AlertLifecycleService:
             historical_win_rate=historical_win_rate,
             historical_profit_factor=historical_profit_factor,
             historical_total_trades=historical_total_trades,
+            market_regime=market_regime,
+            volume_ratio=volume_ratio,
+            rs_percentile=rs_percentile,
         )
 
     def _set_open(

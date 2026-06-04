@@ -90,6 +90,13 @@ def record_from_row(row: dict[str, Any]) -> MomentumBreakoutAlertRecord:
         historical_total_trades=int(row["historical_total_trades"])
         if row.get("historical_total_trades") is not None
         else None,
+        market_regime=str(row["market_regime"]) if row.get("market_regime") else None,
+        volume_ratio=float(row["volume_ratio"])
+        if row.get("volume_ratio") is not None
+        else None,
+        rs_percentile=float(row["rs_percentile"])
+        if row.get("rs_percentile") is not None
+        else None,
     )
 
 
@@ -130,6 +137,9 @@ def record_to_row(record: MomentumBreakoutAlertRecord) -> dict[str, Any]:
         "historical_win_rate": record.historical_win_rate,
         "historical_profit_factor": record.historical_profit_factor,
         "historical_total_trades": record.historical_total_trades,
+        "market_regime": record.market_regime,
+        "volume_ratio": record.volume_ratio,
+        "rs_percentile": record.rs_percentile,
     }
 
 
