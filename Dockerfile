@@ -13,6 +13,7 @@ COPY features ./features
 COPY models ./models
 COPY backtest ./backtest
 COPY ranking_pipeline ./ranking_pipeline
+COPY trade_planner ./trade_planner
 COPY scripts ./scripts
 COPY api ./api
 COPY docker-entrypoint.sh .
