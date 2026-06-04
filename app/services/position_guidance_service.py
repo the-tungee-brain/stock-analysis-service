@@ -27,8 +27,13 @@ from app.builders.position_guidance_support import (
     positions_for_symbol,
 )
 from app.builders.guidance_scoring_types import GuidanceDriver, justification_label
+from app.builders.passive_explanation_validator import validate_trace_matches_guidance
 from app.builders.position_guidance_cross_leg import apply_cross_leg_sanity
 from app.builders.position_guidance_relative_risk import compute_relative_risk_rank
+from app.builders.position_guidance_scoring_trace import (
+    build_symbol_scoring_trace,
+    contributor_models,
+)
 from app.builders.symbol_thesis_engine import evaluate_symbol_thesis
 from app.builders.trade_decision_engine import inputs_from_chart_payload
 from app.models.intelligence_models import IntelligenceSignal, ProactiveAlert
@@ -327,6 +332,9 @@ def build_symbol_position_guidance(
                     primary_reason=equity_result.primary_reason,
                     supporting_factors=equity_result.supporting_factors,
                     risk_factors=equity_result.risk_factors,
+                    scoring_contributors=contributor_models(
+                        equity_result.contributors
+                    ),
                 )
             )
             if metrics.weight_pct is None:
@@ -407,21 +415,26 @@ def build_symbol_position_guidance(
             data_gaps.append(f"{key}:underlying_price")
 
     items = apply_cross_leg_sanity(items)
-    narrative, prompt = _build_synthesis(
-        symbol_upper=symbol_upper,
-        thesis_block=thesis_block,
-        position_items=items,
-    )
-
-    return SymbolPositionGuidanceResponse(
+    response = SymbolPositionGuidanceResponse(
         symbol=symbol_upper,
         as_of_date=trade.as_of_date,
         has_positions=True,
         thesis=thesis_block,
         positions=items,
-        synthesis_narrative=narrative,
-        analysis_prompt=prompt,
+        synthesis_narrative="",
+        analysis_prompt="",
         data_gaps=data_gaps,
+    )
+    trace = build_symbol_scoring_trace(response)
+    validate_trace_matches_guidance(trace, items)
+    return response.model_copy(
+        update={
+            "scoring_trace": trace,
+            "synthesis_narrative": trace,
+            "analysis_prompt": (
+                f"View the Position Guidance scoring trace for {symbol_upper}."
+            ),
+        }
     )
 
 
@@ -470,6 +483,7 @@ def _option_item(
         primary_reason=result.primary_reason,
         supporting_factors=result.supporting_factors,
         risk_factors=result.risk_factors,
+        scoring_contributors=contributor_models(result.contributors),
     )
 
 

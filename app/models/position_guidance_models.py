@@ -32,6 +32,15 @@ class GuidanceDriverModel(BaseModel):
     detail: str | None = None
 
 
+class ScoringContributorModel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    bucket: str
+    points: float
+    label: str
+    driver_code: str | None = Field(default=None, alias="driverCode")
+
+
 class SymbolThesisBlock(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -75,6 +84,9 @@ class PositionGuidanceItem(BaseModel):
         default_factory=list, alias="supportingFactors"
     )
     risk_factors: list[str] = Field(default_factory=list, alias="riskFactors")
+    scoring_contributors: list[ScoringContributorModel] = Field(
+        default_factory=list, alias="scoringContributors"
+    )
 
 
 class SymbolPositionGuidanceResponse(BaseModel):
@@ -89,6 +101,7 @@ class SymbolPositionGuidanceResponse(BaseModel):
     analysis_prompt: str = Field(default="", alias="analysisPrompt")
     disclaimer: str = Field(default=_DISCLAIMER)
     data_gaps: list[str] = Field(default_factory=list, alias="dataGaps")
+    scoring_trace: str = Field(default="", alias="scoringTrace")
 
 
 class PortfolioExitAttentionItem(BaseModel):
