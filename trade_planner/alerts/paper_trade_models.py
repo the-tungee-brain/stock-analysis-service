@@ -15,6 +15,7 @@ PAPER_TRADE_TRACKED_STATUSES: frozenset[AlertLifecycleStatus] = frozenset(
         AlertLifecycleStatus.TARGET_HIT,
         AlertLifecycleStatus.STOP_HIT,
         AlertLifecycleStatus.EXPIRED,
+        AlertLifecycleStatus.CANCELLED,
     }
 )
 

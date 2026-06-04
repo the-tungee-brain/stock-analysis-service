@@ -32,6 +32,7 @@ from app.services.strategy.momentum_breakout_alert_refresh_service import (
 from app.services.strategy.momentum_breakout_alert_service import (
     MomentumBreakoutAlertService,
 )
+from trade_planner.alerts.lifecycle_store import AlertNotCancellableError
 
 router = APIRouter(dependencies=[Depends(require_mb_alerts_enabled)])
 
@@ -104,6 +105,31 @@ async def get_momentum_breakout_alert_history(
             for record in records
         ],
     )
+
+
+@router.post(
+    "/strategy/momentum-breakout/alerts/{alert_id}/cancel",
+    response_model=MomentumBreakoutAlertDto,
+    response_model_by_alias=True,
+)
+async def post_momentum_breakout_alert_cancel(
+    alert_id: str,
+    user_id: str = Depends(get_current_user_id),
+    service: MomentumBreakoutAlertService = Depends(get_momentum_breakout_alert_service),
+) -> MomentumBreakoutAlertDto:
+    lifecycle = service.lifecycle_service
+    try:
+        updated = await asyncio.to_thread(
+            lifecycle.cancel_alert,
+            user_id,
+            alert_id,
+        )
+    except AlertNotCancellableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return record_to_dto(updated, lifecycle=lifecycle, include_events=True)
 
 
 @router.post(

@@ -44,6 +44,30 @@ class NotifyingAlertLifecycleService(AlertLifecycleService):
         self._emitter.on_alert_created(created)
         return created
 
+    def cancel_alert(
+        self,
+        user_id: str,
+        alert_id: str,
+        *,
+        recorded_at: datetime | None = None,
+    ) -> MomentumBreakoutAlertRecord:
+        prior = self.get_alert(user_id, alert_id)
+        prior_status = prior.status if prior else None
+        updated = super().cancel_alert(
+            user_id,
+            alert_id,
+            recorded_at=recorded_at,
+        )
+        if prior_status is not None and prior_status != updated.status:
+            log_mb_event(
+                "alert_cancelled",
+                alert_id=updated.alert_id,
+                user_id=updated.user_id,
+                symbol=updated.symbol,
+                setup_name=updated.setup_name,
+            )
+        return updated
+
     def update_with_latest_price(
         self,
         user_id: str,

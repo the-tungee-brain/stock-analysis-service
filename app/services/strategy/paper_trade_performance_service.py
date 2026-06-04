@@ -69,6 +69,7 @@ class PaperTradePerformanceService:
         if alert.status in {
             AlertLifecycleStatus.PENDING_ENTRY,
             AlertLifecycleStatus.EXPIRED,
+            AlertLifecycleStatus.CANCELLED,
         }:
             if alert.status == AlertLifecycleStatus.PENDING_ENTRY:
                 entry_triggered_at = None
@@ -77,6 +78,10 @@ class PaperTradePerformanceService:
                 outcome_return_pct = None
             elif alert.status == AlertLifecycleStatus.EXPIRED and entry_triggered_at is None:
                 exit_at = exit_at or alert.expires_at
+                exit_price = None
+                outcome_return_pct = None
+            elif alert.status == AlertLifecycleStatus.CANCELLED:
+                exit_at = exit_at or alert.exit_at
                 exit_price = None
                 outcome_return_pct = None
 

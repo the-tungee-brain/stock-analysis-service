@@ -84,6 +84,8 @@ Returns persisted alerts in active lifecycle states (`PENDING_ENTRY`, `ENTRY_TRI
 
 **Refresh:** `POST /api/v1/strategy/momentum-breakout/alerts/refresh` (manual, ignores market-hours guard).
 
+**Cancel:** `POST /api/v1/strategy/momentum-breakout/alerts/{alertId}/cancel` — active alerts only (`PENDING_ENTRY`, `ENTRY_TRIGGERED`, `OPEN`). Returns updated alert DTO. `409` if already terminal. Records lifecycle event `CANCELLED` with message `Alert cancelled by user.` Updates paper-trade row when present. No brokerage orders.
+
 ---
 
 ## 2. Alert History

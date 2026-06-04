@@ -16,6 +16,10 @@ class DuplicateActiveMomentumAlertError(ValueError):
     """Raised when an active alert already exists for the symbol."""
 
 
+class AlertNotCancellableError(ValueError):
+    """Raised when a terminal alert cannot be cancelled."""
+
+
 class MomentumBreakoutAlertStore(Protocol):
     def get(self, user_id: str, alert_id: str) -> MomentumBreakoutAlertRecord | None: ...
 

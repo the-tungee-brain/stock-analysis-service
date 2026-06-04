@@ -111,6 +111,21 @@ class PaperTradeRecordingLifecycleService(NotifyingAlertLifecycleService):
         self._maybe_sync(updated)
         return updated
 
+    def cancel_alert(
+        self,
+        user_id: str,
+        alert_id: str,
+        *,
+        recorded_at: datetime | None = None,
+    ) -> MomentumBreakoutAlertRecord:
+        updated = super().cancel_alert(
+            user_id,
+            alert_id,
+            recorded_at=recorded_at,
+        )
+        self._paper_trade.sync_from_alert(updated)
+        return updated
+
     def _maybe_sync(self, record: MomentumBreakoutAlertRecord) -> None:
         if record.status in {
             AlertLifecycleStatus.ENTRY_TRIGGERED,
@@ -118,5 +133,6 @@ class PaperTradeRecordingLifecycleService(NotifyingAlertLifecycleService):
             AlertLifecycleStatus.TARGET_HIT,
             AlertLifecycleStatus.STOP_HIT,
             AlertLifecycleStatus.EXPIRED,
+            AlertLifecycleStatus.CANCELLED,
         }:
             self._paper_trade.sync_from_alert(record)

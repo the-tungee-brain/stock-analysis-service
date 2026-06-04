@@ -22,11 +22,15 @@ from trade_planner.alerts.market_calendar import (
     validate_signal_date_freshness,
 )
 from trade_planner.alerts.lifecycle_store import (
+    AlertNotCancellableError,
     DuplicateActiveMomentumAlertError,
     InMemoryMomentumBreakoutAlertStore,
     MomentumBreakoutAlertStore,
 )
 from trade_planner.setups.momentum_breakout import MomentumBreakoutSetup
+
+
+ALERT_CANCELLED_BY_USER_MESSAGE = "Alert cancelled by user."
 
 
 class AlertLifecycleService:
@@ -220,6 +224,25 @@ class AlertLifecycleService:
             message="Alert expired without entry fill.",
         )
         return updated
+
+    def cancel_alert(
+        self,
+        user_id: str,
+        alert_id: str,
+        *,
+        recorded_at: datetime | None = None,
+    ) -> MomentumBreakoutAlertRecord:
+        record = self._require_record(user_id, alert_id)
+        if record.status not in ACTIVE_STATUSES:
+            raise AlertNotCancellableError(
+                f"Alert {alert_id} cannot be cancelled from status {record.status.value}."
+            )
+        return self.mark_cancelled(
+            user_id,
+            alert_id,
+            reason=ALERT_CANCELLED_BY_USER_MESSAGE,
+            recorded_at=recorded_at,
+        )
 
     def mark_cancelled(
         self,
