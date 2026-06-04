@@ -33,9 +33,9 @@ jobs:
 
       - name: Install dependencies and run backfill
         env:
-          ORACLE_USER: ${{ secrets.ORACLE_USER }}
-          ORACLE_PASSWORD: ${{ secrets.ORACLE_PASSWORD }}
-          ORACLE_DSN: ${{ secrets.ORACLE_DSN }}
+          POWERPOCKETDB_USER: ${{ secrets.POWERPOCKETDB_USER }}
+          POWERPOCKETDB_PASSWORD: ${{ secrets.POWERPOCKETDB_PASSWORD }}
+          POWERPOCKETDB_TP_TNS: ${{ secrets.POWERPOCKETDB_TP_TNS }}
         run: |
           set -euo pipefail
           python -m venv .venv
@@ -43,7 +43,7 @@ jobs:
           .venv/bin/pip install -r requirements.txt
 
           missing=0
-          for var in ORACLE_USER ORACLE_PASSWORD ORACLE_DSN; do
+          for var in POWERPOCKETDB_USER POWERPOCKETDB_PASSWORD POWERPOCKETDB_TP_TNS; do
             if [ -z "${!var:-}" ]; then
               echo "::error::Missing ${var} — configure it on the GitHub '${{ inputs.environment }}' environment."
               missing=1

@@ -54,12 +54,13 @@ def _build_pool():
         raise RuntimeError(
             "oracledb is required for Oracle backfill. Install requirements.txt."
         ) from exc
-    user = os.getenv("ORACLE_USER")
-    password = os.getenv("ORACLE_PASSWORD")
-    dsn = os.getenv("ORACLE_DSN")
+    user = os.getenv("POWERPOCKETDB_USER")
+    password = os.getenv("POWERPOCKETDB_PASSWORD")
+    dsn = os.getenv("POWERPOCKETDB_TP_TNS")
     if not (user and password and dsn):
         raise RuntimeError(
-            "ORACLE_USER, ORACLE_PASSWORD, and ORACLE_DSN must be set for Oracle backfill."
+            "POWERPOCKETDB_USER, POWERPOCKETDB_PASSWORD, and POWERPOCKETDB_TP_TNS "
+            "must be set for Oracle backfill (same as the API service)."
         )
     return oracledb.create_pool(user=user, password=password, dsn=dsn, min=1, max=2)
 

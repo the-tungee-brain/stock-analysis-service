@@ -37,9 +37,9 @@ After DDL and before enabling paper analytics.
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-export ORACLE_USER=...
-export ORACLE_PASSWORD=...
-export ORACLE_DSN=...
+export POWERPOCKETDB_USER=...
+export POWERPOCKETDB_PASSWORD=...
+export POWERPOCKETDB_TP_TNS='(description= ...)'
 
 # Preview missing rows (no writes)
 .venv/bin/python scripts/backfill_momentum_breakout_paper_trades.py \
@@ -81,9 +81,9 @@ Workflow: **Momentum Breakout paper-trade backfill** (`.github/workflows/momentu
 
 | Secret | Purpose |
 |--------|---------|
-| `ORACLE_USER` | Oracle DB user |
-| `ORACLE_PASSWORD` | Oracle DB password |
-| `ORACLE_DSN` | Oracle connect string |
+| `POWERPOCKETDB_USER` | Oracle DB user (same as deploy) |
+| `POWERPOCKETDB_PASSWORD` | Oracle DB password |
+| `POWERPOCKETDB_TP_TNS` | Oracle connect descriptor (TNS) |
 
 **Recommended run order:**
 
