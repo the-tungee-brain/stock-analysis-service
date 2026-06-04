@@ -1,6 +1,8 @@
 from typing import Dict, Optional, Literal
 import requests
 
+from app.core.latency_observability import observe_dependency
+
 
 ContractType = Literal["ALL", "CALL", "PUT"]
 StrategyType = Literal["SINGLE", "ANALYTICAL"]
@@ -29,12 +31,13 @@ class SchwabMarketAdapter:
         if fields:
             params["fields"] = fields
 
-        response = self.session.get(
-            url,
-            headers=self._get_auth_headers(access_token=access_token),
-            params=params,
-            timeout=10,
-        )
+        with observe_dependency("schwab"):
+            response = self.session.get(
+                url,
+                headers=self._get_auth_headers(access_token=access_token),
+                params=params,
+                timeout=10,
+            )
         response.raise_for_status()
         return response.json()
 
@@ -63,11 +66,12 @@ class SchwabMarketAdapter:
         if to_date:
             params["toDate"] = to_date
 
-        response = self.session.get(
-            url,
-            headers=self._get_auth_headers(access_token=access_token),
-            params=params,
-            timeout=10,
-        )
+        with observe_dependency("schwab"):
+            response = self.session.get(
+                url,
+                headers=self._get_auth_headers(access_token=access_token),
+                params=params,
+                timeout=10,
+            )
         response.raise_for_status()
         return response.json()

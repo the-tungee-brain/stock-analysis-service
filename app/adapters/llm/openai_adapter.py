@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import copy_context
 import threading
 from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Type
 
@@ -15,6 +16,7 @@ from app.core.openai_model_utils import (
     resolve_stream_max_output_tokens,
     stream_request_extras,
 )
+from app.core.latency_observability import observe_dependency
 
 StreamQueueItem = tuple[Literal["chunk", "done", "error"], Any]
 
@@ -82,13 +84,14 @@ class OpenAIAdapter(BaseLLM):
                 model=model,
                 max_output_tokens=max_output_tokens,
             )
-            stream = self.client.responses.create(
-                model=model or settings.OPENAI_MODEL,
-                input=input_messages,
-                stream=True,
-                max_output_tokens=resolved_tokens,
-                **stream_request_extras(model),
-            )
+            with observe_dependency("openai"):
+                stream = self.client.responses.create(
+                    model=model or settings.OPENAI_MODEL,
+                    input=input_messages,
+                    stream=True,
+                    max_output_tokens=resolved_tokens,
+                    **stream_request_extras(model),
+                )
 
             for event in stream:
                 event_type = getattr(event, "type", "")
@@ -143,15 +146,16 @@ class OpenAIAdapter(BaseLLM):
 
         queue: asyncio.Queue[StreamQueueItem] = asyncio.Queue()
         loop = asyncio.get_running_loop()
+        context = copy_context()
         thread = threading.Thread(
-            target=self._produce_response_stream,
-            kwargs={
-                "model": model,
-                "input_messages": input_messages,
-                "max_output_tokens": max_output_tokens,
-                "loop": loop,
-                "queue": queue,
-            },
+            target=lambda: context.run(
+                self._produce_response_stream,
+                model=model,
+                input_messages=input_messages,
+                max_output_tokens=max_output_tokens,
+                loop=loop,
+                queue=queue,
+            ),
             daemon=True,
         )
         thread.start()
@@ -213,7 +217,8 @@ class OpenAIAdapter(BaseLLM):
                 }
             }
 
-        response = self.client.responses.create(**kwargs)
+        with observe_dependency("openai"):
+            response = self.client.responses.create(**kwargs)
         return self._extract_blocking_response_text(response)
 
     async def generate(

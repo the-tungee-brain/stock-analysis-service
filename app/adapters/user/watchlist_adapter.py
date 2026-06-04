@@ -12,6 +12,7 @@ from app.models.watchlist_models import (
     WatchlistSymbolResponse,
     WatchlistWorkspaceResponse,
 )
+from app.core.latency_observability import observe_dependency
 
 _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9.\-]{1,16}$")
 _MAX_FOLDERS = 50
@@ -76,12 +77,13 @@ class WatchlistAdapter:
             raise ValueError(f"At most {_MAX_TOTAL_SYMBOLS} total symbols allowed")
 
     def list_workspace(self, user_id: str) -> list[WatchlistFolderRecord]:
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
-            return self._list_workspace(cur, user_id)
-        finally:
-            self.client.release(con)
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                return self._list_workspace(cur, user_id)
+            finally:
+                self.client.release(con)
 
     def _list_workspace(self, cur, user_id: str) -> list[WatchlistFolderRecord]:
         folder_sql = f"""
@@ -146,27 +148,29 @@ class WatchlistAdapter:
     def get_workspace_snapshot(
         self, user_id: str
     ) -> tuple[list[WatchlistFolderRecord], int]:
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
-            cur.execute("SET TRANSACTION READ ONLY")
-            folders = self._list_workspace(cur, user_id)
-            workspace_version = self._get_workspace_version(cur, user_id)
-            con.commit()
-            return folders, workspace_version
-        except Exception:
-            con.rollback()
-            raise
-        finally:
-            self.client.release(con)
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                cur.execute("SET TRANSACTION READ ONLY")
+                folders = self._list_workspace(cur, user_id)
+                workspace_version = self._get_workspace_version(cur, user_id)
+                con.commit()
+                return folders, workspace_version
+            except Exception:
+                con.rollback()
+                raise
+            finally:
+                self.client.release(con)
 
     def get_workspace_version(self, user_id: str) -> int:
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
-            return self._get_workspace_version(cur, user_id)
-        finally:
-            self.client.release(con)
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                return self._get_workspace_version(cur, user_id)
+            finally:
+                self.client.release(con)
 
     def _get_workspace_version(self, cur, user_id: str) -> int:
         cur.execute(
@@ -247,198 +251,200 @@ class WatchlistAdapter:
             item.id for folder in folders for item in folder.symbols
         }
 
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
-            current_version = self._get_or_create_workspace_version_for_update(
-                cur, user_id
-            )
-            if base_version is not None and base_version != current_version:
-                raise WatchlistVersionConflictError(
-                    current_version=current_version,
-                    base_version=base_version,
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                current_version = self._get_or_create_workspace_version_for_update(
+                    cur, user_id
                 )
-            next_version = current_version + 1
-
-            if incoming_folder_ids:
-                folder_placeholders = ", ".join(
-                    f":folder_id_{index}"
-                    for index, _ in enumerate(incoming_folder_ids)
-                )
-                folder_params = {
-                    f"folder_id_{index}": folder_id
-                    for index, folder_id in enumerate(incoming_folder_ids)
-                }
-                cur.execute(
-                    f"""
-                    DELETE FROM {self.folder_table}
-                    WHERE user_id = :user_id
-                      AND id NOT IN ({folder_placeholders})
-                    """,
-                    {"user_id": user_id, **folder_params},
-                )
-            else:
-                cur.execute(
-                    f"DELETE FROM {self.folder_table} WHERE user_id = :user_id",
-                    {"user_id": user_id},
-                )
-                self._set_workspace_version(cur, user_id, next_version)
-                con.commit()
-                return [], next_version
-
-            merge_folder_sql = f"""
-                MERGE INTO {self.folder_table} t
-                USING (
-                    SELECT :id AS id FROM dual
-                ) s
-                ON (t.id = s.id AND t.user_id = :user_id)
-                WHEN MATCHED THEN UPDATE SET
-                    name = :name,
-                    icon_name = :icon_name,
-                    swatch_id = :swatch_id,
-                    accent_hex = :accent_hex,
-                    is_pinned = :is_pinned,
-                    is_collapsed = :is_collapsed,
-                    sort_order = :sort_order,
-                    updated_at = systimestamp
-                WHEN NOT MATCHED THEN INSERT (
-                    id, user_id, name, icon_name, swatch_id, accent_hex,
-                    is_pinned, is_collapsed, sort_order
-                ) VALUES (
-                    :id, :user_id, :name, :icon_name, :swatch_id, :accent_hex,
-                    :is_pinned, :is_collapsed, :sort_order
-                )
-            """
-
-            for folder in folders:
-                cur.execute(
-                    merge_folder_sql,
-                    {
-                        "id": folder.id,
-                        "user_id": user_id,
-                        "name": folder.name.strip(),
-                        "icon_name": folder.icon_name or "folder.fill",
-                        "swatch_id": folder.swatch_id or "slate",
-                        "accent_hex": folder.accent_hex,
-                        "is_pinned": 1 if folder.is_pinned else 0,
-                        "is_collapsed": 1 if folder.is_collapsed else 0,
-                        "sort_order": folder.sort_order,
-                    },
-                )
-
-                folder_item_ids = {item.id for item in folder.symbols}
-                if folder_item_ids:
-                    item_placeholders = ", ".join(
-                        f":item_id_{index}"
-                        for index, _ in enumerate(folder_item_ids)
+                if base_version is not None and base_version != current_version:
+                    raise WatchlistVersionConflictError(
+                        current_version=current_version,
+                        base_version=base_version,
                     )
-                    item_params = {
-                        f"item_id_{index}": item_id
-                        for index, item_id in enumerate(folder_item_ids)
+                next_version = current_version + 1
+
+                if incoming_folder_ids:
+                    folder_placeholders = ", ".join(
+                        f":folder_id_{index}"
+                        for index, _ in enumerate(incoming_folder_ids)
+                    )
+                    folder_params = {
+                        f"folder_id_{index}": folder_id
+                        for index, folder_id in enumerate(incoming_folder_ids)
                     }
                     cur.execute(
                         f"""
-                        DELETE FROM {self.item_table}
+                        DELETE FROM {self.folder_table}
                         WHERE user_id = :user_id
-                          AND folder_id = :folder_id
-                          AND id NOT IN ({item_placeholders})
+                          AND id NOT IN ({folder_placeholders})
                         """,
-                        {
-                            "user_id": user_id,
-                            "folder_id": folder.id,
-                            **item_params,
-                        },
+                        {"user_id": user_id, **folder_params},
                     )
                 else:
                     cur.execute(
-                        f"""
-                        DELETE FROM {self.item_table}
-                        WHERE user_id = :user_id AND folder_id = :folder_id
-                        """,
-                        {"user_id": user_id, "folder_id": folder.id},
+                        f"DELETE FROM {self.folder_table} WHERE user_id = :user_id",
+                        {"user_id": user_id},
                     )
+                    self._set_workspace_version(cur, user_id, next_version)
+                    con.commit()
+                    return [], next_version
 
-                merge_item_sql = f"""
-                    MERGE INTO {self.item_table} t
+                merge_folder_sql = f"""
+                    MERGE INTO {self.folder_table} t
                     USING (
                         SELECT :id AS id FROM dual
                     ) s
                     ON (t.id = s.id AND t.user_id = :user_id)
                     WHEN MATCHED THEN UPDATE SET
-                        folder_id = :folder_id,
-                        symbol = :symbol,
+                        name = :name,
+                        icon_name = :icon_name,
+                        swatch_id = :swatch_id,
+                        accent_hex = :accent_hex,
+                        is_pinned = :is_pinned,
+                        is_collapsed = :is_collapsed,
                         sort_order = :sort_order,
                         updated_at = systimestamp
                     WHEN NOT MATCHED THEN INSERT (
-                        id, user_id, folder_id, symbol, sort_order
+                        id, user_id, name, icon_name, swatch_id, accent_hex,
+                        is_pinned, is_collapsed, sort_order
                     ) VALUES (
-                        :id, :user_id, :folder_id, :symbol, :sort_order
+                        :id, :user_id, :name, :icon_name, :swatch_id, :accent_hex,
+                        :is_pinned, :is_collapsed, :sort_order
                     )
                 """
 
-                for item in folder.symbols:
+                for folder in folders:
                     cur.execute(
-                        merge_item_sql,
+                        merge_folder_sql,
                         {
-                            "id": item.id,
+                            "id": folder.id,
                             "user_id": user_id,
-                            "folder_id": folder.id,
-                            "symbol": self._normalize_symbol(item.ticker),
-                            "sort_order": item.sort_order,
+                            "name": folder.name.strip(),
+                            "icon_name": folder.icon_name or "folder.fill",
+                            "swatch_id": folder.swatch_id or "slate",
+                            "accent_hex": folder.accent_hex,
+                            "is_pinned": 1 if folder.is_pinned else 0,
+                            "is_collapsed": 1 if folder.is_collapsed else 0,
+                            "sort_order": folder.sort_order,
                         },
                     )
 
-            if incoming_item_ids:
-                global_item_placeholders = ", ".join(
-                    f":global_item_id_{index}"
-                    for index, _ in enumerate(incoming_item_ids)
-                )
-                global_item_params = {
-                    f"global_item_id_{index}": item_id
-                    for index, item_id in enumerate(incoming_item_ids)
-                }
-                cur.execute(
-                    f"""
-                    DELETE FROM {self.item_table}
-                    WHERE user_id = :user_id
-                      AND id NOT IN ({global_item_placeholders})
-                    """,
-                    {"user_id": user_id, **global_item_params},
-                )
+                    folder_item_ids = {item.id for item in folder.symbols}
+                    if folder_item_ids:
+                        item_placeholders = ", ".join(
+                            f":item_id_{index}"
+                            for index, _ in enumerate(folder_item_ids)
+                        )
+                        item_params = {
+                            f"item_id_{index}": item_id
+                            for index, item_id in enumerate(folder_item_ids)
+                        }
+                        cur.execute(
+                            f"""
+                            DELETE FROM {self.item_table}
+                            WHERE user_id = :user_id
+                              AND folder_id = :folder_id
+                              AND id NOT IN ({item_placeholders})
+                            """,
+                            {
+                                "user_id": user_id,
+                                "folder_id": folder.id,
+                                **item_params,
+                            },
+                        )
+                    else:
+                        cur.execute(
+                            f"""
+                            DELETE FROM {self.item_table}
+                            WHERE user_id = :user_id AND folder_id = :folder_id
+                            """,
+                            {"user_id": user_id, "folder_id": folder.id},
+                        )
 
-            self._set_workspace_version(cur, user_id, next_version)
-            saved = self._list_workspace(cur, user_id)
-            con.commit()
-        except Exception:
-            con.rollback()
-            raise
-        finally:
-            self.client.release(con)
+                    merge_item_sql = f"""
+                        MERGE INTO {self.item_table} t
+                        USING (
+                            SELECT :id AS id FROM dual
+                        ) s
+                        ON (t.id = s.id AND t.user_id = :user_id)
+                        WHEN MATCHED THEN UPDATE SET
+                            folder_id = :folder_id,
+                            symbol = :symbol,
+                            sort_order = :sort_order,
+                            updated_at = systimestamp
+                        WHEN NOT MATCHED THEN INSERT (
+                            id, user_id, folder_id, symbol, sort_order
+                        ) VALUES (
+                            :id, :user_id, :folder_id, :symbol, :sort_order
+                        )
+                    """
+
+                    for item in folder.symbols:
+                        cur.execute(
+                            merge_item_sql,
+                            {
+                                "id": item.id,
+                                "user_id": user_id,
+                                "folder_id": folder.id,
+                                "symbol": self._normalize_symbol(item.ticker),
+                                "sort_order": item.sort_order,
+                            },
+                        )
+
+                if incoming_item_ids:
+                    global_item_placeholders = ", ".join(
+                        f":global_item_id_{index}"
+                        for index, _ in enumerate(incoming_item_ids)
+                    )
+                    global_item_params = {
+                        f"global_item_id_{index}": item_id
+                        for index, item_id in enumerate(incoming_item_ids)
+                    }
+                    cur.execute(
+                        f"""
+                        DELETE FROM {self.item_table}
+                        WHERE user_id = :user_id
+                          AND id NOT IN ({global_item_placeholders})
+                        """,
+                        {"user_id": user_id, **global_item_params},
+                    )
+
+                self._set_workspace_version(cur, user_id, next_version)
+                saved = self._list_workspace(cur, user_id)
+                con.commit()
+            except Exception:
+                con.rollback()
+                raise
+            finally:
+                self.client.release(con)
 
         return saved, next_version
 
     def delete_by_user_id(self, user_id: str) -> None:
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
-            cur.execute(
-                f"DELETE FROM {self.item_table} WHERE user_id = :user_id",
-                {"user_id": user_id},
-            )
-            cur.execute(
-                f"DELETE FROM {self.folder_table} WHERE user_id = :user_id",
-                {"user_id": user_id},
-            )
-            cur.execute(
-                f"DELETE FROM {self.workspace_table} WHERE user_id = :user_id",
-                {"user_id": user_id},
-            )
-            con.commit()
-        except Exception:
-            con.rollback()
-            raise
-        finally:
-            self.client.release(con)
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                cur.execute(
+                    f"DELETE FROM {self.item_table} WHERE user_id = :user_id",
+                    {"user_id": user_id},
+                )
+                cur.execute(
+                    f"DELETE FROM {self.folder_table} WHERE user_id = :user_id",
+                    {"user_id": user_id},
+                )
+                cur.execute(
+                    f"DELETE FROM {self.workspace_table} WHERE user_id = :user_id",
+                    {"user_id": user_id},
+                )
+                con.commit()
+            except Exception:
+                con.rollback()
+                raise
+            finally:
+                self.client.release(con)
 
     @staticmethod
     def build_response(

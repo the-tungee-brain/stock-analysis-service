@@ -22,6 +22,7 @@ from app.models.strategy_models import (
     UserInvestmentProfile,
 )
 from app.broker.strategy_symbol_alignment import strategy_symbol_list
+from app.core.latency_observability import observe_dependency, set_latency_attribute
 from app.screener.equity_query_compiler import compile_equity_query
 from app.screener.etf_universe_screener import screen_etf_preset
 from app.screener.preset_registry import (
@@ -179,12 +180,13 @@ class StrategyStockScreenerService:
         try:
             if preset.equity_query is not None:
                 query = compile_equity_query(preset.equity_query)
-                raw = yf.screen(
-                    query,
-                    size=resolved_page_size,
-                    offset=offset,
-                    **YF_SCREEN_SORT,
-                )
+                with observe_dependency("yfinance"):
+                    raw = yf.screen(
+                        query,
+                        size=resolved_page_size,
+                        offset=offset,
+                        **YF_SCREEN_SORT,
+                    )
                 quotes_raw = raw.get("quotes") or []
                 total = int(raw.get("total") or len(quotes_raw))
                 quotes = [
@@ -209,6 +211,7 @@ class StrategyStockScreenerService:
             return None
 
         total_pages = max(1, math.ceil(total / resolved_page_size)) if total else 1
+        set_latency_attribute("symbol_count", len(quotes))
         summary = self.describe_preset(preset)
         sections = self._companion_sections(
             strategy=strategy,
@@ -283,7 +286,8 @@ class StrategyStockScreenerService:
             if not upper:
                 continue
             try:
-                info = yf.Ticker(upper).info or {}
+                with observe_dependency("yfinance"):
+                    info = yf.Ticker(upper).info or {}
             except Exception:
                 logger.debug("Unable to load pinned quote for %s", upper)
                 continue

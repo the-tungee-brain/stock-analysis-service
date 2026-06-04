@@ -1,6 +1,7 @@
 import oracledb
 from typing import Optional, Dict, Any
 from app.models.schwab_models import SchwabAuthTokenItem
+from app.core.latency_observability import observe_dependency
 
 
 class SchwabAuthAccessTokenAdapter:
@@ -30,11 +31,12 @@ class SchwabAuthAccessTokenAdapter:
         )
 
     def save(self, item: SchwabAuthTokenItem) -> int:
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
 
-            sql = f"""
+                sql = f"""
             MERGE INTO {self.table_name} t
             USING (
                 SELECT :user_id            AS user_id,
@@ -69,39 +71,41 @@ class SchwabAuthAccessTokenAdapter:
                 )
             """
 
-            bind_vars = self.item_to_dict(item)
-            cur.execute(sql, bind_vars)
-            rowcount = cur.rowcount
-            con.commit()
-            return rowcount
-        finally:
-            con.close()
+                bind_vars = self.item_to_dict(item)
+                cur.execute(sql, bind_vars)
+                rowcount = cur.rowcount
+                con.commit()
+                return rowcount
+            finally:
+                con.close()
 
     def get_by_user_id(self, user_id: str) -> Optional[SchwabAuthTokenItem]:
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
-            sql = f"SELECT * FROM {self.table_name} WHERE user_id = :user_id"
-            cur.execute(sql, {"user_id": user_id})
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                sql = f"SELECT * FROM {self.table_name} WHERE user_id = :user_id"
+                cur.execute(sql, {"user_id": user_id})
 
-            cols = [col[0] for col in cur.description]
-            row = cur.fetchone()
-            if not row:
-                return None
+                cols = [col[0] for col in cur.description]
+                row = cur.fetchone()
+                if not row:
+                    return None
 
-            row_dict = dict(zip(cols, row))
-            return self.dict_to_item(row_dict)
-        finally:
-            con.close()
+                row_dict = dict(zip(cols, row))
+                return self.dict_to_item(row_dict)
+            finally:
+                con.close()
 
     def delete_by_user_id(self, user_id: str) -> int:
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
-            sql = f"DELETE FROM {self.table_name} WHERE user_id = :user_id"
-            cur.execute(sql, {"user_id": user_id})
-            rowcount = cur.rowcount
-            con.commit()
-            return rowcount
-        finally:
-            con.close()
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                sql = f"DELETE FROM {self.table_name} WHERE user_id = :user_id"
+                cur.execute(sql, {"user_id": user_id})
+                rowcount = cur.rowcount
+                con.commit()
+                return rowcount
+            finally:
+                con.close()

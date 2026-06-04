@@ -9,6 +9,7 @@ import redis
 
 from app.models.intelligence_models import PortfolioIntelligence
 from app.models.schwab_models import Position, SchwabAccounts
+from app.core.latency_observability import observe_dependency, record_dependency_latency
 
 
 class PortfolioBriefCache:
@@ -74,15 +75,18 @@ class PortfolioBriefCache:
         fingerprint: str,
         variant: str = VARIANT_FULL,
     ) -> Optional[PortfolioIntelligence]:
-        raw = self.redis_client.get(
-            self._redis_key(
-                user_id=user_id,
-                fingerprint=fingerprint,
-                variant=variant,
+        with observe_dependency("redis"):
+            raw = self.redis_client.get(
+                self._redis_key(
+                    user_id=user_id,
+                    fingerprint=fingerprint,
+                    variant=variant,
+                )
             )
-        )
         if not raw:
+            record_dependency_latency("portfolio_brief_cache", 0.0, cache_status="miss")
             return None
+        record_dependency_latency("portfolio_brief_cache", 0.0, cache_status="hit")
         try:
             payload = raw.decode() if isinstance(raw, bytes) else raw
             return PortfolioIntelligence.model_validate_json(payload)
@@ -99,19 +103,21 @@ class PortfolioBriefCache:
     ) -> None:
         if self.ttl_seconds <= 0:
             return
-        self.redis_client.setex(
-            self._redis_key(
-                user_id=user_id,
-                fingerprint=fingerprint,
-                variant=variant,
-            ),
-            self.ttl_seconds,
-            brief.model_dump_json(by_alias=True),
-        )
+        with observe_dependency("redis"):
+            self.redis_client.setex(
+                self._redis_key(
+                    user_id=user_id,
+                    fingerprint=fingerprint,
+                    variant=variant,
+                ),
+                self.ttl_seconds,
+                brief.model_dump_json(by_alias=True),
+            )
 
     def invalidate_user(self, *, user_id: str) -> int:
         pattern = f"{self.key_prefix}:*:{user_id}:*"
         deleted = 0
         for key in self.redis_client.scan_iter(match=pattern):
-            deleted += int(self.redis_client.delete(key))
+            with observe_dependency("redis"):
+                deleted += int(self.redis_client.delete(key))
         return deleted

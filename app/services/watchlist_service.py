@@ -14,6 +14,7 @@ from app.models.watchlist_models import (
     WatchlistWorkspaceResponse,
     WatchlistWorkspaceSyncRequest,
 )
+from app.core.latency_observability import set_latency_attribute
 from app.services.ticker_service import TickerService
 
 class WatchlistService:
@@ -110,6 +111,7 @@ class WatchlistService:
             user_id
         )
         symbols = self._collect_symbols(folders)
+        set_latency_attribute("symbol_count", len(symbols))
         titles = self._titles_for_symbols(symbols)
         quote_map = self._quotes_for_symbols(symbols) if include_quotes else None
         return self.watchlist_adapter.build_response(
@@ -129,6 +131,7 @@ class WatchlistService:
             base_version=payload.base_version,
         )
         symbols = self._collect_symbols(saved)
+        set_latency_attribute("symbol_count", len(symbols))
         titles = self._titles_for_symbols(symbols)
         quote_map = self._quotes_for_symbols(symbols)
         return self.watchlist_adapter.build_response(

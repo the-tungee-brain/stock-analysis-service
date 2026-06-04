@@ -10,6 +10,7 @@ from ranking_pipeline.api_models import (
 )
 from ranking_pipeline.config import default_config
 from ranking_pipeline.storage.sqlite import open_store
+from app.core.latency_observability import observe_dependency, set_latency_attribute
 
 
 def get_top_rankings(
@@ -19,15 +20,19 @@ def get_top_rankings(
 ) -> TopRankingsResponse:
     cfg = default_config()
     store = open_store(cfg)
-    rid = run_id or store.latest_run_id()
+    with observe_dependency("sqlite"):
+        rid = run_id or store.latest_run_id()
     if not rid:
         raise LookupError("No ranking runs found. Run scripts/run_ranking_daily.py first.")
 
-    meta = store.get_run_meta(rid)
+    with observe_dependency("sqlite"):
+        meta = store.get_run_meta(rid)
     if not meta:
         raise LookupError(f"Ranking run not found: {rid}")
 
-    rows = store.get_ranking_results(rid, limit=limit)
+    with observe_dependency("sqlite"):
+        rows = store.get_ranking_results(rid, limit=limit)
+    set_latency_attribute("symbol_count", len(rows))
     stocks = [
         RankedStock(
             symbol=r["symbol"],

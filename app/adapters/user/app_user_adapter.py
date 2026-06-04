@@ -2,6 +2,7 @@ import oracledb
 from typing import Optional, Dict, Any
 
 from app.models.user_models import AppUserItem
+from app.core.latency_observability import observe_dependency
 
 
 class AppUserAdapter:
@@ -34,31 +35,33 @@ class AppUserAdapter:
         )
 
     def get_by_identity_sub(self, identity_sub: str) -> Optional[AppUserItem]:
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
-            sql = f"SELECT * FROM {self.table_name} WHERE identity_sub = :identity_sub"
-            cur.execute(sql, {"identity_sub": identity_sub})
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                sql = f"SELECT * FROM {self.table_name} WHERE identity_sub = :identity_sub"
+                cur.execute(sql, {"identity_sub": identity_sub})
 
-            cols = [col[0] for col in cur.description]
-            row = cur.fetchone()
-            if not row:
-                return None
+                cols = [col[0] for col in cur.description]
+                row = cur.fetchone()
+                if not row:
+                    return None
 
-            row_dict = dict(zip(cols, row))
-            return self.dict_to_item(row_dict)
-        finally:
-            con.close()
+                row_dict = dict(zip(cols, row))
+                return self.dict_to_item(row_dict)
+            finally:
+                con.close()
 
     def count_active_users(self) -> int:
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
-            cur.execute(f"SELECT COUNT(*) FROM {self.table_name}")
-            row = cur.fetchone()
-            return int(row[0]) if row else 0
-        finally:
-            con.close()
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                cur.execute(f"SELECT COUNT(*) FROM {self.table_name}")
+                row = cur.fetchone()
+                return int(row[0]) if row else 0
+            finally:
+                con.close()
 
     def list_users_with_schwab(self) -> list[AppUserItem]:
         sql = f"""
@@ -68,24 +71,26 @@ class AppUserAdapter:
             ORDER BY u.last_login_at DESC NULLS LAST
         """
 
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
-            cur.execute(sql)
-            cols = [col[0] for col in cur.description]
-            return [
-                self.dict_to_item(dict(zip(cols, row)))
-                for row in cur.fetchall()
-            ]
-        finally:
-            con.close()
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                cur.execute(sql)
+                cols = [col[0] for col in cur.description]
+                return [
+                    self.dict_to_item(dict(zip(cols, row)))
+                    for row in cur.fetchall()
+                ]
+            finally:
+                con.close()
 
     def save(self, item: AppUserItem) -> int:
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
 
-            sql = f"""
+                sql = f"""
             MERGE INTO {self.table_name} t
             USING (
                 SELECT
@@ -129,22 +134,23 @@ class AppUserAdapter:
                 )
             """
 
-            bind_vars = self.item_to_dict(item)
-            cur.execute(sql, bind_vars)
-            rowcount = cur.rowcount
-            con.commit()
-            return rowcount
-        finally:
-            con.close()
+                bind_vars = self.item_to_dict(item)
+                cur.execute(sql, bind_vars)
+                rowcount = cur.rowcount
+                con.commit()
+                return rowcount
+            finally:
+                con.close()
 
     def delete_by_identity_sub(self, identity_sub: str) -> int:
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
-            sql = f"DELETE FROM {self.table_name} WHERE identity_sub = :identity_sub"
-            cur.execute(sql, {"identity_sub": identity_sub})
-            rowcount = cur.rowcount
-            con.commit()
-            return rowcount
-        finally:
-            con.close()
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                sql = f"DELETE FROM {self.table_name} WHERE identity_sub = :identity_sub"
+                cur.execute(sql, {"identity_sub": identity_sub})
+                rowcount = cur.rowcount
+                con.commit()
+                return rowcount
+            finally:
+                con.close()

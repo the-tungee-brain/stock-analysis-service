@@ -5,6 +5,7 @@ from typing import Optional
 import redis
 
 from app.core.llm_routes import LLMRoute
+from app.core.latency_observability import observe_dependency, record_dependency_latency
 
 
 class LLMOutputCache:
@@ -30,11 +31,14 @@ class LLMOutputCache:
         return f"{self.key_prefix}:{route.value}:{symbol.strip().upper()}:{fingerprint}"
 
     def get(self, route: LLMRoute, symbol: str, fingerprint: str) -> Optional[str]:
-        raw = self.redis_client.get(
-            self._redis_key(route=route, symbol=symbol, fingerprint=fingerprint)
-        )
+        with observe_dependency("redis"):
+            raw = self.redis_client.get(
+                self._redis_key(route=route, symbol=symbol, fingerprint=fingerprint)
+            )
         if raw is None:
+            record_dependency_latency("llm_cache", 0.0, cache_status="miss")
             return None
+        record_dependency_latency("llm_cache", 0.0, cache_status="hit")
         return str(raw)
 
     def put(
@@ -44,8 +48,9 @@ class LLMOutputCache:
         fingerprint: str,
         payload: str,
     ) -> None:
-        self.redis_client.setex(
-            self._redis_key(route=route, symbol=symbol, fingerprint=fingerprint),
-            self.ttl_seconds,
-            payload,
-        )
+        with observe_dependency("redis"):
+            self.redis_client.setex(
+                self._redis_key(route=route, symbol=symbol, fingerprint=fingerprint),
+                self.ttl_seconds,
+                payload,
+            )

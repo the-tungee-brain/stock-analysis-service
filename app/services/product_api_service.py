@@ -22,6 +22,7 @@ from app.api.product.models import (
 from ranking_pipeline.config import default_config
 from ranking_pipeline.portfolio.persistence import open_portfolio_store
 from ranking_pipeline.storage.sqlite import open_store
+from app.core.latency_observability import observe_dependency, set_latency_attribute
 
 
 def _utc_timestamp() -> str:
@@ -62,15 +63,19 @@ def get_rankings_top_v1(*, limit: int = 20, run_id: str | None = None) -> Rankin
     """Serve latest or specified ranking run (precomputed only)."""
     cfg = default_config()
     store = open_store(cfg)
-    rid = run_id or store.latest_run_id()
+    with observe_dependency("sqlite"):
+        rid = run_id or store.latest_run_id()
     if not rid:
         raise LookupError("No ranking runs available")
 
-    meta = store.get_run_meta(rid)
+    with observe_dependency("sqlite"):
+        meta = store.get_run_meta(rid)
     if not meta:
         raise LookupError(f"Ranking run not found: {rid}")
 
-    rows = store.get_ranking_results(rid, limit=limit)
+    with observe_dependency("sqlite"):
+        rows = store.get_ranking_results(rid, limit=limit)
+    set_latency_attribute("symbol_count", len(rows))
     items = [
         RankingItemV1(
             symbol=r["symbol"],
@@ -96,7 +101,9 @@ def get_portfolio_latest_v1() -> PortfolioLatestResponseV1:
     """Serve latest portfolio snapshot with metrics and optional risk layer."""
     enriched = get_latest_portfolio_enriched()
     pstore = open_portfolio_store()
-    raw = pstore.get_portfolio(enriched.portfolio_id) or {}
+    with observe_dependency("sqlite"):
+        raw = pstore.get_portfolio(enriched.portfolio_id) or {}
+    set_latency_attribute("symbol_count", len(raw.get("holdings", [])))
     snap = raw.get("snapshot") or {}
     metrics_row = raw.get("metrics") or {}
     metrics_json: dict = {}
@@ -178,7 +185,8 @@ def get_portfolio_latest_v1() -> PortfolioLatestResponseV1:
 
 def get_system_health_v1() -> SystemHealthResponseV1:
     """Operational health from SQLite run metadata."""
-    snap = PipelineStatusReader().get_status()
+    with observe_dependency("sqlite"):
+        snap = PipelineStatusReader().get_status()
     return SystemHealthResponseV1(
         api_version=API_VERSION,
         last_pipeline_run_time=snap.last_pipeline_run_time,

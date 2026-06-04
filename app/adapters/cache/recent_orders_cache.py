@@ -5,6 +5,7 @@ from typing import List, Optional
 import redis
 
 from app.models.schwab_order_models import SchwabOrder
+from app.core.latency_observability import observe_dependency, record_dependency_latency
 
 
 class RecentOrdersCache:
@@ -35,21 +36,23 @@ class RecentOrdersCache:
         account_number: str,
         days_back: int,
     ) -> int:
-        return int(
-            self.redis_client.delete(
-                self._redis_key(
-                    user_id=user_id,
-                    account_number=account_number,
-                    days_back=days_back,
+        with observe_dependency("redis"):
+            return int(
+                self.redis_client.delete(
+                    self._redis_key(
+                        user_id=user_id,
+                        account_number=account_number,
+                        days_back=days_back,
+                    )
                 )
             )
-        )
 
     def invalidate_user(self, *, user_id: str) -> int:
         pattern = f"{self.key_prefix}:{user_id}:*"
         deleted = 0
         for key in self.redis_client.scan_iter(match=pattern):
-            deleted += int(self.redis_client.delete(key))
+            with observe_dependency("redis"):
+                deleted += int(self.redis_client.delete(key))
         return deleted
 
     def get(
@@ -59,15 +62,18 @@ class RecentOrdersCache:
         account_number: str,
         days_back: int,
     ) -> Optional[List[SchwabOrder]]:
-        raw = self.redis_client.get(
-            self._redis_key(
-                user_id=user_id,
-                account_number=account_number,
-                days_back=days_back,
+        with observe_dependency("redis"):
+            raw = self.redis_client.get(
+                self._redis_key(
+                    user_id=user_id,
+                    account_number=account_number,
+                    days_back=days_back,
+                )
             )
-        )
         if not raw:
+            record_dependency_latency("recent_orders_cache", 0.0, cache_status="miss")
             return None
+        record_dependency_latency("recent_orders_cache", 0.0, cache_status="hit")
         payload = json.loads(raw)
         return [SchwabOrder.model_validate(item) for item in payload]
 
@@ -80,12 +86,13 @@ class RecentOrdersCache:
         orders: List[SchwabOrder],
     ) -> None:
         payload = json.dumps([order.model_dump(mode="json") for order in orders])
-        self.redis_client.setex(
-            self._redis_key(
-                user_id=user_id,
-                account_number=account_number,
-                days_back=days_back,
-            ),
-            self.ttl_seconds,
-            payload,
-        )
+        with observe_dependency("redis"):
+            self.redis_client.setex(
+                self._redis_key(
+                    user_id=user_id,
+                    account_number=account_number,
+                    days_back=days_back,
+                ),
+                self.ttl_seconds,
+                payload,
+            )

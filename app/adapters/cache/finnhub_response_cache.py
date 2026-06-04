@@ -6,6 +6,8 @@ from typing import Any
 
 import redis
 
+from app.core.latency_observability import observe_dependency
+
 # Per-endpoint TTL defaults (seconds).
 DEFAULT_ENDPOINT_TTLS: dict[str, int] = {
     "company_news": 1800,
@@ -44,7 +46,8 @@ class FinnhubResponseCache:
         )
 
     def get(self, endpoint: str, cache_key: str) -> Any | None:
-        raw = self.redis_client.get(self._redis_key(endpoint, cache_key))
+        with observe_dependency("redis"):
+            raw = self.redis_client.get(self._redis_key(endpoint, cache_key))
         if not raw:
             return None
         try:
@@ -56,11 +59,13 @@ class FinnhubResponseCache:
         ttl = self._ttl(endpoint)
         if ttl <= 0:
             return
-        self.redis_client.setex(
-            self._redis_key(endpoint, cache_key),
-            ttl,
-            json.dumps(value),
-        )
+        with observe_dependency("redis"):
+            self.redis_client.setex(
+                self._redis_key(endpoint, cache_key),
+                ttl,
+                json.dumps(value),
+            )
 
     def delete(self, endpoint: str, cache_key: str) -> None:
-        self.redis_client.delete(self._redis_key(endpoint, cache_key))
+        with observe_dependency("redis"):
+            self.redis_client.delete(self._redis_key(endpoint, cache_key))

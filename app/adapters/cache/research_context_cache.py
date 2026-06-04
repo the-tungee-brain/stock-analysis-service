@@ -4,6 +4,7 @@ from typing import Optional
 import redis
 
 from app.models.company_research_models import ResearchContext
+from app.core.latency_observability import observe_dependency, record_dependency_latency
 
 
 class ResearchContextCache:
@@ -32,11 +33,14 @@ class ResearchContextCache:
         return f"{self.key_prefix}:{symbol_upper}:{lookback_days}"
 
     def get(self, symbol: str, *, lookback_days: int = 7) -> Optional[ResearchContext]:
-        raw = self.redis_client.get(
-            self._redis_key(symbol=symbol, lookback_days=lookback_days)
-        )
+        with observe_dependency("redis"):
+            raw = self.redis_client.get(
+                self._redis_key(symbol=symbol, lookback_days=lookback_days)
+            )
         if not raw:
+            record_dependency_latency("research_context_cache", 0.0, cache_status="miss")
             return None
+        record_dependency_latency("research_context_cache", 0.0, cache_status="hit")
         return ResearchContext.model_validate_json(raw)
 
     def put(
@@ -46,8 +50,9 @@ class ResearchContextCache:
         *,
         lookback_days: int = 7,
     ) -> None:
-        self.redis_client.setex(
-            self._redis_key(symbol=symbol, lookback_days=lookback_days),
-            self.ttl_seconds,
-            context.model_dump_json(),
-        )
+        with observe_dependency("redis"):
+            self.redis_client.setex(
+                self._redis_key(symbol=symbol, lookback_days=lookback_days),
+                self.ttl_seconds,
+                context.model_dump_json(),
+            )

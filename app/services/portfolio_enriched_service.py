@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from app.core.latency_observability import observe_dependency
 from app.services.portfolio_construction_service import get_latest_portfolio
 from ranking_pipeline.portfolio.api_models import LatestPortfolioResponse
 from ranking_pipeline.risk.api_models import (
@@ -24,7 +25,8 @@ def get_latest_portfolio_enriched() -> LatestPortfolioEnrichedResponse:
 
 def _load_risk_layer(portfolio_id: str) -> PortfolioRiskLayerSummary | None:
     store = open_portfolio_store()
-    data = store.get_portfolio(portfolio_id)
+    with observe_dependency("sqlite"):
+        data = store.get_portfolio(portfolio_id)
     if not data:
         return None
     metrics_raw = data.get("metrics") or {}

@@ -23,6 +23,7 @@ from app.broker.fiscal_period import (
     fiscal_year_end_month_from_info,
     format_fiscal_period,
 )
+from app.core.latency_observability import observe_dependency, record_dependency_latency
 
 logger = logging.getLogger(__name__)
 
@@ -84,15 +85,17 @@ class YFinanceAdapter:
         symbol_upper = symbol.strip().upper()
         cached = self._get_cached(self._info_cache, symbol_upper, self.INFO_TTL_SECONDS)
         if cached is not None:
+            record_dependency_latency("yfinance", 0.0, cache_status="hit")
             return dict(cached)
 
-        ticker = self._ticker(symbol_upper)
-        try:
-            with yfinance_fetch_lock():
-                info = ticker.info or {}
-        except Exception as exc:
-            self._log_yahoo_failure("ticker.info", symbol_upper, exc)
-            return {}
+        with observe_dependency("yfinance", cache_status="miss"):
+            ticker = self._ticker(symbol_upper)
+            try:
+                with yfinance_fetch_lock():
+                    info = ticker.info or {}
+            except Exception as exc:
+                self._log_yahoo_failure("ticker.info", symbol_upper, exc)
+                return {}
         self._set_cached(self._info_cache, symbol_upper, info)
         return info
 
@@ -115,24 +118,26 @@ class YFinanceAdapter:
             self.HISTORY_TTL_SECONDS,
         )
         if cached is not None:
+            record_dependency_latency("yfinance", 0.0, cache_status="hit")
             return cached.copy()
 
-        ticker = self._ticker(symbol_upper)
-        try:
-            with yfinance_fetch_lock():
-                hist = ticker.history(
-                    period=period,
-                    interval=interval,
-                    auto_adjust=auto_adjust,
-                    prepost=prepost,
+        with observe_dependency("yfinance", cache_status="miss"):
+            ticker = self._ticker(symbol_upper)
+            try:
+                with yfinance_fetch_lock():
+                    hist = ticker.history(
+                        period=period,
+                        interval=interval,
+                        auto_adjust=auto_adjust,
+                        prepost=prepost,
+                    )
+            except Exception as exc:
+                self._log_yahoo_failure(
+                    f"history({period},{interval})",
+                    symbol_upper,
+                    exc,
                 )
-        except Exception as exc:
-            self._log_yahoo_failure(
-                f"history({period},{interval})",
-                symbol_upper,
-                exc,
-            )
-            return pd.DataFrame()
+                return pd.DataFrame()
         self._set_cached(self._history_cache, cache_key, hist)
         return hist.copy()
 
@@ -140,14 +145,15 @@ class YFinanceAdapter:
         self, symbol: str
     ) -> tuple[dict[date, float], dict[date, float]]:
         symbol_upper = symbol.strip().upper()
-        ticker = self._ticker(symbol_upper)
-        try:
-            with yfinance_fetch_lock():
-                dividends = ticker.dividends
-                splits = ticker.splits
-        except Exception as exc:
-            self._log_yahoo_failure("dividends/splits", symbol_upper, exc)
-            return {}, {}
+        with observe_dependency("yfinance"):
+            ticker = self._ticker(symbol_upper)
+            try:
+                with yfinance_fetch_lock():
+                    dividends = ticker.dividends
+                    splits = ticker.splits
+            except Exception as exc:
+                self._log_yahoo_failure("dividends/splits", symbol_upper, exc)
+                return {}, {}
 
         dividend_map: dict[date, float] = {}
         if dividends is not None and not dividends.empty:
@@ -274,34 +280,36 @@ class YFinanceAdapter:
             self.EARNINGS_TTL_SECONDS,
         )
         if cached is not None:
+            record_dependency_latency("yfinance", 0.0, cache_status="hit")
             return dict(cached)
 
-        info = self.get_ticker_info(symbol_upper)
-        fy_end_month = fiscal_year_end_month_from_info(info)
-        ticker = self._ticker(symbol_upper)
+        with observe_dependency("yfinance", cache_status="miss"):
+            info = self.get_ticker_info(symbol_upper)
+            fy_end_month = fiscal_year_end_month_from_info(info)
+            ticker = self._ticker(symbol_upper)
 
-        with yfinance_fetch_lock():
-            surprises = self._fetch_earnings_surprises(
-                ticker,
-                limit=limit,
-                fiscal_year_end_month=fy_end_month,
-            )
-            revenue_by_period = self._fetch_quarterly_revenue(ticker)
-            reported_periods = {
-                (item["quarter"], item["year"])
-                for item in surprises
-                if item.get("actual") is not None
-                and item.get("quarter") is not None
-                and item.get("year") is not None
-            }
-            latest_reported = self._latest_reported_date(surprises)
-            upcoming = self._fetch_upcoming_earnings(
-                ticker,
-                info=info,
-                fiscal_year_end_month=fy_end_month,
-                reported_periods=reported_periods,
-                latest_reported_date=latest_reported,
-            )
+            with yfinance_fetch_lock():
+                surprises = self._fetch_earnings_surprises(
+                    ticker,
+                    limit=limit,
+                    fiscal_year_end_month=fy_end_month,
+                )
+                revenue_by_period = self._fetch_quarterly_revenue(ticker)
+                reported_periods = {
+                    (item["quarter"], item["year"])
+                    for item in surprises
+                    if item.get("actual") is not None
+                    and item.get("quarter") is not None
+                    and item.get("year") is not None
+                }
+                latest_reported = self._latest_reported_date(surprises)
+                upcoming = self._fetch_upcoming_earnings(
+                    ticker,
+                    info=info,
+                    fiscal_year_end_month=fy_end_month,
+                    reported_periods=reported_periods,
+                    latest_reported_date=latest_reported,
+                )
 
         bundle = {
             "surprises": surprises,
@@ -320,36 +328,38 @@ class YFinanceAdapter:
             self.STREET_ANALYSIS_TTL_SECONDS,
         )
         if cached is not None:
+            record_dependency_latency("yfinance", 0.0, cache_status="hit")
             return dict(cached)
 
-        ticker = self._ticker(symbol_upper)
-        with yfinance_fetch_lock():
-            bundle: dict[str, Any] = {
-                "price_targets": self._safe_call(ticker.get_analyst_price_targets),
-                "recommendations_summary": self._safe_dataframe(
-                    ticker.get_recommendations_summary
-                ),
-                "recommendations": self._safe_dataframe(ticker.get_recommendations),
-                "earnings_estimate": self._safe_table(
-                    ticker.get_earnings_estimate, as_dict=True
-                ),
-                "revenue_estimate": self._safe_table(
-                    ticker.get_revenue_estimate, as_dict=True
-                ),
-                "eps_revisions": self._safe_table(ticker.get_eps_revisions, as_dict=True),
-                "eps_trend": self._safe_table(ticker.get_eps_trend, as_dict=True),
-                "upgrades_downgrades": self._safe_dataframe(ticker.get_upgrades_downgrades),
-                "growth_estimates": self._safe_table(
-                    ticker.get_growth_estimates, as_dict=True
-                ),
-                "institutional_holders": self._safe_dataframe(
-                    ticker.get_institutional_holders
-                ),
-                "insider_transactions": self._safe_dataframe(
-                    ticker.get_insider_transactions
-                ),
-                "major_holders": self._safe_dataframe(ticker.get_major_holders),
-            }
+        with observe_dependency("yfinance", cache_status="miss"):
+            ticker = self._ticker(symbol_upper)
+            with yfinance_fetch_lock():
+                bundle: dict[str, Any] = {
+                    "price_targets": self._safe_call(ticker.get_analyst_price_targets),
+                    "recommendations_summary": self._safe_dataframe(
+                        ticker.get_recommendations_summary
+                    ),
+                    "recommendations": self._safe_dataframe(ticker.get_recommendations),
+                    "earnings_estimate": self._safe_table(
+                        ticker.get_earnings_estimate, as_dict=True
+                    ),
+                    "revenue_estimate": self._safe_table(
+                        ticker.get_revenue_estimate, as_dict=True
+                    ),
+                    "eps_revisions": self._safe_table(ticker.get_eps_revisions, as_dict=True),
+                    "eps_trend": self._safe_table(ticker.get_eps_trend, as_dict=True),
+                    "upgrades_downgrades": self._safe_dataframe(ticker.get_upgrades_downgrades),
+                    "growth_estimates": self._safe_table(
+                        ticker.get_growth_estimates, as_dict=True
+                    ),
+                    "institutional_holders": self._safe_dataframe(
+                        ticker.get_institutional_holders
+                    ),
+                    "insider_transactions": self._safe_dataframe(
+                        ticker.get_insider_transactions
+                    ),
+                    "major_holders": self._safe_dataframe(ticker.get_major_holders),
+                }
         self._set_cached(self._street_analysis_cache, symbol_upper, bundle)
         return bundle
 
@@ -362,15 +372,17 @@ class YFinanceAdapter:
             self.FUNDS_DATA_TTL_SECONDS,
         )
         if cached is not None:
+            record_dependency_latency("yfinance", 0.0, cache_status="hit")
             return dict(cached)
 
-        ticker = self._ticker(symbol_upper)
-        funds = None
-        try:
-            with yfinance_fetch_lock():
-                funds = ticker.get_funds_data()
-        except Exception:
-            logger.debug("yfinance get_funds_data failed for %s", symbol_upper)
+        with observe_dependency("yfinance", cache_status="miss"):
+            ticker = self._ticker(symbol_upper)
+            funds = None
+            try:
+                with yfinance_fetch_lock():
+                    funds = ticker.get_funds_data()
+            except Exception:
+                logger.debug("yfinance get_funds_data failed for %s", symbol_upper)
 
         bundle: dict[str, Any] = {}
         if funds is not None:

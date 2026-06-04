@@ -4,6 +4,7 @@ from typing import Optional
 import redis
 
 from app.models.dividend_research_models import DividendHistoryContext
+from app.core.latency_observability import observe_dependency, record_dependency_latency
 
 
 class DividendHistoryCache:
@@ -71,9 +72,12 @@ class DividendHistoryCache:
         return f"{self.key_prefix}:{symbol.strip().upper()}:{cache_key}"
 
     def get(self, symbol: str, cache_key: str) -> Optional[DividendHistoryContext]:
-        raw = self.redis_client.get(self._redis_key(symbol, cache_key))
+        with observe_dependency("redis"):
+            raw = self.redis_client.get(self._redis_key(symbol, cache_key))
         if not raw:
+            record_dependency_latency("dividend_history_cache", 0.0, cache_status="miss")
             return None
+        record_dependency_latency("dividend_history_cache", 0.0, cache_status="hit")
         return DividendHistoryContext.model_validate_json(raw)
 
     def put(
@@ -82,8 +86,9 @@ class DividendHistoryCache:
         cache_key: str,
         context: DividendHistoryContext,
     ) -> None:
-        self.redis_client.setex(
-            self._redis_key(symbol, cache_key),
-            self.ttl_seconds,
-            context.model_dump_json(),
-        )
+        with observe_dependency("redis"):
+            self.redis_client.setex(
+                self._redis_key(symbol, cache_key),
+                self.ttl_seconds,
+                context.model_dump_json(),
+            )

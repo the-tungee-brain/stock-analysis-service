@@ -17,6 +17,7 @@ from app.adapters.finnhub.finnhub_circuit import (
     FinnhubCircuitBreaker,
     FinnhubUnavailableError,
 )
+from app.core.latency_observability import observe_dependency, record_dependency_latency
 
 logger = logging.getLogger(__name__)
 
@@ -90,9 +91,11 @@ class FinnhubAdapter:
         if self._cache is not None:
             cached = self._cache.get(endpoint=endpoint, cache_key=cache_key)
             if cached is not None:
+                record_dependency_latency("finnhub", 0.0, cache_status="hit")
                 return cached
 
-        result = self._call(label, fn)
+        with observe_dependency("finnhub", cache_status="miss"):
+            result = self._call(label, fn)
 
         if self._cache is not None:
             self._cache.put(endpoint=endpoint, cache_key=cache_key, value=result)

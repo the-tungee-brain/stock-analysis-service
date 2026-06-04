@@ -15,6 +15,7 @@ from app.dependencies.service_dependencies import (
     get_transaction_service,
 )
 from app.broker.option_utils import summarize_assignment_risk_structural
+from app.core.latency_observability import set_latency_attribute
 from app.models.intelligence_models import PortfolioIntelligence, ProactiveAlert
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.models.recent_order_models import RecentActivitySummary
@@ -121,6 +122,8 @@ async def get_account_positions(
     )
     account = account_map["account"]
     positions = account.securitiesAccount.positions
+    set_latency_attribute("account_count", 1)
+    set_latency_attribute("symbol_count", len(positions))
     account_number = account.securitiesAccount.accountNumber
     positions_synced_at = datetime.now(timezone.utc).isoformat()
 

@@ -4,6 +4,7 @@ from typing import Optional
 import redis
 
 from app.models.news_analytics_models import StockNewsView
+from app.core.latency_observability import observe_dependency, record_dependency_latency
 
 
 class EnrichedNewsCache:
@@ -28,17 +29,22 @@ class EnrichedNewsCache:
         return f"{self.key_prefix}:{symbol.strip().upper()}"
 
     def get(self, symbol: str) -> Optional[StockNewsView]:
-        raw = self.redis_client.get(self._redis_key(symbol=symbol))
+        with observe_dependency("redis"):
+            raw = self.redis_client.get(self._redis_key(symbol=symbol))
         if not raw:
+            record_dependency_latency("enriched_news_cache", 0.0, cache_status="miss")
             return None
+        record_dependency_latency("enriched_news_cache", 0.0, cache_status="hit")
         return StockNewsView.model_validate_json(raw)
 
     def put(self, symbol: str, view: StockNewsView) -> None:
-        self.redis_client.setex(
-            self._redis_key(symbol=symbol),
-            self.ttl_seconds,
-            view.model_dump_json(),
-        )
+        with observe_dependency("redis"):
+            self.redis_client.setex(
+                self._redis_key(symbol=symbol),
+                self.ttl_seconds,
+                view.model_dump_json(),
+            )
 
     def delete(self, symbol: str) -> None:
-        self.redis_client.delete(self._redis_key(symbol=symbol))
+        with observe_dependency("redis"):
+            self.redis_client.delete(self._redis_key(symbol=symbol))

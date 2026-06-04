@@ -2,6 +2,7 @@ from typing import Dict, Optional, Literal, List, Any
 import requests
 from datetime import datetime, timedelta, timezone
 from app.models.schwab_order_models import OrderStatus
+from app.core.latency_observability import observe_dependency
 
 MAX_ORDER_LOOKBACK_DAYS = 60
 
@@ -20,11 +21,12 @@ class SchwabTraderAdapter:
 
     def get_account_numbers(self, access_token: str) -> List[Dict[str, Any]]:
         url = f"{self.base_uri}/accounts/accountNumbers"
-        response = self.session.get(
-            url,
-            headers=self._get_auth_headers(access_token),
-            timeout=10,
-        )
+        with observe_dependency("schwab"):
+            response = self.session.get(
+                url,
+                headers=self._get_auth_headers(access_token),
+                timeout=10,
+            )
         response.raise_for_status()
         return response.json()
 
@@ -58,12 +60,13 @@ class SchwabTraderAdapter:
         if fields:
             params["fields"] = fields
 
-        response = self.session.get(
-            url,
-            headers=self._get_auth_headers(access_token),
-            params=params,
-            timeout=10,
-        )
+        with observe_dependency("schwab"):
+            response = self.session.get(
+                url,
+                headers=self._get_auth_headers(access_token),
+                params=params,
+                timeout=10,
+            )
         response.raise_for_status()
         return response.json()
 
@@ -114,12 +117,13 @@ class SchwabTraderAdapter:
         if status:
             params["status"] = status
 
-        response = self.session.get(
-            url,
-            headers=self._get_auth_headers(access_token),
-            params=params,
-            timeout=10,
-        )
+        with observe_dependency("schwab"):
+            response = self.session.get(
+                url,
+                headers=self._get_auth_headers(access_token),
+                params=params,
+                timeout=10,
+            )
 
         if not response.ok:
             detail = response.text.strip()

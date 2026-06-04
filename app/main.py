@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, APIRouter
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.latency_observability import LatencyLoggingMiddleware
 from app.api.get_recent_orders_route import router as get_recent_orders_router
 from app.api.analyze_positions_by_symbol_route import (
     router as analyze_positions_by_symbol_router,
@@ -102,6 +103,8 @@ AUTH_GOOGLE_PREFIX = f"{API_PREFIX}/auth/google"
 load_dotenv()
 
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(LatencyLoggingMiddleware)
 
 origins = [
     "http://localhost:3000",

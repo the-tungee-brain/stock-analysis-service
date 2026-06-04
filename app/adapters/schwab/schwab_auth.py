@@ -3,6 +3,8 @@ import base64
 from dotenv import load_dotenv
 from urllib.parse import unquote
 
+from app.core.latency_observability import observe_dependency
+
 
 class SchwabAuth:
 
@@ -29,12 +31,13 @@ class SchwabAuth:
     def get_refreshed_access_token(self, refresh_token):
         headers = self._get_basic_auth_header()
         data = {"grant_type": "refresh_token", "refresh_token": refresh_token}
-        response = requests.post(
-            self.TOKEN_URL,
-            headers=headers,
-            data=data,
-            timeout=self.TOKEN_REQUEST_TIMEOUT_SECONDS,
-        )
+        with observe_dependency("schwab"):
+            response = requests.post(
+                self.TOKEN_URL,
+                headers=headers,
+                data=data,
+                timeout=self.TOKEN_REQUEST_TIMEOUT_SECONDS,
+            )
         if response.status_code == 200:
             return response
         else:
@@ -47,12 +50,13 @@ class SchwabAuth:
             "code": unquote(auth_code),
             "redirect_uri": self.redirect_uri,
         }
-        response = requests.post(
-            self.TOKEN_URL,
-            headers=headers,
-            data=data,
-            timeout=self.TOKEN_REQUEST_TIMEOUT_SECONDS,
-        )
+        with observe_dependency("schwab"):
+            response = requests.post(
+                self.TOKEN_URL,
+                headers=headers,
+                data=data,
+                timeout=self.TOKEN_REQUEST_TIMEOUT_SECONDS,
+            )
         if response.status_code == 200:
             return response
         else:

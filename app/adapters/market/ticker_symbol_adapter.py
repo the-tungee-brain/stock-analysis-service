@@ -2,6 +2,7 @@ import oracledb
 from typing import List
 
 from app.models.ticker_symbol_models import TickerSymbolItem
+from app.core.latency_observability import observe_dependency
 
 
 class TickerSymbolAdapter:
@@ -38,11 +39,12 @@ class TickerSymbolAdapter:
 
         resolved_limit = max(1, min(limit, 100))
 
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
 
-            sql = f"""
+                sql = f"""
                 SELECT SYMBOL, TITLE, ASSET_TYPE, LOGO_URL
                 FROM {self.table_name}
                 WHERE UPPER(SYMBOL) LIKE :pattern || '%'
@@ -57,20 +59,20 @@ class TickerSymbolAdapter:
                 FETCH FIRST :limit ROWS ONLY
             """
 
-            cur.execute(
-                sql,
-                {
-                    "pattern": pattern,
-                    "exact": pattern,
-                    "limit": resolved_limit,
-                },
-            )
+                cur.execute(
+                    sql,
+                    {
+                        "pattern": pattern,
+                        "exact": pattern,
+                        "limit": resolved_limit,
+                    },
+                )
 
-            cols = [col[0] for col in cur.description]
-            rows = cur.fetchall()
-            return [self.dict_to_item(dict(zip(cols, row))) for row in rows]
-        finally:
-            self.client.release(con)
+                cols = [col[0] for col in cur.description]
+                rows = cur.fetchall()
+                return [self.dict_to_item(dict(zip(cols, row))) for row in rows]
+            finally:
+                self.client.release(con)
 
     def get_by_symbols(self, symbols: list[str]) -> dict[str, TickerSymbolItem]:
         normalized = [
@@ -90,41 +92,43 @@ class TickerSymbolAdapter:
             for index, symbol in enumerate(unique_symbols)
         }
 
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
-            sql = f"""
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                sql = f"""
                 SELECT SYMBOL, TITLE, ASSET_TYPE, LOGO_URL
                 FROM {self.table_name}
                 WHERE UPPER(SYMBOL) IN ({placeholders})
             """
-            cur.execute(sql, params)
-            cols = [col[0] for col in cur.description]
-            rows = cur.fetchall()
-            items = [self.dict_to_item(dict(zip(cols, row))) for row in rows]
-            return {item.symbol.upper(): item for item in items}
-        finally:
-            self.client.release(con)
+                cur.execute(sql, params)
+                cols = [col[0] for col in cur.description]
+                rows = cur.fetchall()
+                items = [self.dict_to_item(dict(zip(cols, row))) for row in rows]
+                return {item.symbol.upper(): item for item in items}
+            finally:
+                self.client.release(con)
 
     def get_by_symbol(self, symbol: str) -> TickerSymbolItem | None:
         symbol_upper = symbol.strip().upper()
         if not symbol_upper:
             return None
 
-        con = self.client.acquire()
-        try:
-            cur = con.cursor()
-            sql = f"""
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                sql = f"""
                 SELECT SYMBOL, TITLE, ASSET_TYPE, LOGO_URL
                 FROM {self.table_name}
                 WHERE UPPER(SYMBOL) = :symbol
                 FETCH FIRST 1 ROW ONLY
             """
-            cur.execute(sql, {"symbol": symbol_upper})
-            cols = [col[0] for col in cur.description]
-            row = cur.fetchone()
-            if row is None:
-                return None
-            return self.dict_to_item(dict(zip(cols, row)))
-        finally:
-            self.client.release(con)
+                cur.execute(sql, {"symbol": symbol_upper})
+                cols = [col[0] for col in cur.description]
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                return self.dict_to_item(dict(zip(cols, row)))
+            finally:
+                self.client.release(con)

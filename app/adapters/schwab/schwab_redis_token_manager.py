@@ -4,6 +4,8 @@ from typing import Any, Optional
 
 import redis
 
+from app.core.latency_observability import observe_dependency, record_dependency_latency
+
 
 class SchwabRedisTokenManager:
     TOKEN_TTL_SECONDS: int = int(
@@ -19,9 +21,12 @@ class SchwabRedisTokenManager:
 
     def get(self, key: str) -> Optional[Any]:
         redis_key = self._redis_key(key)
-        raw = self.redis_client.get(redis_key)
+        with observe_dependency("redis"):
+            raw = self.redis_client.get(redis_key)
         if raw is None:
+            record_dependency_latency("schwab_token_cache", 0.0, cache_status="miss")
             return None
+        record_dependency_latency("schwab_token_cache", 0.0, cache_status="hit")
 
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8")
@@ -37,8 +42,10 @@ class SchwabRedisTokenManager:
 
         redis_key = self._redis_key(key)
         payload = json.dumps(value)
-        self.redis_client.setex(redis_key, ttl_seconds, payload)
+        with observe_dependency("redis"):
+            self.redis_client.setex(redis_key, ttl_seconds, payload)
 
     def delete(self, key: str) -> int:
         redis_key = self._redis_key(key)
-        return self.redis_client.delete(redis_key)
+        with observe_dependency("redis"):
+            return self.redis_client.delete(redis_key)
