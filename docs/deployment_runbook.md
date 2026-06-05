@@ -11,6 +11,7 @@
 | Sun 06:00 UTC | `ranking-pipeline-vm.yml` | **weekly** universe refresh |
 | Manual (one-time) | `ranking-pipeline-vm.yml` → **bootstrap** | Universe → SPY → daily → portfolio |
 | Manual | `ranking-pipeline-vm.yml` → **daily** / **bootstrap-resume** | Ad hoc |
+| Manual / Tue–Sat 08:45 UTC | `emerging-leaders-precompute.yml` | Verify Emerging Leaders precompute snapshot readiness |
 
 Script on VM: `/home/ubuntu/ranking_pipeline_remote.sh` (copied on deploy and before each pipeline run)  
 Logs: `/home/ubuntu/logs/ranking-bootstrap.log`, `ranking-daily.log`
@@ -64,6 +65,37 @@ If ranking is **stale** (older than one trading day vs the latest bar, empty res
 Diagnostics: `GET /api/v1/strategy/momentum-breakout/universe` (fields: `universeSource`, `selectionMethod`, `rankingRunId`, `warning`, …).
 
 Config: `MB_SCAN_UNIVERSE_ORDER` — default `ranking_score` (`liquidity` \| `market_cap` \| `alphabetical` to override).
+
+### Emerging Leaders snapshot serving
+
+`GET /api/v1/research/emerging-leaders` serves the latest completed precomputed
+snapshot when `EMERGING_LEADERS_SERVING_MODE=precomputed`. Before enabling or
+keeping precomputed serving after a backend deploy, run **Actions → Emerging
+Leaders precompute verification**.
+
+The workflow runs the full precompute job in the deployed `sas-server` container
+against the persisted ranking volume, verifies the latest completed snapshot, and
+writes a summary artifact containing `run_id`, `as_of_date`, `generated_at`,
+`candidates_scanned`, `results_stored`, and `duration_ms`.
+
+Only enable precomputed serving after the workflow passes:
+
+```bash
+EMERGING_LEADERS_SERVING_MODE=precomputed
+```
+
+The workflow does **not** set `EMERGING_LEADERS_SERVING_MODE` automatically. If
+snapshot serving needs to be rolled back, set:
+
+```bash
+EMERGING_LEADERS_SERVING_MODE=live_emergency
+```
+
+Required GitHub secrets for the verification workflow are the same VM access
+secrets used by the ranking pipeline workflow: `VM_IP` and `SSH_PRIVATE_KEY`.
+No credentials are hardcoded or printed. The workflow expects the production
+ranking DB at the container default path `/app/data/ranking/ranking_pipeline.db`;
+if that path changes, update the workflow and the API/container mount together.
 
 ---
 

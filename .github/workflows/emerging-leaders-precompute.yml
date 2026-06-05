@@ -1,0 +1,178 @@
+name: Emerging Leaders precompute verification
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Tue-Sat 08:45 UTC: after the 07:30 UTC ranking pipeline window.
+    - cron: "45 8 * * 2-6"
+
+concurrency:
+  group: emerging-leaders-precompute-verification
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      VM_HOST: ${{ secrets.VM_IP }}
+      VM_USER: ubuntu
+      CONTAINER_NAME: sas-server
+      SUMMARY_FILE: emerging-leaders-precompute-summary.json
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          install -m 600 /dev/null ~/.ssh/sas_vm_key
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/sas_vm_key
+          ssh-keyscan -H "$VM_HOST" >> ~/.ssh/known_hosts
+
+      - name: Run precompute and verify latest completed snapshot
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/sas_vm_key "$VM_USER@$VM_HOST" "CONTAINER_NAME='$CONTAINER_NAME' bash -s" > "$SUMMARY_FILE" <<'REMOTE'
+          set -euo pipefail
+          CONTAINER_NAME="${CONTAINER_NAME:-sas-server}"
+
+          if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+            echo "$CONTAINER_NAME container is not running" >&2
+            exit 1
+          fi
+
+          docker exec "$CONTAINER_NAME" sh -lc '
+            set -eu
+            cd /app
+            PYTHON_BIN=".venv/bin/python"
+            if [ ! -x "$PYTHON_BIN" ]; then
+              PYTHON_BIN="python"
+            fi
+
+            "$PYTHON_BIN" scripts/run_emerging_leaders_precompute.py >&2
+
+            "$PYTHON_BIN" - <<'"'"'PY'"'"'
+          import json
+          import sqlite3
+          import sys
+          from pathlib import Path
+
+          db_path = Path("/app/data/ranking/ranking_pipeline.db")
+          if not db_path.exists():
+              raise SystemExit(f"Ranking DB not found: {db_path}")
+
+          conn = sqlite3.connect(db_path)
+          conn.row_factory = sqlite3.Row
+          try:
+              run = conn.execute(
+                  """
+                  SELECT *
+                  FROM emerging_leaders_snapshot_runs
+                  WHERE status = 'completed'
+                  ORDER BY generated_at DESC
+                  LIMIT 1
+                  """
+              ).fetchone()
+              if run is None:
+                  raise SystemExit("No completed Emerging Leaders snapshot run found")
+
+              results_stored = conn.execute(
+                  """
+                  SELECT COUNT(*) AS c
+                  FROM emerging_leaders_snapshot_results
+                  WHERE run_id = ?
+                  """,
+                  (run["run_id"],),
+              ).fetchone()["c"]
+
+              if run["status"] != "completed":
+                  raise SystemExit(f"Latest run is not completed: {run['status']}")
+              if not run["generated_at"]:
+                  raise SystemExit("Latest completed run is missing generated_at")
+
+              candidates_scanned = int(run["candidates_scanned"])
+              symbols_with_data = int(run["symbols_with_data"])
+              excluded_top_movers = int(run["excluded_top_movers"])
+              evaluations_computed = int(run["evaluations_computed"])
+              eligible_after_exclusions = symbols_with_data - excluded_top_movers
+              if eligible_after_exclusions > 500 and candidates_scanned <= 500:
+                  raise SystemExit(
+                      "Expected candidates_scanned > 500 when eligible universe > 500; "
+                      f"got candidates_scanned={candidates_scanned}, "
+                      f"symbols_with_data={symbols_with_data}, "
+                      f"excluded_top_movers={excluded_top_movers}"
+                  )
+
+              expected_results = min(100, evaluations_computed)
+              if expected_results >= 95 and results_stored < 95:
+                  raise SystemExit(
+                      "Expected near-100 stored results; "
+                      f"got results_stored={results_stored}, "
+                      f"evaluations_computed={evaluations_computed}"
+                  )
+              if expected_results < 95 and results_stored != expected_results:
+                  raise SystemExit(
+                      "Stored result count does not match low evaluation count; "
+                      f"got results_stored={results_stored}, "
+                      f"evaluations_computed={evaluations_computed}"
+                  )
+
+              summary = {
+                  "run_id": run["run_id"],
+                  "as_of_date": run["as_of_date"],
+                  "generated_at": run["generated_at"],
+                  "candidates_scanned": candidates_scanned,
+                  "symbols_with_data": symbols_with_data,
+                  "excluded_top_movers": excluded_top_movers,
+                  "results_stored": int(results_stored),
+                  "evaluations_computed": evaluations_computed,
+                  "duration_ms": int(run["duration_ms"]),
+              }
+              print(json.dumps(summary, indent=2, sort_keys=True))
+          finally:
+              conn.close()
+          PY
+          '
+          REMOTE
+
+      - name: Write step summary
+        run: |
+          set -euo pipefail
+          echo "## Emerging Leaders precompute verification" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          .venv/bin/python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+
+          summary = json.loads(Path("emerging-leaders-precompute-summary.json").read_text())
+          for key in (
+              "run_id",
+              "as_of_date",
+              "generated_at",
+              "candidates_scanned",
+              "symbols_with_data",
+              "excluded_top_movers",
+              "results_stored",
+              "evaluations_computed",
+              "duration_ms",
+          ):
+              print(f"- `{key}`: {summary.get(key)}")
+          PY
+
+      - name: Upload summary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: emerging-leaders-precompute-summary
+          path: ${{ env.SUMMARY_FILE }}
