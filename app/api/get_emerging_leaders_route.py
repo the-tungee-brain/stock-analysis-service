@@ -4,7 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth.dependencies import get_current_user_id
 from app.models.emerging_leaders_models import EmergingLeadersResponse
-from app.services.emerging_leaders_service import build_emerging_leaders
+from app.services.emerging_leaders_service import (
+    EmergingLeadersSnapshotUnavailable,
+    build_emerging_leaders,
+)
 
 router = APIRouter()
 
@@ -21,5 +24,7 @@ async def get_emerging_leaders(
     del user_id
     try:
         return await asyncio.to_thread(build_emerging_leaders, limit=limit)
+    except EmergingLeadersSnapshotUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

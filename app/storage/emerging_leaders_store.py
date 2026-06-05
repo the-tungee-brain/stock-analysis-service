@@ -189,15 +189,37 @@ class EmergingLeadersStore:
             return None
         return self._record_from_row(row)
 
-    def list_results(self, run_id: str) -> list[dict[str, Any]]:
+    def latest_completed_run(self) -> EmergingLeadersRunRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM emerging_leaders_snapshot_runs
+                WHERE status = 'completed'
+                ORDER BY generated_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        return self._record_from_row(row)
+
+    def list_results(
+        self,
+        run_id: str,
+        *,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        limit_clause = "" if limit is None else "LIMIT ?"
+        params: tuple[Any, ...] = (run_id,) if limit is None else (run_id, int(limit))
         with self._connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT * FROM emerging_leaders_snapshot_results
                 WHERE run_id = ?
                 ORDER BY rank
+                {limit_clause}
                 """,
-                (run_id,),
+                params,
             ).fetchall()
         return [
             {

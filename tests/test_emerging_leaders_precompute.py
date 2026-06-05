@@ -12,7 +12,7 @@ from app.builders.emerging_leaders_engine import (
 from app.services.emerging_leaders_precompute_service import (
     precompute_emerging_leaders_snapshot,
 )
-from app.services.emerging_leaders_service import build_emerging_leaders
+from app.services.emerging_leaders_service import build_emerging_leaders_live
 from app.storage.emerging_leaders_store import EmergingLeadersStore
 from ranking_pipeline.storage.sqlite import UniverseMemberRecord
 
@@ -270,7 +270,7 @@ def test_failed_precompute_records_status_and_error(
     assert latest.error_message == "scoring exploded"
 
 
-def test_existing_emerging_leaders_endpoint_behavior_remains_live(
+def test_existing_emerging_leaders_live_scan_behavior_remains_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_collect():
@@ -281,7 +281,7 @@ def test_existing_emerging_leaders_endpoint_behavior_remains_live(
         fake_collect,
     )
 
-    response = build_emerging_leaders(limit=20)
+    response = build_emerging_leaders_live(limit=20)
 
     assert response.as_of_date == "2026-06-05"
     assert response.universe_scanned == 1
