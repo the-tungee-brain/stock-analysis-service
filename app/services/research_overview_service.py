@@ -220,7 +220,9 @@ class ResearchOverviewService:
                     "snapshot",
                     symbol_upper,
                     lambda: self.company_research_service.build_context(
-                        symbol=symbol_upper
+                        symbol=symbol_upper,
+                        include_news=True,
+                        include_press_releases=True,
                     ),
                 )
             prompts = self._timed_section(
@@ -283,12 +285,20 @@ class ResearchOverviewService:
         ctx = None
         needs_context = include_summary or not self._has_cached_core(cached_sections)
         if needs_context:
+            if include_summary:
+                build_context = lambda: self.company_research_service.build_context(
+                    symbol=symbol_upper,
+                    include_news=True,
+                    include_press_releases=True,
+                )
+            else:
+                build_context = lambda: self.company_research_service.build_context(
+                    symbol=symbol_upper
+                )
             ctx = self._timed_section(
                 "snapshot",
                 symbol_upper,
-                lambda: self.company_research_service.build_context(
-                    symbol=symbol_upper
-                ),
+                build_context,
             )
 
         snapshot = self._cached_snapshot(cached_sections)
@@ -395,7 +405,9 @@ class ResearchOverviewService:
                     "snapshot",
                     symbol_upper,
                     lambda: self.company_research_service.build_context(
-                        symbol=symbol_upper
+                        symbol=symbol_upper,
+                        include_news=True,
+                        include_press_releases=True,
                     ),
                 )
             prompts = self._timed_section(
@@ -467,12 +479,20 @@ class ResearchOverviewService:
         ctx = None
         needs_context = include_summary or not self._has_cached_core(cached_sections)
         if needs_context:
+            if include_summary:
+                build_context = lambda: self.company_research_service.build_context(
+                    symbol=symbol_upper,
+                    include_news=True,
+                    include_press_releases=True,
+                )
+            else:
+                build_context = lambda: self.company_research_service.build_context(
+                    symbol=symbol_upper
+                )
             ctx = self._timed_section(
                 "snapshot",
                 symbol_upper,
-                lambda: self.company_research_service.build_context(
-                    symbol=symbol_upper
-                ),
+                build_context,
             )
 
         snapshot = self._cached_snapshot(cached_sections)

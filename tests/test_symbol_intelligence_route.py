@@ -74,6 +74,7 @@ def test_build_symbol_intelligence_delegates_to_intelligence_service():
     )
 
     assert result == expected
+    company_research_service.build_context.assert_called_once_with(symbol="AAPL")
     portfolio_intelligence_service.build_symbol_intelligence.assert_called_once()
     _, delegate_kwargs = (
         portfolio_intelligence_service.build_symbol_intelligence.call_args

@@ -9,7 +9,7 @@ from app.core.latency_observability import observe_dependency, record_dependency
 
 class ResearchContextCache:
     DEFAULT_TTL_SECONDS = 1800
-    DEFAULT_KEY_PREFIX = "research:context:v2"
+    DEFAULT_KEY_PREFIX = "research:context:v3"
 
     def __init__(
         self,
@@ -26,16 +26,36 @@ class ResearchContextCache:
             )
         )
 
-    def _redis_key(self, symbol: str, *, lookback_days: int = 7) -> str:
+    def _redis_key(
+        self,
+        symbol: str,
+        *,
+        lookback_days: int = 7,
+        include_news: bool = False,
+        include_press_releases: bool = False,
+    ) -> str:
         symbol_upper = symbol.strip().upper()
+        variant = f"news{int(include_news)}:press{int(include_press_releases)}"
         if lookback_days == 7:
-            return f"{self.key_prefix}:{symbol_upper}"
-        return f"{self.key_prefix}:{symbol_upper}:{lookback_days}"
+            return f"{self.key_prefix}:{symbol_upper}:{variant}"
+        return f"{self.key_prefix}:{symbol_upper}:{lookback_days}:{variant}"
 
-    def get(self, symbol: str, *, lookback_days: int = 7) -> Optional[ResearchContext]:
+    def get(
+        self,
+        symbol: str,
+        *,
+        lookback_days: int = 7,
+        include_news: bool = False,
+        include_press_releases: bool = False,
+    ) -> Optional[ResearchContext]:
         with observe_dependency("redis"):
             raw = self.redis_client.get(
-                self._redis_key(symbol=symbol, lookback_days=lookback_days)
+                self._redis_key(
+                    symbol=symbol,
+                    lookback_days=lookback_days,
+                    include_news=include_news,
+                    include_press_releases=include_press_releases,
+                )
             )
         if not raw:
             record_dependency_latency("research_context_cache", 0.0, cache_status="miss")
@@ -49,10 +69,17 @@ class ResearchContextCache:
         context: ResearchContext,
         *,
         lookback_days: int = 7,
+        include_news: bool = False,
+        include_press_releases: bool = False,
     ) -> None:
         with observe_dependency("redis"):
             self.redis_client.setex(
-                self._redis_key(symbol=symbol, lookback_days=lookback_days),
+                self._redis_key(
+                    symbol=symbol,
+                    lookback_days=lookback_days,
+                    include_news=include_news,
+                    include_press_releases=include_press_releases,
+                ),
                 self.ttl_seconds,
                 context.model_dump_json(),
             )

@@ -143,3 +143,43 @@ def test_build_portfolio_brief_with_cache_uses_full_variant():
         variant=PortfolioBriefCache.VARIANT_FULL,
     )
     company_research_service.build_context.assert_not_called()
+
+
+def test_build_portfolio_brief_full_context_does_not_opt_into_company_news():
+    portfolio_intelligence_service = MagicMock()
+    portfolio_intelligence_service.attach_enriched_news.side_effect = lambda ctx: ctx
+    portfolio_intelligence_service.build_portfolio_intelligence.return_value = (
+        PortfolioIntelligence(signals=[], digest=None, alerts=[])
+    )
+
+    company_research_service = MagicMock()
+    ctx = MagicMock()
+    ctx.snapshot = MagicMock(sector="Technology")
+    ctx.asset_type = "EQUITY"
+    company_research_service.build_context.return_value = ctx
+
+    market_service = MagicMock()
+    market_service.get_enriched_quote_snapshot.return_value = {}
+
+    service = PortfolioAnalysisService(
+        market_service=market_service,
+        schwab_auth_service=MagicMock(),
+        prompt_enrichment_service=MagicMock(),
+        company_research_service=company_research_service,
+        transaction_service=MagicMock(),
+        portfolio_intelligence_service=portfolio_intelligence_service,
+        profile_adapter=MagicMock(),
+    )
+
+    account = _make_account()
+    positions = [_make_position(symbol="AAPL", market_value=50_000)]
+
+    service.build_portfolio_brief(
+        user_id="user-1",
+        account=account,
+        positions=positions,
+        access_token="token",
+        lightweight=False,
+    )
+
+    company_research_service.build_context.assert_called_once_with(symbol="AAPL")

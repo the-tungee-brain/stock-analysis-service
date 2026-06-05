@@ -173,7 +173,12 @@ class CompanyResearchService:
         return False
 
     def build_context(
-        self, symbol: str, *, news_lookback_days: int = 7
+        self,
+        symbol: str,
+        *,
+        news_lookback_days: int = 7,
+        include_news: bool = False,
+        include_press_releases: bool = False,
     ) -> ResearchContext:
         symbol_upper = symbol.strip().upper()
 
@@ -182,6 +187,8 @@ class CompanyResearchService:
                 cached = self.research_context_cache.get(
                     symbol=symbol_upper,
                     lookback_days=news_lookback_days,
+                    include_news=include_news,
+                    include_press_releases=include_press_releases,
                 )
                 if cached is not None and not self._cached_context_is_stale(cached):
                     return self._attach_enriched_news(cached)
@@ -191,6 +198,8 @@ class CompanyResearchService:
         context = self._build_context(
             symbol=symbol_upper,
             news_lookback_days=news_lookback_days,
+            include_news=include_news,
+            include_press_releases=include_press_releases,
         )
         context = self._attach_enriched_news(context)
 
@@ -200,6 +209,8 @@ class CompanyResearchService:
                     symbol=symbol_upper,
                     context=context,
                     lookback_days=news_lookback_days,
+                    include_news=include_news,
+                    include_press_releases=include_press_releases,
                 )
             except Exception:
                 pass
@@ -300,7 +311,12 @@ class CompanyResearchService:
         return fundamentals
 
     def _build_context(
-        self, symbol: str, *, news_lookback_days: int = 7
+        self,
+        symbol: str,
+        *,
+        news_lookback_days: int = 7,
+        include_news: bool = False,
+        include_press_releases: bool = False,
     ) -> ResearchContext:
         asset_type = self._resolve_asset_type(symbol)
         is_etf = self._is_etf(asset_type)
@@ -325,17 +341,25 @@ class CompanyResearchService:
                 "performance",
                 lambda: self.market_service.get_performance(symbol=symbol),
             )
-            future_news = executor.submit(
-                self._run_loader,
-                "news",
-                lambda: self._load_news(
-                    symbol=symbol, lookback_days=news_lookback_days
-                ),
+            future_news = (
+                executor.submit(
+                    self._run_loader,
+                    "news",
+                    lambda: self._load_news(
+                        symbol=symbol, lookback_days=news_lookback_days
+                    ),
+                )
+                if include_news
+                else None
             )
-            future_press = executor.submit(
-                self._run_loader,
-                "press_releases",
-                lambda: self._load_press_releases(symbol=symbol),
+            future_press = (
+                executor.submit(
+                    self._run_loader,
+                    "press_releases",
+                    lambda: self._load_press_releases(symbol=symbol),
+                )
+                if include_press_releases
+                else None
             )
             future_fundamentals = executor.submit(
                 self._run_loader,
@@ -398,10 +422,12 @@ class CompanyResearchService:
             if gap:
                 data_gaps.append(gap)
 
-            news, gap = future_news.result()
-            if gap:
-                data_gaps.append(gap)
-            news = news or []
+            news: list[NewsHeadline] = []
+            if future_news is not None:
+                news, gap = future_news.result()
+                if gap:
+                    data_gaps.append(gap)
+                news = news or []
 
             press_releases: list[NewsHeadline] = []
             if future_press is not None:

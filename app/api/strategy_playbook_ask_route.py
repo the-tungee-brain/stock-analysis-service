@@ -186,6 +186,8 @@ async def _stream_research_playbook_ask(
         ctx = await asyncio.to_thread(
             company_research_service.build_context,
             symbol=symbol,
+            include_news=True,
+            include_press_releases=True,
         )
 
         holdings_block = None

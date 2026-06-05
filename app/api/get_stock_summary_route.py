@@ -30,6 +30,8 @@ async def get_stock_summary(
     ctx = await asyncio.to_thread(
         company_research_service.build_context,
         symbol=symbol,
+        include_news=True,
+        include_press_releases=True,
     )
 
     prompts = prompt_enrichment_service.build_stock_summary_prompt(ctx=ctx)

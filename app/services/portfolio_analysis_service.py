@@ -680,6 +680,8 @@ class PortfolioAnalysisService:
             ctx = self.company_research_service.build_context(
                 symbol=symbol,
                 news_lookback_days=news_lookback_days,
+                include_news=True,
+                include_press_releases=True,
             )
             ctx = self.portfolio_intelligence_service.attach_enriched_news(ctx)
         except Exception:
@@ -1368,6 +1370,8 @@ class PortfolioAnalysisService:
             ctx = self.company_research_service.build_context(
                 symbol=symbol,
                 news_lookback_days=news_lookback_days,
+                include_news=True,
+                include_press_releases=True,
             )
             ctx = self.portfolio_intelligence_service.attach_enriched_news(ctx)
         except Exception:

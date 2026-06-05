@@ -36,7 +36,7 @@ def test_research_context_cache_uses_lookback_in_key():
 
     assert loaded is not None
     assert loaded.symbol == "AAPL"
-    assert "research:context:v2:AAPL:14" in stored
+    assert "research:context:v3:AAPL:14:news0:press0" in stored
     assert cache.get(symbol="AAPL", lookback_days=7) is None
 
 
@@ -67,7 +67,33 @@ def test_research_context_cache_roundtrip():
     assert loaded.symbol == "AAPL"
     assert loaded.peers == ["MSFT", "GOOGL"]
     assert loaded.data_gaps == ["news"]
-    assert json.loads(stored["research:context:v2:AAPL"])["symbol"] == "AAPL"
+    assert json.loads(stored["research:context:v3:AAPL:news0:press0"])["symbol"] == "AAPL"
+
+
+def test_research_context_cache_separates_news_variants():
+    redis_client = MagicMock()
+    stored: dict[str, str] = {}
+
+    def setex(key, ttl, value):
+        stored[key] = value
+
+    def get(key):
+        return stored.get(key)
+
+    redis_client.setex = setex
+    redis_client.get = get
+
+    cache = ResearchContextCache(redis_client=redis_client, ttl_seconds=900)
+    no_news = ResearchContext(symbol="AAPL", news=[])
+    with_news = ResearchContext(symbol="AAPL", news=[])
+
+    cache.put(symbol="AAPL", context=no_news)
+    cache.put(symbol="AAPL", context=with_news, include_news=True)
+
+    assert "research:context:v3:AAPL:news0:press0" in stored
+    assert "research:context:v3:AAPL:news1:press0" in stored
+    assert cache.get(symbol="AAPL", include_news=True) is not None
+    assert cache.get(symbol="AAPL", include_press_releases=True) is None
 
 
 def test_research_chat_followup_message_omits_context_block():
