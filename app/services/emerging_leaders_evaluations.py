@@ -62,7 +62,7 @@ def _sort_by_liquidity(
 def select_emerging_leader_candidates(
     store: RankingStore,
     *,
-    max_universe: int,
+    max_universe: int | None,
     top_mover_symbols: set[str],
 ) -> tuple[list[str], int]:
     """Return quality-ordered candidates and total passed symbols with local data."""
@@ -114,12 +114,33 @@ def select_emerging_leader_candidates(
         ranked_symbols.extend(
             member.symbol.strip().upper() for member in _sort_by_liquidity(tail)
         )
+        if max_universe is None:
+            return ranked_symbols, len(with_data)
         return ranked_symbols[:max_universe], len(with_data)
 
     liquidity_ordered = [
         member.symbol.strip().upper() for member in _sort_by_liquidity(eligible)
     ]
+    if max_universe is None:
+        return liquidity_ordered, len(with_data)
     return liquidity_ordered[:max_universe], len(with_data)
+
+
+def score_emerging_leader_candidates(
+    candidates: list[str],
+) -> list[EmergingLeaderEvaluation]:
+    evaluations: list[EmergingLeaderEvaluation] = []
+    workers = max(1, min(_worker_count(), 16))
+    if candidates:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_score_symbol, sym): sym for sym in candidates}
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None and passes_emerging_leader_list(result):
+                    evaluations.append(result)
+
+    evaluations.sort(key=ranking_sort_key, reverse=True)
+    return evaluations
 
 
 def collect_qualifying_emerging_leader_evaluations(
@@ -154,17 +175,7 @@ def collect_qualifying_emerging_leader_evaluations(
         top_mover_symbols=top_mover_symbols,
     )
 
-    evaluations: list[EmergingLeaderEvaluation] = []
-    workers = max(1, min(_worker_count(), 16))
-    if candidates:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_score_symbol, sym): sym for sym in candidates}
-            for future in as_completed(futures):
-                result = future.result()
-                if result is not None and passes_emerging_leader_list(result):
-                    evaluations.append(result)
-
-    evaluations.sort(key=ranking_sort_key, reverse=True)
+    evaluations = score_emerging_leader_candidates(candidates)
     return (
         evaluations,
         as_of_date,
