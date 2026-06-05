@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 AssetType = Literal[
     "STOCK",
     "ETF",
+    "FUND",
     "MUTUAL_FUND",
     "INDEX",
     "CRYPTO",

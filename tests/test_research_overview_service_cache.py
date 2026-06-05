@@ -82,6 +82,8 @@ def _service(symbol_cache=None) -> ResearchOverviewService:
 
     ticker_service = MagicMock()
     ticker_service.get_by_symbol.return_value = SimpleNamespace(asset_type="STOCK")
+    asset_type_service = MagicMock()
+    asset_type_service.resolve.return_value = "STOCK"
 
     yfinance_analysis_builder = MagicMock()
     yfinance_analysis_builder.build.return_value = StreetAnalysisSnapshot(
@@ -99,6 +101,7 @@ def _service(symbol_cache=None) -> ResearchOverviewService:
         yfinance_analysis_builder=yfinance_analysis_builder,
         yfinance_funds_builder=MagicMock(),
         etf_research_service=MagicMock(),
+        asset_type_service=asset_type_service,
         symbol_cache=symbol_cache,
     )
 

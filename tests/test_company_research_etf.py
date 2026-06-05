@@ -134,3 +134,35 @@ def test_build_context_include_press_releases_calls_press_releases():
         symbol="SPY",
         lookback_days=30,
     )
+
+
+def test_company_research_uses_asset_type_service_for_resolution():
+    asset_type_service = MagicMock()
+    asset_type_service.resolve.return_value = "ETF"
+    ticker_builder = MagicMock()
+    ticker_builder.get_by_symbol.return_value = MagicMock(asset_type="STOCK")
+
+    etf_holdings = EtfHoldingsContext(ticker="SPY", total_holdings=504)
+    etf_service = MagicMock()
+    etf_service.build_holdings_context.return_value = etf_holdings
+
+    fundamentals_builder = MagicMock()
+    fundamentals_builder.build_etf_metrics.return_value = {}
+
+    service = CompanyResearchService(
+        company_profile_service=MagicMock(get_snapshot=MagicMock(return_value=None)),
+        market_service=MagicMock(get_performance=MagicMock(return_value=None)),
+        news_service=MagicMock(),
+        fundamentals_builder=fundamentals_builder,
+        sec_research_service=MagicMock(),
+        earnings_service=MagicMock(),
+        ticker_symbol_builder=ticker_builder,
+        etf_research_service=etf_service,
+        asset_type_service=asset_type_service,
+    )
+
+    ctx = service._build_context("SPY")
+
+    assert ctx.asset_type == "ETF"
+    asset_type_service.resolve.assert_called_once_with("SPY")
+    ticker_builder.get_by_symbol.assert_not_called()

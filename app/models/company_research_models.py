@@ -8,6 +8,7 @@ SentimentLabel = Literal["Bullish", "Neutral", "Bearish"]
 AssetType = Literal[
     "STOCK",
     "ETF",
+    "FUND",
     "MUTUAL_FUND",
     "INDEX",
     "CRYPTO",

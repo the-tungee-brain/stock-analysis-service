@@ -25,7 +25,6 @@ from app.models.company_research_models import (
     ResearchSnapshot,
 )
 from app.models.intelligence_models import SymbolIntelligence
-from app.models.ticker_symbol_models import TickerSymbolItem
 from app.models.yfinance_analysis_models import StreetAnalysisSnapshot
 from app.models.yfinance_funds_models import EtfFundsSnapshot
 from app.services.company_profile_service import CompanyProfileService
@@ -38,11 +37,12 @@ from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.services.portfolio_service import PortfolioService
 from app.services.schwab_auth_service import SchwabAuthService
 from app.services.ticker_service import TickerService
+from app.services.asset_type_service import AssetTypeService
 
 logger = logging.getLogger(__name__)
 
 _ASSET_TYPES: frozenset[str] = frozenset(
-    {"STOCK", "ETF", "MUTUAL_FUND", "INDEX", "CRYPTO", "ADR", "BOND", "OPTION"}
+    {"STOCK", "ETF", "FUND", "MUTUAL_FUND", "INDEX", "CRYPTO", "ADR", "BOND", "OPTION"}
 )
 
 
@@ -81,6 +81,7 @@ class ResearchOverviewService:
         yfinance_analysis_builder: YFinanceAnalysisBuilder,
         yfinance_funds_builder: YFinanceFundsBuilder,
         etf_research_service: EtfResearchService,
+        asset_type_service: AssetTypeService,
         prompt_enrichment_service: PromptEnrichmentService | None = None,
         llm_service: LLMService | None = None,
         symbol_cache: ResearchOverviewSymbolCache | None = None,
@@ -95,6 +96,7 @@ class ResearchOverviewService:
         self.yfinance_analysis_builder = yfinance_analysis_builder
         self.yfinance_funds_builder = yfinance_funds_builder
         self.etf_research_service = etf_research_service
+        self.asset_type_service = asset_type_service
         self.prompt_enrichment_service = prompt_enrichment_service
         self.llm_service = llm_service
         self.symbol_cache = symbol_cache
@@ -323,9 +325,8 @@ class ResearchOverviewService:
 
         asset_type = self._cached_asset_type(cached_sections)
         if asset_type is None:
-            ticker_item = self._lookup_ticker(symbol_upper)
             asset_type = (ctx.asset_type if ctx is not None else None) or (
-                ticker_item.asset_type if ticker_item else None
+                self._resolve_asset_type(symbol_upper)
             )
 
         etf_holdings = (
@@ -457,12 +458,12 @@ class ResearchOverviewService:
             summary=summary,
         )
 
-    def _lookup_ticker(self, symbol_upper: str) -> TickerSymbolItem | None:
+    def _resolve_asset_type(self, symbol_upper: str) -> AssetType | None:
         try:
             return self._timed_section(
                 "snapshot",
                 symbol_upper,
-                lambda: self.ticker_service.get_by_symbol(symbol=symbol_upper),
+                lambda: self.asset_type_service.resolve(symbol_upper),
             )
         except Exception:
             return None
@@ -517,9 +518,8 @@ class ResearchOverviewService:
 
         asset_type = self._cached_asset_type(cached_sections)
         if asset_type is None:
-            ticker_item = self._lookup_ticker(symbol_upper)
             asset_type = (ctx.asset_type if ctx is not None else None) or (
-                ticker_item.asset_type if ticker_item else None
+                self._resolve_asset_type(symbol_upper)
             )
 
         return {

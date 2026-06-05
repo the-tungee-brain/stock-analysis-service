@@ -20,6 +20,7 @@ from app.services.enriched_news_service import EnrichedNewsService
 from app.services.market_service import MarketService
 from app.services.news_service import NewsService
 from app.services.sec_research_service import SecResearchService
+from app.services.asset_type_service import AssetTypeService
 
 
 class CompanyResearchService:
@@ -36,6 +37,7 @@ class CompanyResearchService:
         ticker_symbol_builder: TickerSymbolBuilder | None = None,
         etf_research_service: EtfResearchService | None = None,
         yfinance_financials_builder: YFinanceFinancialsBuilder | None = None,
+        asset_type_service: AssetTypeService | None = None,
     ):
         self.company_profile_service = company_profile_service
         self.market_service = market_service
@@ -48,6 +50,7 @@ class CompanyResearchService:
         self.ticker_symbol_builder = ticker_symbol_builder
         self.etf_research_service = etf_research_service
         self.yfinance_financials_builder = yfinance_financials_builder
+        self.asset_type_service = asset_type_service
 
     @staticmethod
     def merge_fundamentals(
@@ -263,6 +266,11 @@ class CompanyResearchService:
         return context.model_copy(update={"enriched_news": summary})
 
     def _resolve_asset_type(self, symbol: str) -> str | None:
+        if self.asset_type_service is not None:
+            return self.asset_type_service.resolve(symbol)
+
+        # Compatibility fallback for direct test/local construction outside the
+        # app dependency graph.
         if self.ticker_symbol_builder is None:
             return None
         try:

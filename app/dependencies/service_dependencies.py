@@ -55,6 +55,7 @@ from app.services.strategy.momentum_breakout_snapshot_serving_service import (
 from app.services.strategy.custom_trade_plan_service import CustomTradePlanService
 from app.services.strategy.wheel_backtest_service import WheelBacktestService
 from app.services.account_deletion_service import AccountDeletionService
+from app.services.asset_type_service import AssetTypeService
 from app.services.research_overview_service import ResearchOverviewService
 from app.services.watchlist_service import WatchlistService
 from app.services.pattern_analysis_service import PatternAnalysisService
@@ -118,6 +119,10 @@ def get_yfinance_funds_builder(request: Request) -> YFinanceFundsBuilder:
 
 def get_ticker_service(request: Request) -> TickerService:
     return request.app.state.ticker_service
+
+
+def get_asset_type_service(request: Request) -> AssetTypeService:
+    return request.app.state.asset_type_service
 
 
 def get_sec_research_service(request: Request) -> SecResearchService:

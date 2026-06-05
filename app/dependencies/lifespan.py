@@ -102,6 +102,7 @@ from app.services.intelligence.portfolio_intelligence_service import (
 from app.services.morning_brief_delivery_service import MorningBriefDeliveryService
 from app.services.portfolio_memory_service import PortfolioMemoryService
 from app.services.portfolio_news_service import PortfolioNewsService
+from app.services.asset_type_service import AssetTypeService
 from app.services.research_overview_service import ResearchOverviewService
 from app.services.research_price_history_service import ResearchPriceHistoryService
 from app.services.strategy.strategy_journey_service import StrategyJourneyService
@@ -329,6 +330,10 @@ async def lifespan(app: FastAPI):
         securitiesdb_adapter=securitiesdb_adapter,
         fundamentals_builder=fundamentals_builder,
     )
+    asset_type_service = AssetTypeService(
+        ticker_symbol_builder=ticker_symbol_builder,
+        etf_research_service=etf_research_service,
+    )
     dividend_research_service = DividendResearchService(
         securitiesdb_adapter=securitiesdb_adapter,
         dividend_history_cache=dividend_history_cache,
@@ -408,6 +413,7 @@ async def lifespan(app: FastAPI):
         ticker_symbol_builder=ticker_symbol_builder,
         etf_research_service=etf_research_service,
         yfinance_financials_builder=yfinance_financials_builder,
+        asset_type_service=asset_type_service,
     )
     peer_comparison_service = PeerComparisonService(
         yfinance_adapter=yfinance_adapter,
@@ -452,6 +458,7 @@ async def lifespan(app: FastAPI):
         yfinance_analysis_builder=yfinance_analysis_builder,
         yfinance_funds_builder=yfinance_funds_builder,
         etf_research_service=etf_research_service,
+        asset_type_service=asset_type_service,
         prompt_enrichment_service=prompt_enrichment_service,
         llm_service=llm_service,
         symbol_cache=research_overview_symbol_cache,
@@ -563,6 +570,7 @@ async def lifespan(app: FastAPI):
     app.state.etf_research_service = etf_research_service
     app.state.dividend_research_service = dividend_research_service
     app.state.ticker_service = ticker_service
+    app.state.asset_type_service = asset_type_service
     app.state.watchlist_service = watchlist_service
     app.state.research_overview_service = research_overview_service
     app.state.transaction_service = transaction_service
