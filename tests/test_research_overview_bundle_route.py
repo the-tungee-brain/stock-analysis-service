@@ -1,11 +1,15 @@
 import asyncio
+import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
+import numpy as np
+import pandas as pd
 from fastapi import Request
 
 from app.api.get_research_overview_bundle_route import get_research_overview_bundle
 from app.http.etag import json_weak_etag
+from app.http.json_sanitizer import sanitize_json_value
 from app.models.company_research_models import PerformanceSnapshot, ResearchSnapshot
 from app.models.intelligence_models import SymbolIntelligence
 from app.services.research_overview_service import ResearchOverviewBundle
@@ -102,3 +106,64 @@ def test_overview_bundle_returns_304_when_etag_matches():
 
     assert response.status_code == 304
     service.build_bundle_async.assert_awaited_once()
+
+
+def test_sanitize_json_value_converts_nested_non_finite_values_to_none():
+    payload = {
+        "price": float("nan"),
+        "nested": {
+            "upside": float("inf"),
+            "downside": float("-inf"),
+            "numpy": np.float64("nan"),
+            "pandas": pd.NA,
+        },
+        "items": [1.0, np.float64("inf"), pd.NaT],
+    }
+
+    assert sanitize_json_value(payload) == {
+        "price": None,
+        "nested": {
+            "upside": None,
+            "downside": None,
+            "numpy": None,
+            "pandas": None,
+        },
+        "items": [1.0, None, None],
+    }
+
+
+def test_overview_bundle_sanitizes_non_finite_values_before_json_response():
+    bundle = _sample_bundle()
+    bundle.snapshot.price = float("nan")
+    bundle.snapshot.changePct = float("inf")
+    service = _mock_service(bundle)
+
+    request = Request(
+        scope={
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+        }
+    )
+
+    response = asyncio.run(
+        get_research_overview_bundle(
+            request=request,
+            symbol="AAPL",
+            holdings_limit=8,
+            include_summary=False,
+            user_id="user-1",
+            overview_service=service,
+        )
+    )
+
+    assert response.status_code == 200
+    payload = json.loads(response.body)
+    assert payload["snapshot"]["price"] is None
+    assert payload["snapshot"]["changePct"] is None
+
+    expected_payload = sanitize_json_value(
+        bundle.model_dump(mode="json", by_alias=True)
+    )
+    assert response.headers["etag"] == f'"{json_weak_etag(expected_payload)}"'

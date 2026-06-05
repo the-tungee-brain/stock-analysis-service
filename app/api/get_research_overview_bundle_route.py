@@ -8,6 +8,7 @@ from app.auth.dependencies import get_current_user_id
 from app.core.plan_features import PRO_FEATURE_BIG_PICTURE, require_paid_feature
 from app.dependencies.service_dependencies import get_research_overview_service
 from app.http.etag import json_weak_etag, normalize_if_none_match
+from app.http.json_sanitizer import sanitize_json_value
 from app.services.research_overview_service import (
     ResearchOverviewBundle,
     ResearchOverviewService,
@@ -55,7 +56,7 @@ async def get_research_overview_bundle(
         elapsed_ms,
     )
 
-    payload = bundle.model_dump(mode="json", by_alias=True)
+    payload = sanitize_json_value(bundle.model_dump(mode="json", by_alias=True))
     etag = json_weak_etag(payload)
     client_etag = normalize_if_none_match(request.headers.get("if-none-match"))
     headers = {
