@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from models.train_pipeline import run_pipeline
+from tests.conftest import seed_pattern_benchmarks
 from tests.test_pattern_train_and_save import _synthetic_ohlcv
 
 
@@ -30,6 +31,7 @@ def test_run_pipeline_trains_model(pipeline_dirs):
             from data.store import save_raw
             from features.build_features import build_and_save_features
 
+            seed_pattern_benchmarks(rows=600)
             save_raw(ohlcv, "AAPL")
             build_mock.side_effect = lambda symbols: {
                 symbol.strip().upper(): build_and_save_features(symbol)

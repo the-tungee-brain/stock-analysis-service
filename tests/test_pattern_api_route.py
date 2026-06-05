@@ -17,6 +17,7 @@ from data.store import save_raw
 from features.build_features import build_and_save_features
 from models.pattern_production import production_model_config
 from models.train_and_save import TrainAndSaveConfig, train_and_save
+from tests.conftest import seed_pattern_benchmarks
 from tests.test_pattern_train_and_save import _synthetic_ohlcv
 
 
@@ -67,6 +68,7 @@ def pattern_client(tmp_path, monkeypatch):
     monkeypatch.setattr("data.paths.FEATURES_DIR", features_dir)
     monkeypatch.setattr("models.artifact_store.DEFAULT_ARTIFACT_DIR", artifact_dir)
 
+    seed_pattern_benchmarks(rows=600)
     save_raw(_synthetic_ohlcv(rows=600), "AAPL")
     build_and_save_features("AAPL")
     train_and_save(

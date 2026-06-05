@@ -11,6 +11,7 @@ from data.store import save_raw
 from features.build_features import build_and_save_features
 from models.train_and_save import TrainAndSaveConfig, train_and_save
 from models.xgb_model import XGBModelConfig
+from tests.conftest import seed_pattern_benchmarks
 from tests.test_pattern_train_and_save import _synthetic_ohlcv
 
 
@@ -22,6 +23,7 @@ def trained_api_client(tmp_path, monkeypatch):
     monkeypatch.setattr("data.paths.RAW_DIR", raw_dir)
     monkeypatch.setattr("data.paths.FEATURES_DIR", features_dir)
 
+    seed_pattern_benchmarks(rows=600)
     save_raw(_synthetic_ohlcv(rows=600), "AAPL")
     build_and_save_features("AAPL")
 

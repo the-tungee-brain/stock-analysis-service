@@ -20,6 +20,7 @@ from models.pattern_production import (
 )
 from models.prediction_service import load_deployed_model
 from models.train_and_save import TrainAndSaveConfig, train_and_save
+from tests.conftest import seed_pattern_benchmarks
 from tests.test_pattern_train_and_save import _synthetic_ohlcv
 
 
@@ -31,6 +32,7 @@ def loaded_tradeable_model(tmp_path, monkeypatch):
     monkeypatch.setattr("data.paths.RAW_DIR", raw_dir)
     monkeypatch.setattr("data.paths.FEATURES_DIR", features_dir)
 
+    seed_pattern_benchmarks(rows=600)
     save_raw(_synthetic_ohlcv(rows=600), "MSFT")
     build_and_save_features("MSFT")
     train_and_save(

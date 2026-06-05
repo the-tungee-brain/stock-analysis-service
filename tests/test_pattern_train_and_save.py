@@ -15,6 +15,7 @@ from models.artifact_store import load_model_artifacts, meta_path, model_path
 from models.labels import LabelScheme
 from models.train_and_save import TrainAndSaveConfig, train_and_save
 from models.xgb_model import XGBModelConfig
+from tests.conftest import seed_pattern_benchmarks
 
 
 def _synthetic_ohlcv(rows: int = 500) -> pd.DataFrame:
@@ -42,6 +43,7 @@ def seeded_symbol_data(tmp_path, monkeypatch):
     monkeypatch.setattr("data.paths.RAW_DIR", raw_dir)
     monkeypatch.setattr("data.paths.FEATURES_DIR", features_dir)
 
+    seed_pattern_benchmarks(rows=600)
     save_raw(_synthetic_ohlcv(rows=600), "AAPL")
     build_and_save_features("AAPL")
 
