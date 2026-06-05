@@ -182,15 +182,13 @@ class ResearchOverviewService:
                     etf_funds = self._timed_section(
                         "etf_funds",
                         symbol_upper,
-                        lambda: self.yfinance_funds_builder.build(
-                            symbol=symbol_upper,
-                        ),
+                        lambda: self._load_etf_funds(symbol_upper),
                     )
                 if etf_holdings is None:
                     etf_holdings = self._timed_section(
                         "etf_holdings",
                         symbol_upper,
-                        lambda: self.etf_research_service.build_holdings_context(
+                        lambda: self._load_etf_holdings(
                             symbol_upper,
                             holdings_limit=holdings_limit,
                         ),
@@ -204,9 +202,7 @@ class ResearchOverviewService:
                     street_analysis = self._timed_section(
                         "street_analysis",
                         symbol_upper,
-                        lambda: self.yfinance_analysis_builder.build(
-                            symbol=symbol_upper,
-                        ),
+                        lambda: self._load_street_analysis(symbol_upper),
                     )
             else:
                 street_analysis = None
@@ -358,16 +354,14 @@ class ResearchOverviewService:
                         self._timed_section,
                         "etf_funds",
                         symbol_upper,
-                        lambda: self.yfinance_funds_builder.build(
-                            symbol=symbol_upper,
-                        ),
+                        lambda: self._load_etf_funds(symbol_upper),
                     )
                 if etf_holdings is None:
                     etf_holdings_future = pool.submit(
                         self._timed_section,
                         "etf_holdings",
                         symbol_upper,
-                        lambda: self.etf_research_service.build_holdings_context(
+                        lambda: self._load_etf_holdings(
                             symbol_upper,
                             holdings_limit=holdings_limit,
                         ),
@@ -379,9 +373,7 @@ class ResearchOverviewService:
                         self._timed_section,
                         "street_analysis",
                         symbol_upper,
-                        lambda: self.yfinance_analysis_builder.build(
-                            symbol=symbol_upper,
-                        ),
+                        lambda: self._load_street_analysis(symbol_upper),
                     )
 
             intelligence = intelligence_future.result()
@@ -541,6 +533,47 @@ class ResearchOverviewService:
             elapsed_ms,
         )
         return result
+
+    def _load_street_analysis(self, symbol_upper: str) -> StreetAnalysisSnapshot | None:
+        try:
+            return self.yfinance_analysis_builder.build(symbol=symbol_upper)
+        except Exception as exc:
+            logger.warning(
+                "Yahoo Finance street analysis unavailable for %s: %s",
+                symbol_upper,
+                exc,
+            )
+            return None
+
+    def _load_etf_funds(self, symbol_upper: str) -> EtfFundsSnapshot | None:
+        try:
+            return self.yfinance_funds_builder.build(symbol=symbol_upper)
+        except Exception as exc:
+            logger.warning(
+                "Yahoo Finance fund profile unavailable for %s: %s",
+                symbol_upper,
+                exc,
+            )
+            return None
+
+    def _load_etf_holdings(
+        self,
+        symbol_upper: str,
+        *,
+        holdings_limit: int,
+    ) -> EtfHoldingsContext | None:
+        try:
+            return self.etf_research_service.build_holdings_context(
+                symbol_upper,
+                holdings_limit=holdings_limit,
+            )
+        except Exception as exc:
+            logger.warning(
+                "ETF holdings unavailable for %s: %s",
+                symbol_upper,
+                exc,
+            )
+            return None
 
     def _read_symbol_cache(self, symbol_upper: str) -> dict[str, Any]:
         if self.symbol_cache is None:

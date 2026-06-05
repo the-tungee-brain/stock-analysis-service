@@ -63,6 +63,24 @@ def test_street_analysis_for_stock_calls_yfinance_builder():
     yfinance_analysis_builder.build.assert_called_once_with(symbol="AAPL")
 
 
+def test_street_analysis_builder_failure_returns_null_shape():
+    ticker_service = _ticker_service("STOCK")
+    etf_research_service = MagicMock()
+    yfinance_analysis_builder = MagicMock()
+    yfinance_analysis_builder.build.side_effect = RuntimeError("yahoo unavailable")
+
+    result = asyncio.run(
+        get_street_analysis(
+            symbol="AAPL",
+            ticker_service=ticker_service,
+            etf_research_service=etf_research_service,
+            yfinance_analysis_builder=yfinance_analysis_builder,
+        )
+    )
+
+    assert result.model_dump(mode="json", by_alias=True) == {"streetAnalysis": None}
+
+
 def test_etf_funds_for_non_etf_avoids_context_and_fund_builder():
     ticker_service = _ticker_service("STOCK")
     etf_research_service = MagicMock()
@@ -106,6 +124,24 @@ def test_etf_funds_for_etf_calls_fund_builder_directly():
     ticker_service.get_by_symbol.assert_called_once_with("SPY")
     etf_research_service.is_etf_symbol.assert_not_called()
     yfinance_funds_builder.build.assert_called_once_with(symbol="SPY")
+
+
+def test_etf_funds_builder_failure_returns_null_shape():
+    ticker_service = _ticker_service("ETF")
+    etf_research_service = MagicMock()
+    yfinance_funds_builder = MagicMock()
+    yfinance_funds_builder.build.side_effect = RuntimeError("yahoo unavailable")
+
+    result = asyncio.run(
+        get_etf_funds(
+            symbol="SPY",
+            ticker_service=ticker_service,
+            etf_research_service=etf_research_service,
+            yfinance_funds_builder=yfinance_funds_builder,
+        )
+    )
+
+    assert result.model_dump(mode="json", by_alias=True) == {"etfFunds": None}
 
 
 def test_missing_ticker_asset_type_falls_back_to_etf_holdings_detection():

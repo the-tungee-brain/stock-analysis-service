@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,6 +16,7 @@ from app.services.ticker_service import TickerService
 from app.api.research_asset_type import is_fund_asset_type, resolve_asset_type_fast
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class StreetAnalysisResponse(BaseModel):
@@ -47,8 +49,16 @@ async def get_street_analysis(
     if is_fund_asset_type(asset_type):
         return StreetAnalysisResponse(street_analysis=None)
 
-    street_analysis = await asyncio.to_thread(
-        yfinance_analysis_builder.build,
-        symbol=symbol_upper,
-    )
+    try:
+        street_analysis = await asyncio.to_thread(
+            yfinance_analysis_builder.build,
+            symbol=symbol_upper,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Yahoo Finance street analysis unavailable for %s: %s",
+            symbol_upper,
+            exc,
+        )
+        street_analysis = None
     return StreetAnalysisResponse(street_analysis=street_analysis)

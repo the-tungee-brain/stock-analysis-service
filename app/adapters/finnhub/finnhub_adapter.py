@@ -4,7 +4,9 @@ import logging
 import os
 import time
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TypeVar
 
 import finnhub
@@ -32,15 +34,41 @@ _FINNHUB_RETRY_ATTEMPTS = max(
 _FINNHUB_RETRY_BACKOFF_SECONDS = float(
     os.getenv("FINNHUB_RETRY_BACKOFF_SECONDS", "0.35")
 )
+_FINNHUB_ENRICHMENT_ATTEMPTS = max(
+    1, int(os.getenv("FINNHUB_ENRICHMENT_RETRY_ATTEMPTS", "1"))
+)
+_FINNHUB_ENRICHMENT_TIMEOUT_SECONDS = float(
+    os.getenv("FINNHUB_ENRICHMENT_TIMEOUT_SECONDS", "3")
+)
+_request_timeout_override: ContextVar[float | None] = ContextVar(
+    "finnhub_request_timeout_override",
+    default=None,
+)
 
 
 def _normalized_request(self, method: str, path: str, **kwargs):
     uri = f"{self.API_URL.rstrip('/')}/{path.lstrip('/')}"
-    kwargs["timeout"] = kwargs.get("timeout", self.DEFAULT_TIMEOUT)
+    timeout = _request_timeout_override.get()
+    kwargs["timeout"] = kwargs.get(
+        "timeout",
+        timeout if timeout is not None else self.DEFAULT_TIMEOUT,
+    )
     kwargs["params"] = self._format_params(kwargs.get("params", {}))
 
     response = getattr(self._session, method)(uri, **kwargs)
     return self._handle_response(response)
+
+
+@contextmanager
+def _temporary_timeout(timeout_seconds: float | None) -> Iterator[None]:
+    if timeout_seconds is None:
+        yield
+        return
+    token = _request_timeout_override.set(timeout_seconds)
+    try:
+        yield
+    finally:
+        _request_timeout_override.reset(token)
 
 
 class FinnhubAdapter:
@@ -87,6 +115,10 @@ class FinnhubAdapter:
         cache_key: str,
         label: str,
         fn: Callable[[], T],
+        *,
+        attempts: int | None = None,
+        timeout_seconds: float | None = None,
+        log_failure: bool = True,
     ) -> T:
         if self._cache is not None:
             cached = self._cache.get(endpoint=endpoint, cache_key=cache_key)
@@ -95,39 +127,61 @@ class FinnhubAdapter:
                 return cached
 
         with observe_dependency("finnhub", cache_status="miss"):
-            result = self._call(label, fn)
+            result = self._call(
+                label,
+                fn,
+                attempts=attempts,
+                timeout_seconds=timeout_seconds,
+                log_failure=log_failure,
+            )
 
         if self._cache is not None:
             self._cache.put(endpoint=endpoint, cache_key=cache_key, value=result)
 
         return result
 
-    def _call(self, label: str, fn: Callable[[], T]) -> T:
+    def _call(
+        self,
+        label: str,
+        fn: Callable[[], T],
+        *,
+        attempts: int | None = None,
+        timeout_seconds: float | None = None,
+        log_failure: bool = True,
+    ) -> T:
         if not self._circuit.allow_request():
             raise FinnhubUnavailableError("Finnhub circuit open")
 
+        resolved_attempts = max(1, attempts or _FINNHUB_RETRY_ATTEMPTS)
         last_api_error: FinnhubAPIException | None = None
-        for attempt in range(_FINNHUB_RETRY_ATTEMPTS):
+        for attempt in range(resolved_attempts):
             try:
-                result = fn()
+                with _temporary_timeout(timeout_seconds):
+                    result = fn()
             except FinnhubAPIException as exc:
                 last_api_error = exc
-                if self._should_retry_finnhub_api_error(exc, attempt):
+                if self._should_retry_finnhub_api_error(
+                    exc,
+                    attempt,
+                    attempts=resolved_attempts,
+                ):
                     self._sleep_before_finnhub_retry(attempt)
                     continue
                 if self._should_record_finnhub_circuit_failure(exc):
                     self._circuit.record_failure()
-                logger.warning("Finnhub %s unavailable: %s", label, exc)
+                if log_failure:
+                    logger.warning("Finnhub %s unavailable: %s", label, exc)
                 raise
             except (
                 requests.exceptions.Timeout,
                 requests.exceptions.ConnectionError,
             ) as exc:
-                if attempt < _FINNHUB_RETRY_ATTEMPTS - 1:
+                if attempt < resolved_attempts - 1:
                     self._sleep_before_finnhub_retry(attempt)
                     continue
                 self._circuit.record_failure()
-                logger.warning("Finnhub %s unavailable: %s", label, exc)
+                if log_failure:
+                    logger.warning("Finnhub %s unavailable: %s", label, exc)
                 raise
             else:
                 self._circuit.record_success()
@@ -146,11 +200,14 @@ class FinnhubAdapter:
         self,
         exc: FinnhubAPIException,
         attempt: int,
+        *,
+        attempts: int | None = None,
     ) -> bool:
         code = self._finnhub_status_code(exc)
+        resolved_attempts = max(1, attempts or _FINNHUB_RETRY_ATTEMPTS)
         return (
             code in _TRANSIENT_FINNHUB_STATUSES
-            and attempt < _FINNHUB_RETRY_ATTEMPTS - 1
+            and attempt < resolved_attempts - 1
         )
 
     def _should_record_finnhub_circuit_failure(self, exc: FinnhubAPIException) -> bool:
@@ -174,6 +231,9 @@ class FinnhubAdapter:
             lambda: self.finnhub_client.company_news(
                 symbol=symbol, _from=_from, to=to
             ),
+            attempts=_FINNHUB_ENRICHMENT_ATTEMPTS,
+            timeout_seconds=_FINNHUB_ENRICHMENT_TIMEOUT_SECONDS,
+            log_failure=False,
         )
 
     def invalidate_company_news(self, symbol: str, _from: str, to: str) -> None:
@@ -269,6 +329,9 @@ class FinnhubAdapter:
             lambda: self.finnhub_client.press_releases(
                 symbol=symbol, _from=_from, to=to
             ),
+            attempts=_FINNHUB_ENRICHMENT_ATTEMPTS,
+            timeout_seconds=_FINNHUB_ENRICHMENT_TIMEOUT_SECONDS,
+            log_failure=False,
         )
 
     def get_stock_peers(self, symbol: str) -> list[str]:

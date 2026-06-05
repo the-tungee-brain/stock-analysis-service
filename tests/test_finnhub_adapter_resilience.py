@@ -88,6 +88,21 @@ def test_finnhub_adapter_retries_transient_502_then_succeeds():
     assert adapter.finnhub_client.quote.call_count == 3
 
 
+def test_finnhub_company_news_timeout_does_not_retry_multiple_times():
+    adapter = FinnhubAdapter(api_key="test-key")
+    adapter.finnhub_client = MagicMock()
+    adapter.finnhub_client.company_news.side_effect = _timeout_error()
+
+    with pytest.raises(requests.exceptions.ConnectTimeout):
+        adapter.get_company_news("AAAU", _from="2026-06-01", to="2026-06-05")
+
+    adapter.finnhub_client.company_news.assert_called_once_with(
+        symbol="AAAU",
+        _from="2026-06-01",
+        to="2026-06-05",
+    )
+
+
 def test_finnhub_adapter_does_not_open_circuit_on_502():
     adapter = FinnhubAdapter(
         api_key="test-key",

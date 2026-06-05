@@ -284,6 +284,60 @@ def test_enrichment_street_section_calls_only_street_builder(fake_symbol_intelli
     service.yfinance_analysis_builder.build.assert_called_once_with(symbol="AAPL")
 
 
+def test_enrichment_street_failure_returns_valid_partial_bundle(
+    fake_symbol_intelligence,
+):
+    service = _service(symbol_cache=_DictSymbolCache())
+    service.yfinance_analysis_builder.build.side_effect = RuntimeError(
+        "yahoo unavailable"
+    )
+
+    bundle = service.build_enrichment_bundle(
+        user_id="user-1",
+        symbol="AAPL",
+        sections={"street"},
+    )
+
+    assert bundle.symbol == "AAPL"
+    assert bundle.street_analysis is None
+    assert bundle.intelligence.partial is True
+    assert fake_symbol_intelligence == []
+
+
+def test_enrichment_etf_failures_return_valid_partial_bundle(
+    fake_symbol_intelligence,
+):
+    cache = _DictSymbolCache(
+        {
+            "SPY": {
+                "symbol": "SPY",
+                "asset_type": "ETF",
+                "snapshot": _snapshot().model_dump(mode="json"),
+                "performance": _performance().model_dump(mode="json"),
+            }
+        }
+    )
+    service = _service(symbol_cache=cache)
+    service.yfinance_funds_builder.build.side_effect = RuntimeError(
+        "yahoo unavailable"
+    )
+    service.etf_research_service.build_holdings_context.side_effect = RuntimeError(
+        "securitiesdb unavailable"
+    )
+
+    bundle = service.build_enrichment_bundle(
+        user_id="user-1",
+        symbol="SPY",
+        sections={"etf"},
+    )
+
+    assert bundle.symbol == "SPY"
+    assert bundle.etf_funds is None
+    assert bundle.etf_holdings is None
+    assert bundle.intelligence.partial is True
+    assert fake_symbol_intelligence == []
+
+
 def test_enrichment_intelligence_section_calls_only_user_overlay(
     fake_symbol_intelligence,
 ):

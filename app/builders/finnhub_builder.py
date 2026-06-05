@@ -128,9 +128,11 @@ class FinnhubBuilder:
             raw = self.finnhub_adapter.get_press_releases(
                 symbol=symbol, _from=_from_str, to=to_str
             )
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "Finnhub press releases unavailable for %s", symbol, exc_info=True
+                "Finnhub press releases unavailable for %s: %s",
+                symbol,
+                exc,
             )
             return NewsResponse(root=[])
         if not raw:

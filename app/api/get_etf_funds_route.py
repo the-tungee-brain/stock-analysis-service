@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,6 +16,7 @@ from app.services.ticker_service import TickerService
 from app.api.research_asset_type import is_fund_asset_type, resolve_asset_type_fast
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class EtfFundsResponse(BaseModel):
@@ -45,8 +47,16 @@ async def get_etf_funds(
     if not is_fund_asset_type(asset_type):
         return EtfFundsResponse(etf_funds=None)
 
-    etf_funds = await asyncio.to_thread(
-        yfinance_funds_builder.build,
-        symbol=symbol_upper,
-    )
+    try:
+        etf_funds = await asyncio.to_thread(
+            yfinance_funds_builder.build,
+            symbol=symbol_upper,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Yahoo Finance fund profile unavailable for %s: %s",
+            symbol_upper,
+            exc,
+        )
+        etf_funds = None
     return EtfFundsResponse(etf_funds=etf_funds)

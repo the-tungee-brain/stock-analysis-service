@@ -12,6 +12,7 @@ def test_finnhub_adapter_company_news_query_params_match_curl_format():
     def fake_get(url, **kwargs):
         captured["url"] = url
         captured["params"] = dict(kwargs.get("params") or {})
+        captured["timeout"] = kwargs.get("timeout")
         response = MagicMock()
         response.ok = True
         response.headers = {"Content-Type": "application/json"}
@@ -22,6 +23,7 @@ def test_finnhub_adapter_company_news_query_params_match_curl_format():
     adapter.get_company_news("AMZN", _from="2026-05-18", to="2026-05-25")
 
     assert captured["url"] == f"{DEFAULT_API_URL}/company-news"
+    assert captured["timeout"] == 3.0
     assert "//" not in str(captured["url"]).removeprefix("https://")
     params = captured["params"]
     assert params["symbol"] == "AMZN"
@@ -54,3 +56,23 @@ def test_finnhub_adapter_uses_company_peers_client_method():
 
     assert adapter.get_stock_peers("AAPL") == ["MSFT", "GOOGL"]
     adapter.finnhub_client.company_peers.assert_called_once_with(symbol="AAPL")
+
+
+def test_finnhub_adapter_press_releases_uses_short_enrichment_timeout():
+    adapter = FinnhubAdapter(api_key="test-key")
+    captured: dict[str, object] = {}
+
+    def fake_get(url, **kwargs):
+        captured["url"] = url
+        captured["timeout"] = kwargs.get("timeout")
+        response = MagicMock()
+        response.ok = True
+        response.headers = {"Content-Type": "application/json"}
+        response.json.return_value = []
+        return response
+
+    adapter.finnhub_client._session.get = fake_get
+    adapter.get_press_releases("AMZN", _from="2026-05-18", to="2026-05-25")
+
+    assert captured["url"] == f"{DEFAULT_API_URL}/press-releases"
+    assert captured["timeout"] == 3.0
