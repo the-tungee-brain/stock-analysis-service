@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from app.adapters.cache.pattern_analysis_cache import PatternAnalysisCache
 from app.auth.dependencies import get_current_user
 from app.core.llm_config import settings
 from app.main import app
 from app.models.user_models import AppUserItem
+from app.services.pattern_analysis_service import PatternAnalysisService
 from data.store import save_raw
 from features.build_features import build_and_save_features
 from models.pattern_production import production_model_config
@@ -97,6 +98,31 @@ def pattern_client(tmp_path, monkeypatch):
     app.state.pattern_loaded_model = load_deployed_model(artifact_dir)
     yield TestClient(app)
     app.state.pattern_loaded_model = None
+    if hasattr(app.state, "pattern_analysis_service"):
+        delattr(app.state, "pattern_analysis_service")
+
+
+class _FakeRedis:
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    def get(self, key: str) -> str | None:
+        return self.store.get(key)
+
+    def setex(self, key: str, ttl: int, value: str) -> None:
+        self.store[key] = value
+
+
+@pytest.fixture
+def pattern_cache_service():
+    service = PatternAnalysisService(
+        cache=PatternAnalysisCache(redis_client=_FakeRedis(), ttl_seconds=60),
+        enabled=True,
+    )
+    app.state.pattern_analysis_service = service
+    yield service
+    if hasattr(app.state, "pattern_analysis_service"):
+        delattr(app.state, "pattern_analysis_service")
 
 
 def test_pattern_health_requires_loaded_model(auth_headers):
@@ -157,3 +183,102 @@ def test_pattern_intelligence_returns_payload(pattern_client, auth_headers):
     assert summary["whyThisOutlook"]
     assert summary["thesis"]
     assert "interpretation" not in payload
+
+
+def test_pattern_intelligence_cache_hit_avoids_rebuild(
+    pattern_client,
+    auth_headers,
+    pattern_cache_service,
+    monkeypatch,
+):
+    first = pattern_client.get(
+        "/api/v1/pattern/intelligence",
+        params={"symbol": "AAPL"},
+        headers=auth_headers,
+    )
+    assert first.status_code == 200
+
+    def _fail_build(*args, **kwargs):
+        raise AssertionError("pattern intelligence should be served from cache")
+
+    monkeypatch.setattr(
+        "app.services.pattern_analysis_service.build_pattern_intelligence",
+        _fail_build,
+    )
+
+    second = pattern_client.get(
+        "/api/v1/pattern/intelligence",
+        params={"symbol": "AAPL"},
+        headers=auth_headers,
+    )
+    assert second.status_code == 200
+    assert second.json() == first.json()
+
+
+def test_pattern_predict_after_intelligence_reuses_cached_prediction(
+    pattern_client,
+    auth_headers,
+    pattern_cache_service,
+    monkeypatch,
+):
+    response = pattern_client.get(
+        "/api/v1/pattern/intelligence",
+        params={"symbol": "AAPL"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+
+    def _fail_predict(*args, **kwargs):
+        raise AssertionError("prediction should be served from cache")
+
+    monkeypatch.setattr(
+        "app.services.pattern_analysis_service.predict_for_symbol",
+        _fail_predict,
+    )
+
+    predict = pattern_client.get(
+        "/api/v1/pattern/predict",
+        params={"symbol": "AAPL"},
+        headers=auth_headers,
+    )
+    assert predict.status_code == 200
+    payload = predict.json()
+    assert payload["symbol"] == "AAPL"
+    assert payload["prediction"] in (0, 1)
+
+
+def test_pattern_intelligence_after_predict_reuses_cached_analysis(
+    pattern_client,
+    auth_headers,
+    pattern_cache_service,
+    monkeypatch,
+):
+    predict = pattern_client.get(
+        "/api/v1/pattern/predict",
+        params={"symbol": "AAPL"},
+        headers=auth_headers,
+    )
+    assert predict.status_code == 200
+
+    def _fail_predict(*args, **kwargs):
+        raise AssertionError("prediction should be served from cache")
+
+    def _fail_build(*args, **kwargs):
+        raise AssertionError("pattern intelligence should be served from cache")
+
+    monkeypatch.setattr(
+        "app.services.pattern_analysis_service.predict_for_symbol",
+        _fail_predict,
+    )
+    monkeypatch.setattr(
+        "app.services.pattern_analysis_service.build_pattern_intelligence",
+        _fail_build,
+    )
+
+    intelligence = pattern_client.get(
+        "/api/v1/pattern/intelligence",
+        params={"symbol": "AAPL"},
+        headers=auth_headers,
+    )
+    assert intelligence.status_code == 200
+    assert intelligence.json()["symbol"] == "AAPL"

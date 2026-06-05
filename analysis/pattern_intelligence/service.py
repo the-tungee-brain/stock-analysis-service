@@ -51,6 +51,7 @@ def build_pattern_intelligence(
     *,
     loaded_model: LoadedModel | None = None,
     raw: pd.DataFrame | None = None,
+    prediction_payload: dict[str, Any] | None = None,
 ) -> PatternIntelligenceResult:
     symbol_upper = symbol.strip().upper()
     ohlcv = raw if raw is not None else load_raw_ohlcv(symbol_upper)
@@ -61,7 +62,11 @@ def build_pattern_intelligence(
     primary = active[0] if active else None
 
     context = build_trend_context(symbol_upper, ohlcv)
-    core = _core_model_payload(symbol_upper, loaded_model)
+    core = _core_model_payload(
+        symbol_upper,
+        loaded_model,
+        prediction_payload=prediction_payload,
+    )
 
     scores = build_pattern_scores(
         pattern=primary,
@@ -124,13 +129,21 @@ def build_pattern_intelligence(
     )
 
 
-def _core_model_payload(symbol: str, loaded: LoadedModel | None) -> dict[str, Any] | None:
-    if loaded is None:
+def _core_model_payload(
+    symbol: str,
+    loaded: LoadedModel | None,
+    *,
+    prediction_payload: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    if prediction_payload is not None:
+        payload = prediction_payload
+    elif loaded is None:
         return None
-    try:
-        payload = predict_for_symbol(symbol, loaded)
-    except (FileNotFoundError, ValueError):
-        return None
+    else:
+        try:
+            payload = predict_for_symbol(symbol, loaded)
+        except (FileNotFoundError, ValueError):
+            return None
     return {
         "prediction": payload.get("prediction"),
         "up_prob": payload.get("up_prob"),

@@ -27,6 +27,7 @@ from app.adapters.schwab.schwab_market_adapter import SchwabMarketAdapter
 from app.adapters.schwab.schwab_redis_token_manager import SchwabRedisTokenManager
 from app.adapters.cache.recent_orders_cache import RecentOrdersCache
 from app.adapters.cache.llm_output_cache import LLMOutputCache
+from app.adapters.cache.pattern_analysis_cache import PatternAnalysisCache
 from app.adapters.schwab.schwab_trader_adapter import SchwabTraderAdapter
 from app.adapters.user.app_user_adapter import AppUserAdapter
 from app.adapters.user.waitlist_adapter import WaitlistAdapter
@@ -159,6 +160,7 @@ from app.services.strategy.momentum_breakout_snapshot_serving_service import (
 )
 from app.services.strategy.custom_trade_plan_service import CustomTradePlanService
 from app.services.strategy.wheel_backtest_service import WheelBacktestService
+from app.services.pattern_analysis_service import PatternAnalysisService
 
 
 def get_redis_client() -> redis.Redis:
@@ -242,6 +244,7 @@ async def lifespan(app: FastAPI):
     enriched_news_cache = EnrichedNewsCache(redis_client=redis_client)
     recent_orders_cache = RecentOrdersCache(redis_client=redis_client)
     llm_output_cache = LLMOutputCache(redis_client=redis_client)
+    pattern_analysis_cache = PatternAnalysisCache(redis_client=redis_client)
     openai_adapter = OpenAIAdapter(client=openai_client)
     chat_messages_adapter = ChatMessagesAdapter(client=powerpocketdb_client)
     chat_sessions_adapter = ChatSessionsAdapter(client=powerpocketdb_client)
@@ -545,6 +548,9 @@ async def lifespan(app: FastAPI):
     app.state.research_overview_service = research_overview_service
     app.state.transaction_service = transaction_service
     app.state.recent_orders_cache = recent_orders_cache
+    app.state.pattern_analysis_service = PatternAnalysisService(
+        cache=pattern_analysis_cache
+    )
     app.state.portfolio_memory_service = portfolio_memory_service
     app.state.portfolio_news_service = portfolio_news_service
     app.state.morning_brief_delivery_service = morning_brief_delivery_service

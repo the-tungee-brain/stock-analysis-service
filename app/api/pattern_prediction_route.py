@@ -9,11 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from app.auth.dependencies import get_current_user_id
 from app.core.plan_features import PRO_FEATURE_PATTERN_TREND, require_paid_feature
 from app.services.pattern_forecast_service import pattern_forecast_to_api_dict
+from app.services.pattern_analysis_service import PatternAnalysisService
 from models.prediction_service import (
     LoadedModel,
     health_payload,
-    load_deployed_model,
-    predict_for_symbol,
 )
 
 router = APIRouter(prefix="/pattern", tags=["Pattern Prediction"])
@@ -21,6 +20,22 @@ router = APIRouter(prefix="/pattern", tags=["Pattern Prediction"])
 
 def _get_loaded_model(app) -> LoadedModel | None:  # noqa: ANN001
     return getattr(app.state, "pattern_loaded_model", None)
+
+
+def _get_pattern_analysis_service(app) -> PatternAnalysisService:  # noqa: ANN001
+    service = getattr(app.state, "pattern_analysis_service", None)
+    if service is not None:
+        return service
+
+    cache = None
+    redis_client = getattr(app.state, "redis_client", None)
+    if redis_client is not None:
+        from app.adapters.cache.pattern_analysis_cache import PatternAnalysisCache
+
+        cache = PatternAnalysisCache(redis_client=redis_client)
+    service = PatternAnalysisService(cache=cache)
+    app.state.pattern_analysis_service = service
+    return service
 
 
 @router.get("/health")
@@ -53,11 +68,18 @@ async def pattern_predict(
         )
 
     try:
-        payload = await asyncio.to_thread(predict_for_symbol, symbol, loaded)
+        service = _get_pattern_analysis_service(request.app)
+        payload = await asyncio.to_thread(
+            service.get_or_build_prediction_payload,
+            symbol,
+            loaded,
+        )
         return {"symbol": payload["symbol"], **pattern_forecast_to_api_dict(payload)}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OSError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
@@ -76,20 +98,16 @@ async def pattern_intelligence(
         )
 
     from app.services.pattern_intelligence_service import (
-        build_pattern_intelligence_payload,
+        pattern_intelligence_from_dict,
         pattern_intelligence_to_api_dict,
     )
 
     try:
-        payload = await asyncio.to_thread(
-            build_pattern_intelligence_payload,
-            symbol,
-            loaded,
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        service = _get_pattern_analysis_service(request.app)
+        snapshot = await asyncio.to_thread(service.get_or_build, symbol, loaded)
+        payload = pattern_intelligence_from_dict(snapshot.pattern_intelligence)
+    except (FileNotFoundError, ValueError, OSError):
+        payload = None
 
     if payload is None:
         raise HTTPException(
