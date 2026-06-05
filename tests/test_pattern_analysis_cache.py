@@ -73,7 +73,7 @@ def _patch_live_build(monkeypatch, *, calls: dict[str, int]) -> None:
 
     monkeypatch.setattr(service_module, "ensure_raw_ohlcv", lambda symbol: raw)
     monkeypatch.setattr(service_module, "ensure_benchmark_ohlcv", lambda: None)
-    monkeypatch.setattr(service_module, "load_symbol", lambda symbol: raw)
+    monkeypatch.setattr(service_module, "load_benchmark_ohlcv", lambda symbol: raw)
 
     def _predict(symbol: str, loaded: LoadedModel) -> dict:
         calls["predict"] = calls.get("predict", 0) + 1
