@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -66,6 +66,7 @@ def _context():
         performance=_performance(),
         asset_type="STOCK",
         etf_holdings=None,
+        model_dump_json=lambda: '{"symbol":"AAPL"}',
     )
 
 
@@ -213,3 +214,125 @@ def test_section_latency_logs_do_not_include_private_payloads(caplog):
     assert "account" not in caplog.text.lower()
     assert "position" not in caplog.text.lower()
     assert "prompt" not in caplog.text.lower()
+
+
+def test_fast_bundle_avoids_intelligence_and_slow_enrichment_on_cache_miss(
+    fake_symbol_intelligence,
+):
+    service = _service(symbol_cache=_DictSymbolCache())
+    service.yfinance_analysis_builder.build.side_effect = AssertionError(
+        "fast path must not build street analysis on cache miss"
+    )
+    service.yfinance_funds_builder.build.side_effect = AssertionError(
+        "fast path must not build ETF funds on cache miss"
+    )
+    service.etf_research_service.build_holdings_context.side_effect = AssertionError(
+        "fast path must not build ETF holdings on cache miss"
+    )
+
+    bundle = service.build_fast_bundle(symbol="AAPL")
+
+    assert bundle.symbol == "AAPL"
+    assert bundle.intelligence.partial is True
+    assert bundle.street_analysis is None
+    assert fake_symbol_intelligence == []
+
+
+def test_fast_bundle_uses_cached_street_analysis_without_live_builder():
+    cache = _DictSymbolCache(
+        {
+            "AAPL": {
+                "symbol": "AAPL",
+                "asset_type": "STOCK",
+                "snapshot": _snapshot().model_dump(mode="json"),
+                "performance": _performance().model_dump(mode="json"),
+                "street_analysis": StreetAnalysisSnapshot(
+                    consensus_label="Cached Buy"
+                ).model_dump(mode="json"),
+            }
+        }
+    )
+    service = _service(symbol_cache=cache)
+    service.yfinance_analysis_builder.build.side_effect = AssertionError(
+        "fast path should use cached street analysis"
+    )
+
+    bundle = service.build_fast_bundle(symbol="AAPL")
+
+    assert bundle.street_analysis is not None
+    assert bundle.street_analysis.consensus_label == "Cached Buy"
+
+
+def test_enrichment_street_section_calls_only_street_builder(fake_symbol_intelligence):
+    service = _service(symbol_cache=_DictSymbolCache())
+    service.yfinance_funds_builder.build.side_effect = AssertionError(
+        "ETF funds should not run for street-only enrichment"
+    )
+    service.etf_research_service.build_holdings_context.side_effect = AssertionError(
+        "ETF holdings should not run for street-only enrichment"
+    )
+
+    bundle = service.build_enrichment_bundle(
+        user_id="user-1",
+        symbol="AAPL",
+        sections={"street"},
+    )
+
+    assert bundle.street_analysis is not None
+    assert bundle.intelligence.partial is True
+    assert fake_symbol_intelligence == []
+    service.yfinance_analysis_builder.build.assert_called_once_with(symbol="AAPL")
+
+
+def test_enrichment_intelligence_section_calls_only_user_overlay(
+    fake_symbol_intelligence,
+):
+    service = _service(symbol_cache=_DictSymbolCache())
+    service.yfinance_analysis_builder.build.side_effect = AssertionError(
+        "street analysis should not run for intelligence-only enrichment"
+    )
+
+    bundle = service.build_enrichment_bundle(
+        user_id="user-1",
+        symbol="AAPL",
+        sections={"intelligence"},
+    )
+
+    assert bundle.intelligence.partial is False
+    assert fake_symbol_intelligence == ["user-1"]
+    assert bundle.street_analysis is None
+
+
+def test_enrichment_summary_is_not_cached():
+    prompt_service = MagicMock()
+    prompt_service.build_stock_summary_prompt.return_value = ["system", "user"]
+    llm_service = MagicMock()
+    llm_service.generate_from_prompts = AsyncMock(
+        return_value=service_module.AISummary(
+            short="Short",
+            long="Long",
+            sentiment="Neutral",
+            investmentThesis="Thesis",
+            keyStrengths=[],
+            keyRisks=[],
+            whatToWatch=[],
+            valuationContext="Valuation",
+        )
+    )
+    cache = _DictSymbolCache()
+    service = _service(symbol_cache=cache)
+    service.prompt_enrichment_service = prompt_service
+    service.llm_service = llm_service
+
+    bundle = service.build_enrichment_bundle(
+        user_id="user-1",
+        symbol="AAPL",
+        sections={"summary"},
+        include_summary=True,
+    )
+
+    assert bundle.summary is not None
+    encoded = json.dumps(cache.store["AAPL"], sort_keys=True).lower()
+    assert "summary" not in encoded
+    assert "prompt" not in encoded
+    assert "thesis" not in encoded

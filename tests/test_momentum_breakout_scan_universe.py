@@ -85,6 +85,20 @@ def test_is_ranking_fresh_when_run_created_same_day_before_open() -> None:
     assert is_ranking_output_stale(run, now=now, total_ranked=100) is False
 
 
+def test_is_ranking_fresh_for_same_day_run_before_open() -> None:
+    run = LatestRankingRunMeta(
+        run_id="run-premarket",
+        as_of_date="2026-06-05",
+        created_at="2026-06-05T11:22:55+00:00",
+        universe_snapshot_id="snap",
+        symbol_count=100,
+    )
+    # Friday 2026-06-05 07:22 ET is before open, so the latest completed bar
+    # is 2026-06-04 even though today's ranking run already exists.
+    now = datetime(2026, 6, 5, 11, 22, 55, tzinfo=timezone.utc)
+    assert is_ranking_output_stale(run, now=now, total_ranked=100) is False
+
+
 def test_daily_ranking_order_beats_alphabetical(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

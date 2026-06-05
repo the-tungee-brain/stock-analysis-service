@@ -99,6 +99,181 @@ class ResearchOverviewService:
         self.llm_service = llm_service
         self.symbol_cache = symbol_cache
 
+    def build_fast_bundle(
+        self,
+        *,
+        symbol: str,
+        holdings_limit: int = 8,
+    ) -> ResearchOverviewBundle:
+        symbol_upper = symbol.strip().upper()
+        base = self._build_symbol_base(
+            symbol_upper=symbol_upper,
+            holdings_limit=holdings_limit,
+            include_summary=False,
+            include_context_etf_holdings=False,
+        )
+        self._write_symbol_cache(
+            symbol_upper=symbol_upper,
+            asset_type=base["asset_type"],
+            snapshot=base["snapshot"],
+            performance=base["performance"],
+            street_analysis=base["street_analysis"],
+            etf_funds=base["etf_funds"],
+            etf_holdings=base["etf_holdings"],
+            holdings_limit=holdings_limit,
+        )
+        return ResearchOverviewBundle(
+            symbol=symbol_upper,
+            asset_type=base["asset_type"],
+            as_of=datetime.now(timezone.utc),
+            snapshot=base["snapshot"],
+            performance=base["performance"],
+            intelligence=SymbolIntelligence(symbol=symbol_upper, partial=True),
+            street_analysis=base["street_analysis"],
+            etf_funds=base["etf_funds"],
+            etf_holdings=base["etf_holdings"],
+            summary=None,
+        )
+
+    def build_enrichment_bundle(
+        self,
+        *,
+        user_id: str,
+        symbol: str,
+        holdings_limit: int = 8,
+        sections: set[str] | None = None,
+        include_summary: bool = False,
+    ) -> ResearchOverviewBundle:
+        symbol_upper = symbol.strip().upper()
+        requested = sections or {"intelligence", "street", "etf"}
+        base = self._build_symbol_base(
+            symbol_upper=symbol_upper,
+            holdings_limit=holdings_limit,
+            include_summary=include_summary and "summary" in requested,
+            include_context_etf_holdings=True,
+        )
+
+        intelligence = SymbolIntelligence(symbol=symbol_upper, partial=True)
+        if "intelligence" in requested:
+            intelligence = self._timed_section(
+                "intelligence",
+                symbol_upper,
+                lambda: self._timed_section(
+                    "user_portfolio_overlay",
+                    symbol_upper,
+                    lambda: fetch_symbol_intelligence(
+                        user_id=user_id,
+                        symbol_upper=symbol_upper,
+                        include_options=False,
+                        portfolio_service=self.portfolio_service,
+                        schwab_auth_service=self.schwab_auth_service,
+                        portfolio_analysis_service=self.portfolio_analysis_service,
+                    ),
+                ),
+            )
+
+        street_analysis = base["street_analysis"]
+        etf_funds = base["etf_funds"]
+        etf_holdings = base["etf_holdings"]
+
+        if base["asset_type"] == "ETF":
+            if "etf" in requested:
+                if etf_funds is None:
+                    etf_funds = self._timed_section(
+                        "etf_funds",
+                        symbol_upper,
+                        lambda: self.yfinance_funds_builder.build(
+                            symbol=symbol_upper,
+                        ),
+                    )
+                if etf_holdings is None:
+                    etf_holdings = self._timed_section(
+                        "etf_holdings",
+                        symbol_upper,
+                        lambda: self.etf_research_service.build_holdings_context(
+                            symbol_upper,
+                            holdings_limit=holdings_limit,
+                        ),
+                    )
+            else:
+                etf_funds = None
+                etf_holdings = None
+        else:
+            if "street" in requested:
+                if street_analysis is None:
+                    street_analysis = self._timed_section(
+                        "street_analysis",
+                        symbol_upper,
+                        lambda: self.yfinance_analysis_builder.build(
+                            symbol=symbol_upper,
+                        ),
+                    )
+            else:
+                street_analysis = None
+
+        summary: AISummary | None = None
+        if (
+            include_summary
+            and "summary" in requested
+            and self.prompt_enrichment_service is not None
+            and self.llm_service is not None
+        ):
+            ctx = base["ctx"]
+            if ctx is None:
+                ctx = self._timed_section(
+                    "snapshot",
+                    symbol_upper,
+                    lambda: self.company_research_service.build_context(
+                        symbol=symbol_upper
+                    ),
+                )
+            prompts = self._timed_section(
+                "summary_prompt",
+                symbol_upper,
+                lambda: self.prompt_enrichment_service.build_stock_summary_prompt(
+                    ctx=ctx
+                ),
+            )
+            summary = self._timed_section(
+                "summary_openai",
+                symbol_upper,
+                lambda: asyncio.run(
+                    self.llm_service.generate_from_prompts(
+                        prompts=prompts,
+                        response_model=AISummary,
+                        route=LLMRoute.SUMMARY,
+                        symbol=ctx.symbol,
+                        context_fingerprint=CompanyResearchService.context_fingerprint(
+                            ctx
+                        ),
+                        user_id=user_id,
+                    ),
+                ),
+            )
+
+        self._write_symbol_cache(
+            symbol_upper=symbol_upper,
+            asset_type=base["asset_type"],
+            snapshot=base["snapshot"],
+            performance=base["performance"],
+            street_analysis=street_analysis,
+            etf_funds=etf_funds,
+            etf_holdings=etf_holdings,
+            holdings_limit=holdings_limit,
+        )
+        return ResearchOverviewBundle(
+            symbol=symbol_upper,
+            asset_type=base["asset_type"],
+            as_of=datetime.now(timezone.utc),
+            snapshot=base["snapshot"],
+            performance=base["performance"],
+            intelligence=intelligence,
+            street_analysis=street_analysis,
+            etf_funds=etf_funds,
+            etf_holdings=etf_holdings,
+            summary=summary,
+        )
+
     def build_bundle(
         self,
         *,
@@ -288,6 +463,71 @@ class ResearchOverviewService:
         except Exception:
             return None
 
+    def _build_symbol_base(
+        self,
+        *,
+        symbol_upper: str,
+        holdings_limit: int,
+        include_summary: bool,
+        include_context_etf_holdings: bool,
+    ) -> dict[str, Any]:
+        cached_sections = self._read_symbol_cache(symbol_upper)
+        ctx = None
+        needs_context = include_summary or not self._has_cached_core(cached_sections)
+        if needs_context:
+            ctx = self._timed_section(
+                "snapshot",
+                symbol_upper,
+                lambda: self.company_research_service.build_context(
+                    symbol=symbol_upper
+                ),
+            )
+
+        snapshot = self._cached_snapshot(cached_sections)
+        if snapshot is None:
+            snapshot = (ctx.snapshot if ctx is not None else None) or self._timed_section(
+                "snapshot",
+                symbol_upper,
+                lambda: self.company_profile_service.get_snapshot(
+                    symbol=symbol_upper
+                ),
+            )
+
+        performance = self._cached_performance(cached_sections)
+        if performance is None:
+            performance = (
+                ctx.performance if ctx is not None else None
+            ) or self._timed_section(
+                "performance",
+                symbol_upper,
+                lambda: self.market_service.get_performance(symbol=symbol_upper),
+            )
+
+        asset_type = self._cached_asset_type(cached_sections)
+        if asset_type is None:
+            ticker_item = self._lookup_ticker(symbol_upper)
+            asset_type = (ctx.asset_type if ctx is not None else None) or (
+                ticker_item.asset_type if ticker_item else None
+            )
+
+        return {
+            "ctx": ctx,
+            "snapshot": snapshot,
+            "performance": performance,
+            "asset_type": asset_type,
+            "street_analysis": self._cached_street_analysis(cached_sections),
+            "etf_funds": self._cached_etf_funds(cached_sections),
+            "etf_holdings": self._cached_etf_holdings(
+                cached_sections,
+                holdings_limit=holdings_limit,
+            )
+            or (
+                ctx.etf_holdings
+                if include_context_etf_holdings and ctx is not None
+                else None
+            ),
+        }
+
     def _timed_section(self, section: str, symbol_upper: str, fn):
         started = time.perf_counter()
         dependency = f"research_overview_{section}"
@@ -426,6 +666,38 @@ class ResearchOverviewService:
                 user_id=user_id,
                 symbol=symbol,
                 holdings_limit=holdings_limit,
+                include_summary=include_summary,
+            )
+        )
+
+    async def build_fast_bundle_async(
+        self,
+        *,
+        symbol: str,
+        holdings_limit: int = 8,
+    ) -> ResearchOverviewBundle:
+        return await asyncio.to_thread(
+            lambda: self.build_fast_bundle(
+                symbol=symbol,
+                holdings_limit=holdings_limit,
+            )
+        )
+
+    async def build_enrichment_bundle_async(
+        self,
+        *,
+        user_id: str,
+        symbol: str,
+        holdings_limit: int = 8,
+        sections: set[str] | None = None,
+        include_summary: bool = False,
+    ) -> ResearchOverviewBundle:
+        return await asyncio.to_thread(
+            lambda: self.build_enrichment_bundle(
+                user_id=user_id,
+                symbol=symbol,
+                holdings_limit=holdings_limit,
+                sections=sections,
                 include_summary=include_summary,
             )
         )

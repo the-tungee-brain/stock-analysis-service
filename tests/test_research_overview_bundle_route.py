@@ -7,7 +7,11 @@ import numpy as np
 import pandas as pd
 from fastapi import Request
 
-from app.api.get_research_overview_bundle_route import get_research_overview_bundle
+from app.api.get_research_overview_bundle_route import (
+    get_research_overview_bundle,
+    get_research_overview_enrichment,
+    get_research_overview_fast,
+)
 from app.http.etag import json_weak_etag
 from app.http.json_sanitizer import sanitize_json_value
 from app.models.company_research_models import PerformanceSnapshot, ResearchSnapshot
@@ -44,6 +48,8 @@ def _sample_bundle() -> ResearchOverviewBundle:
 def _mock_service(bundle: ResearchOverviewBundle) -> MagicMock:
     service = MagicMock()
     service.build_bundle_async = AsyncMock(return_value=bundle)
+    service.build_fast_bundle_async = AsyncMock(return_value=bundle)
+    service.build_enrichment_bundle_async = AsyncMock(return_value=bundle)
     return service
 
 
@@ -106,6 +112,78 @@ def test_overview_bundle_returns_304_when_etag_matches():
 
     assert response.status_code == 304
     service.build_bundle_async.assert_awaited_once()
+
+
+def test_overview_fast_returns_valid_bundle_shape():
+    bundle = _sample_bundle()
+    bundle.intelligence.partial = True
+    service = _mock_service(bundle)
+
+    request = Request(
+        scope={
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+        }
+    )
+
+    response = asyncio.run(
+        get_research_overview_fast(
+            request=request,
+            symbol="AAPL",
+            holdings_limit=8,
+            user_id="user-1",
+            overview_service=service,
+        )
+    )
+
+    assert response.status_code == 200
+    payload = json.loads(response.body)
+    assert payload["symbol"] == "AAPL"
+    assert payload["snapshot"]["name"] == "Apple Inc."
+    assert payload["intelligence"]["partial"] is True
+    service.build_fast_bundle_async.assert_awaited_once_with(
+        symbol="AAPL",
+        holdings_limit=8,
+    )
+    service.build_bundle_async.assert_not_called()
+
+
+def test_overview_enrichment_parses_requested_sections():
+    bundle = _sample_bundle()
+    service = _mock_service(bundle)
+
+    request = Request(
+        scope={
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+        }
+    )
+
+    response = asyncio.run(
+        get_research_overview_enrichment(
+            request=request,
+            symbol="AAPL",
+            holdings_limit=8,
+            sections="street,intelligence",
+            include_summary=False,
+            user_id="user-1",
+            overview_service=service,
+        )
+    )
+
+    assert response.status_code == 200
+    service.build_enrichment_bundle_async.assert_awaited_once_with(
+        user_id="user-1",
+        symbol="AAPL",
+        holdings_limit=8,
+        sections={"street", "intelligence"},
+        include_summary=False,
+    )
+    service.build_bundle_async.assert_not_called()
 
 
 def test_sanitize_json_value_converts_nested_non_finite_values_to_none():

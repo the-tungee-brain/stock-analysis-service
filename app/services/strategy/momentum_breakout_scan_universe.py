@@ -162,7 +162,10 @@ def is_ranking_output_stale(
     except ValueError:
         return True
 
-    if trading_days_apart(as_of_day, expected_bar_day) > 1:
+    if as_of_day <= expected_bar_day:
+        if trading_days_apart(as_of_day, expected_bar_day) > 1:
+            return True
+    elif trading_days_apart(expected_bar_day, as_of_day) > 1:
         return True
 
     if is_before_regular_session_open(instant):
