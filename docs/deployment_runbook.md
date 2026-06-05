@@ -177,6 +177,37 @@ where table_name = 'WATCHLIST_WORKSPACE';
 Then deploy/restart the API. Old web and iOS clients can continue syncing without
 `baseVersion`; optimistic concurrency is enforced only for clients that send it.
 
+### Oracle provider symbol profile migration
+
+Existing Oracle databases need an additive table migration before enabling durable
+Yahoo `ticker.info` profile caching. The script is idempotent and only creates
+`PROVIDER_SYMBOL_PROFILE` when it is missing. `TICKER_SYMBOLS` remains the
+canonical app identity table and is not altered.
+
+Run on the production VM with the same Oracle credentials used by the API:
+
+```bash
+cd /path/to/stock-analysis
+sqlplus -s "$POWERPOCKETDB_USER/$POWERPOCKETDB_PASSWORD@$POWERPOCKETDB_TP_TNS" <<'SQL'
+whenever sqlerror exit sql.sqlcode
+@app/sql/migrations/20260605_provider_symbol_profile.sql
+exit
+SQL
+```
+
+It is safe to run the script more than once. Verify the table exists:
+
+```sql
+select table_name
+from user_tables
+where table_name = 'PROVIDER_SYMBOL_PROFILE';
+```
+
+The API stores only successful public provider metadata from Yahoo. Failed Yahoo
+lookups are not persisted and continue returning unavailable data without retry.
+Set `YAHOO_PROFILE_DB_TTL_HOURS` to tune profile freshness; the default is 24
+hours. Set `YAHOO_PROFILE_DB_ENABLED=false` to bypass the durable profile cache.
+
 ---
 
 ## D. Monitoring

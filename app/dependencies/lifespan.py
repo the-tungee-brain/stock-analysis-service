@@ -37,6 +37,9 @@ from app.adapters.user.user_investment_profile_adapter import (
 )
 from app.adapters.user.user_strategy_journey_adapter import UserStrategyJourneyAdapter
 from app.adapters.user.watchlist_adapter import WatchlistAdapter
+from app.adapters.market.provider_symbol_profile_adapter import (
+    ProviderSymbolProfileAdapter,
+)
 from app.adapters.market.ticker_symbol_adapter import TickerSymbolAdapter
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.adapters.email.email_adapter import EmailAdapter
@@ -252,7 +255,10 @@ async def lifespan(app: FastAPI):
     openai_adapter = OpenAIAdapter(client=openai_client)
     chat_messages_adapter = ChatMessagesAdapter(client=powerpocketdb_client)
     chat_sessions_adapter = ChatSessionsAdapter(client=powerpocketdb_client)
-    yfinance_adapter = YFinanceAdapter()
+    provider_symbol_profile_adapter = ProviderSymbolProfileAdapter(
+        client=powerpocketdb_client
+    )
+    yfinance_adapter = YFinanceAdapter(profile_store=provider_symbol_profile_adapter)
     ticker_symbol_adapter = TickerSymbolAdapter(client=powerpocketdb_client)
     portfolio_snapshot_adapter = PortfolioSnapshotAdapter(client=powerpocketdb_client)
     alert_history_adapter = AlertHistoryAdapter(client=powerpocketdb_client)

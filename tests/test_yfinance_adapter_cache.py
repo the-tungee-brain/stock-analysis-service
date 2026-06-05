@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, PropertyMock, patch
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import pytest
@@ -6,6 +7,7 @@ import pytest
 from app.adapters.cache.dividend_history_cache import DividendHistoryCache
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.builders.fundamentals_builder import FundamentalsBuilder
+from app.models.provider_symbol_profile_models import ProviderSymbolProfile
 from app.models.dividend_research_models import (
     AnnualDividendIncome,
     DividendHistoryContext,
@@ -13,6 +15,53 @@ from app.models.dividend_research_models import (
     DividendSnowballScenario,
 )
 from app.services.dividend_research_service import DividendResearchService
+
+
+class _FakeProfileStore:
+    def __init__(
+        self,
+        profile: ProviderSymbolProfile | None = None,
+        *,
+        read_error: Exception | None = None,
+        write_error: Exception | None = None,
+    ) -> None:
+        self.profile = profile
+        self.read_error = read_error
+        self.write_error = write_error
+        self.get_calls: list[tuple[str, str]] = []
+        self.upsert_calls: list[tuple[str, str, dict]] = []
+
+    def get(self, provider: str, symbol: str) -> ProviderSymbolProfile | None:
+        self.get_calls.append((provider, symbol))
+        if self.read_error is not None:
+            raise self.read_error
+        return self.profile
+
+    def upsert_success(
+        self,
+        provider: str,
+        symbol: str,
+        info: dict,
+        *,
+        fetched_at: datetime | None = None,
+    ) -> None:
+        self.upsert_calls.append((provider, symbol, dict(info)))
+        if self.write_error is not None:
+            raise self.write_error
+
+
+def _profile(
+    symbol: str,
+    raw: dict,
+    *,
+    fetched_at: datetime | None = None,
+) -> ProviderSymbolProfile:
+    return ProviderSymbolProfile(
+        provider="yahoo",
+        symbol=symbol,
+        fetched_at=fetched_at or datetime.now(timezone.utc),
+        raw_json=raw,
+    )
 
 
 def test_get_ticker_info_uses_cache():
@@ -28,6 +77,180 @@ def test_get_ticker_info_uses_cache():
     assert first["longName"] == "Apple Inc."
     assert second["longName"] == "Apple Inc."
     ticker_cls.assert_called_once()
+
+
+def test_get_ticker_info_uses_fresh_db_profile_without_yahoo():
+    store = _FakeProfileStore(
+        _profile("AAPL", {"longName": "Apple Inc.", "currency": "USD"})
+    )
+    adapter = YFinanceAdapter(profile_store=store)
+
+    with patch("app.adapters.market.yfinance_adapter.yf.Ticker") as ticker_cls:
+        info = adapter.get_ticker_info("AAPL")
+
+    assert info["longName"] == "Apple Inc."
+    assert store.get_calls == [("yahoo", "AAPL")]
+    assert store.upsert_calls == []
+    ticker_cls.assert_not_called()
+
+
+def test_get_ticker_info_missing_db_profile_fetches_once_and_stores_success():
+    store = _FakeProfileStore()
+    adapter = YFinanceAdapter(profile_store=store)
+    mock_ticker = MagicMock()
+    mock_ticker.info = {"longName": "Apple Inc.", "currency": "USD"}
+
+    with patch(
+        "app.adapters.market.yfinance_adapter.yf.Ticker",
+        return_value=mock_ticker,
+    ) as ticker_cls:
+        info = adapter.get_ticker_info("AAPL")
+
+    assert info["longName"] == "Apple Inc."
+    ticker_cls.assert_called_once()
+    assert store.upsert_calls == [
+        ("yahoo", "AAPL", {"longName": "Apple Inc.", "currency": "USD"})
+    ]
+
+
+def test_get_ticker_info_stale_db_profile_fetches_once_and_updates_success():
+    stale = datetime.now(timezone.utc) - timedelta(hours=25)
+    store = _FakeProfileStore(
+        _profile("AAPL", {"longName": "Stale Apple"}, fetched_at=stale)
+    )
+    adapter = YFinanceAdapter(profile_store=store)
+    mock_ticker = MagicMock()
+    mock_ticker.info = {"longName": "Fresh Apple", "currency": "USD"}
+
+    with patch(
+        "app.adapters.market.yfinance_adapter.yf.Ticker",
+        return_value=mock_ticker,
+    ) as ticker_cls:
+        info = adapter.get_ticker_info("AAPL")
+
+    assert info["longName"] == "Fresh Apple"
+    ticker_cls.assert_called_once()
+    assert store.upsert_calls == [
+        ("yahoo", "AAPL", {"longName": "Fresh Apple", "currency": "USD"})
+    ]
+
+
+def test_get_ticker_info_yahoo_failure_does_not_persist_profile():
+    store = _FakeProfileStore()
+    adapter = YFinanceAdapter(profile_store=store)
+    mock_ticker = MagicMock()
+
+    def _raise_no_fundamentals() -> dict:
+        raise Exception("HTTP Error 404: No fundamentals data found for symbol: BEAGR")
+
+    type(mock_ticker).info = property(lambda _self: _raise_no_fundamentals())
+
+    with patch(
+        "app.adapters.market.yfinance_adapter.yf.Ticker",
+        return_value=mock_ticker,
+    ) as ticker_cls:
+        info = adapter.get_ticker_info("BEAGR")
+
+    assert info == {}
+    ticker_cls.assert_called_once()
+    assert store.upsert_calls == []
+
+
+def test_get_ticker_info_db_read_failure_falls_back_to_yahoo():
+    store = _FakeProfileStore(read_error=RuntimeError("database down"))
+    adapter = YFinanceAdapter(profile_store=store)
+    mock_ticker = MagicMock()
+    mock_ticker.info = {"longName": "Apple Inc.", "currency": "USD"}
+
+    with patch(
+        "app.adapters.market.yfinance_adapter.yf.Ticker",
+        return_value=mock_ticker,
+    ) as ticker_cls:
+        info = adapter.get_ticker_info("AAPL")
+
+    assert info["longName"] == "Apple Inc."
+    ticker_cls.assert_called_once()
+
+
+def test_get_ticker_info_db_write_failure_returns_yahoo_info():
+    store = _FakeProfileStore(write_error=RuntimeError("database down"))
+    adapter = YFinanceAdapter(profile_store=store)
+    mock_ticker = MagicMock()
+    mock_ticker.info = {"longName": "Apple Inc.", "currency": "USD"}
+
+    with patch(
+        "app.adapters.market.yfinance_adapter.yf.Ticker",
+        return_value=mock_ticker,
+    ):
+        info = adapter.get_ticker_info("AAPL")
+
+    assert info["longName"] == "Apple Inc."
+    assert store.upsert_calls == [
+        ("yahoo", "AAPL", {"longName": "Apple Inc.", "currency": "USD"})
+    ]
+
+
+def test_chart_payload_uses_db_profile_metadata_without_second_yahoo_info_call():
+    store = _FakeProfileStore(
+        _profile(
+            "AAPL",
+            {
+                "longName": "Apple Inc.",
+                "currency": "USD",
+                "regularMarketPreviousClose": 198.0,
+            },
+        )
+    )
+    adapter = YFinanceAdapter(profile_store=store)
+    mock_ticker = MagicMock()
+    mock_ticker.history.return_value = pd.DataFrame(
+        {
+            "Open": [199.0],
+            "High": [201.0],
+            "Low": [198.0],
+            "Close": [200.0],
+            "Volume": [1000],
+        },
+        index=pd.to_datetime(["2026-01-02"]),
+    )
+
+    def _unexpected_info() -> dict:
+        raise AssertionError("ticker.info should not be called")
+
+    type(mock_ticker).info = property(lambda _self: _unexpected_info())
+
+    with patch(
+        "app.adapters.market.yfinance_adapter.yf.Ticker",
+        return_value=mock_ticker,
+    ):
+        payload = adapter.get_stock_chart_payload("AAPL", period="5d", interval="1d")
+
+    assert payload["name"] == "Apple Inc."
+    assert payload["currency"] == "USD"
+    assert payload["previousClose"] == 198.0
+
+
+def test_fundamentals_builder_uses_db_profile_metadata_without_yahoo_info_call():
+    store = _FakeProfileStore(
+        _profile(
+            "AAPL",
+            {
+                "longName": "Apple Inc.",
+                "trailingPE": 31.2,
+                "dividendYield": 0.005,
+            },
+        )
+    )
+    adapter = YFinanceAdapter(profile_store=store)
+    builder = FundamentalsBuilder(adapter)
+
+    with patch("app.adapters.market.yfinance_adapter.yf.Ticker") as ticker_cls:
+        metrics = builder.build("AAPL")
+
+    ticker_cls.assert_not_called()
+    labels = {metric.label: metric.value for metric in metrics}
+    assert labels["P/E (trailing)"] == "31.2x"
+    assert labels["Dividend yield"] == "0.50%"
 
 
 def test_get_funds_data_raw_falls_back_to_ticker_info_when_fund_attrs_fail():

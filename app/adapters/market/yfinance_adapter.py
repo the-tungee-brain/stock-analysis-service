@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 import os
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from threading import Lock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.adapters.market.yfinance_news_parser import YFinanceNewsTab
 
@@ -26,6 +26,11 @@ from app.broker.fiscal_period import (
 )
 from app.core.latency_observability import observe_dependency, record_dependency_latency
 
+if TYPE_CHECKING:
+    from app.adapters.market.provider_symbol_profile_adapter import (
+        ProviderSymbolProfileAdapter,
+    )
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,9 +45,27 @@ class YFinanceAdapter:
     FUNDS_DATA_TTL_SECONDS = int(
         os.getenv("YFINANCE_FUNDS_DATA_CACHE_TTL_SECONDS", "86400")
     )
+    PROFILE_DB_PROVIDER = "yahoo"
+    PROFILE_DB_ENABLED = (
+        os.getenv("YAHOO_PROFILE_DB_ENABLED", "true").strip().lower()
+        not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
+    )
+    PROFILE_DB_TTL_SECONDS = int(
+        float(os.getenv("YAHOO_PROFILE_DB_TTL_HOURS", "24")) * 3600
+    )
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        profile_store: "ProviderSymbolProfileAdapter | None" = None,
+    ) -> None:
         configure_yfinance()
+        self.profile_store = profile_store
         self._info_cache: dict[str, tuple[float, dict]] = {}
         self._history_cache: dict[str, tuple[float, pd.DataFrame]] = {}
         self._earnings_cache: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -89,6 +112,12 @@ class YFinanceAdapter:
             record_dependency_latency("yfinance", 0.0, cache_status="hit")
             return dict(cached)
 
+        db_info = self._get_fresh_profile_info(symbol_upper)
+        if db_info is not None:
+            self._set_cached(self._info_cache, symbol_upper, db_info)
+            record_dependency_latency("yahoo_profile_db", 0.0, cache_status="hit")
+            return dict(db_info)
+
         with observe_dependency("yfinance", cache_status="miss"):
             ticker = self._ticker(symbol_upper)
             try:
@@ -104,8 +133,72 @@ class YFinanceAdapter:
                     return {}
                 self._log_yahoo_failure("ticker.info", symbol_upper, exc)
                 return {}
+        if not info:
+            return {}
         self._set_cached(self._info_cache, symbol_upper, info)
+        self._put_profile_info(symbol_upper, info)
         return info
+
+    def _get_fresh_profile_info(self, symbol_upper: str) -> dict[str, Any] | None:
+        if (
+            not self.PROFILE_DB_ENABLED
+            or self.profile_store is None
+            or self.PROFILE_DB_TTL_SECONDS <= 0
+        ):
+            return None
+        try:
+            profile = self.profile_store.get(self.PROFILE_DB_PROVIDER, symbol_upper)
+        except Exception:
+            logger.warning(
+                "Yahoo profile DB read failed for %s",
+                symbol_upper,
+                exc_info=True,
+            )
+            record_dependency_latency(
+                "yahoo_profile_db",
+                0.0,
+                cache_status="miss",
+                error=True,
+            )
+            return None
+        if profile is None:
+            record_dependency_latency(
+                "yahoo_profile_db",
+                0.0,
+                cache_status="miss",
+            )
+            return None
+
+        fetched_at = profile.fetched_at
+        if fetched_at.tzinfo is None:
+            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+        age_seconds = (datetime.now(timezone.utc) - fetched_at).total_seconds()
+        if age_seconds >= self.PROFILE_DB_TTL_SECONDS:
+            record_dependency_latency(
+                "yahoo_profile_db",
+                0.0,
+                cache_status="stale",
+            )
+            return None
+
+        return dict(profile.raw_json)
+
+    def _put_profile_info(self, symbol_upper: str, info: dict[str, Any]) -> None:
+        if not self.PROFILE_DB_ENABLED or self.profile_store is None or not info:
+            return
+        try:
+            self.profile_store.upsert_success(
+                self.PROFILE_DB_PROVIDER,
+                symbol_upper,
+                info,
+                fetched_at=datetime.now(timezone.utc),
+            )
+        except Exception:
+            logger.warning(
+                "Yahoo profile DB write failed for %s",
+                symbol_upper,
+                exc_info=True,
+            )
 
     def get_history(
         self,
