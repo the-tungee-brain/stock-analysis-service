@@ -80,10 +80,11 @@ jobs:
                   """
                   SELECT *
                   FROM emerging_leaders_snapshot_runs
-                  WHERE status = 'completed'
+                  WHERE status = ?
                   ORDER BY generated_at DESC
                   LIMIT 1
-                  """
+                  """,
+                  ("completed",),
               ).fetchone()
               if run is None:
                   raise SystemExit("No completed Emerging Leaders snapshot run found")
