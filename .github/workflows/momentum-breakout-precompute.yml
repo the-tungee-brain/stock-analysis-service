@@ -2,6 +2,12 @@ name: Momentum Breakout precompute
 
 on:
   workflow_dispatch:
+    inputs:
+      explain_blocked:
+        description: "Print and summarize blocked-candidate diagnostics"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: momentum-breakout-precompute
@@ -16,6 +22,7 @@ jobs:
       VM_USER: ubuntu
       CONTAINER_NAME: sas-server
       SUMMARY_FILE: momentum-breakout-precompute-summary.json
+      EXPLAIN_BLOCKED: ${{ inputs.explain_blocked }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -35,16 +42,17 @@ jobs:
       - name: Run Momentum Breakout precompute and verify latest run
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/sas_vm_key "$VM_USER@$VM_HOST" "CONTAINER_NAME='$CONTAINER_NAME' bash -s" > "$SUMMARY_FILE" <<'REMOTE'
+          ssh -i ~/.ssh/sas_vm_key "$VM_USER@$VM_HOST" "CONTAINER_NAME='$CONTAINER_NAME' EXPLAIN_BLOCKED='$EXPLAIN_BLOCKED' bash -s" > "$SUMMARY_FILE" <<'REMOTE'
           set -euo pipefail
           CONTAINER_NAME="${CONTAINER_NAME:-sas-server}"
+          EXPLAIN_BLOCKED="${EXPLAIN_BLOCKED:-false}"
 
           if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
             echo "$CONTAINER_NAME container is not running" >&2
             exit 1
           fi
 
-          docker exec "$CONTAINER_NAME" sh -lc '
+          docker exec -e EXPLAIN_BLOCKED="$EXPLAIN_BLOCKED" "$CONTAINER_NAME" sh -lc '
             set -eu
             cd /app
             PYTHON_BIN=".venv/bin/python"
@@ -52,12 +60,29 @@ jobs:
               PYTHON_BIN="python"
             fi
 
-            "$PYTHON_BIN" scripts/run_momentum_breakout_precompute.py >&2
+            PRECOMPUTE_OUTPUT="$(mktemp)"
+            if [ "${EXPLAIN_BLOCKED:-false}" = "true" ]; then
+              "$PYTHON_BIN" scripts/run_momentum_breakout_precompute.py --explain-blocked > "$PRECOMPUTE_OUTPUT"
+            else
+              "$PYTHON_BIN" scripts/run_momentum_breakout_precompute.py > "$PRECOMPUTE_OUTPUT"
+            fi
+            cat "$PRECOMPUTE_OUTPUT" >&2
 
-            "$PYTHON_BIN" - <<'"'"'PY'"'"'
+            "$PYTHON_BIN" - "$PRECOMPUTE_OUTPUT" <<'"'"'PY'"'"'
           import json
           import sqlite3
+          import sys
           from pathlib import Path
+
+          precompute_text = Path(sys.argv[1]).read_text()
+          try:
+              precompute_result, _ = json.JSONDecoder().raw_decode(precompute_text)
+          except json.JSONDecodeError as exc:
+              raise SystemExit(f"Could not parse precompute JSON output: {exc}") from exc
+          if precompute_result.get("status") != "completed":
+              raise SystemExit(
+                  f"Precompute did not complete: {precompute_result.get('status')}"
+              )
 
           db_path = Path("/app/data/ranking/ranking_pipeline.db")
           if not db_path.exists():
@@ -123,6 +148,9 @@ jobs:
                   "results_stored": int(results_stored),
                   "duration_ms": duration_ms,
               }
+              diagnostics = precompute_result.get("blocked_diagnostics")
+              if isinstance(diagnostics, dict):
+                  summary["blocked_diagnostics"] = diagnostics
               print(json.dumps(summary, indent=2, sort_keys=True))
           finally:
               conn.close()
@@ -156,6 +184,31 @@ jobs:
               "duration_ms",
           ):
               print(f"- `{key}`: {summary.get(key)}")
+
+          diagnostics = summary.get("blocked_diagnostics")
+          if isinstance(diagnostics, dict):
+              print("")
+              print("### Blocked diagnostics")
+              print(
+                  "- `blocked_by_profit_factor`: "
+                  f"{diagnostics.get('blocked_by_historical_profit_factor')}"
+              )
+              print(
+                  "- `blocked_by_trade_count`: "
+                  f"{diagnostics.get('blocked_by_historical_trade_count')}"
+              )
+              print(
+                  "- `blocked_by_stop_distance`: "
+                  f"{diagnostics.get('blocked_by_stop_distance')}"
+              )
+              print(
+                  "- `blocked_by_risk_gate`: "
+                  f"{diagnostics.get('blocked_by_risk_gate')}"
+              )
+              print(
+                  "- `top_blocked_symbols`: "
+                  f"`{json.dumps(diagnostics.get('top_blocked_symbols') or [])}`"
+              )
           PY
 
       - name: Upload summary artifact
