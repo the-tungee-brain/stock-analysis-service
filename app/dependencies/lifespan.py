@@ -411,6 +411,7 @@ async def lifespan(app: FastAPI):
         schwab_trader_builder=schwab_trader_builder,
         recent_orders_cache=recent_orders_cache,
     )
+    pattern_analysis_service = PatternAnalysisService(cache=pattern_analysis_cache)
     portfolio_analysis_service = PortfolioAnalysisService(
         market_service=market_service,
         schwab_auth_service=schwab_auth_service,
@@ -420,6 +421,7 @@ async def lifespan(app: FastAPI):
         portfolio_intelligence_service=portfolio_intelligence_service,
         profile_adapter=user_investment_profile_adapter,
         portfolio_brief_cache=portfolio_brief_cache,
+        pattern_analysis_service=pattern_analysis_service,
     )
     ticker_service = TickerService(ticker_symbol_builder=ticker_symbol_builder)
     watchlist_service = WatchlistService(
@@ -553,9 +555,7 @@ async def lifespan(app: FastAPI):
     app.state.research_overview_service = research_overview_service
     app.state.transaction_service = transaction_service
     app.state.recent_orders_cache = recent_orders_cache
-    app.state.pattern_analysis_service = PatternAnalysisService(
-        cache=pattern_analysis_cache
-    )
+    app.state.pattern_analysis_service = pattern_analysis_service
     app.state.portfolio_memory_service = portfolio_memory_service
     app.state.portfolio_news_service = portfolio_news_service
     app.state.morning_brief_delivery_service = morning_brief_delivery_service

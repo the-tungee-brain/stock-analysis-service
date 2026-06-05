@@ -59,6 +59,7 @@ from app.services.transaction_service import RECENT_ACTIVITY_DAYS, TransactionSe
 if TYPE_CHECKING:
     from app.adapters.cache.portfolio_brief_cache import PortfolioBriefCache
     from models.prediction_service import LoadedModel
+    from app.services.pattern_analysis_service import PatternAnalysisService
 
 BENCHMARK_SYMBOLS = ["$SPX", "$DJI", "$VIX", "TLT"]
 TRANSACTION_ACTIONS = frozenset(
@@ -94,6 +95,7 @@ class PortfolioAnalysisService:
         portfolio_intelligence_service: PortfolioIntelligenceService,
         profile_adapter: UserInvestmentProfileAdapter,
         portfolio_brief_cache: "PortfolioBriefCache | None" = None,
+        pattern_analysis_service: "PatternAnalysisService | None" = None,
     ):
         self.market_service = market_service
         self.schwab_auth_service = schwab_auth_service
@@ -104,9 +106,16 @@ class PortfolioAnalysisService:
         self.profile_adapter = profile_adapter
         self.portfolio_brief_cache = portfolio_brief_cache
         self._pattern_loaded_model: LoadedModel | None = None
+        self._pattern_analysis_service = pattern_analysis_service
 
     def attach_pattern_model(self, loaded: "LoadedModel | None") -> None:
         self._pattern_loaded_model = loaded
+
+    def attach_pattern_analysis_service(
+        self,
+        service: "PatternAnalysisService | None",
+    ) -> None:
+        self._pattern_analysis_service = service
 
     def _portfolio_brief_fingerprint(
         self,
@@ -1070,25 +1079,8 @@ class PortfolioAnalysisService:
             )
             return SymbolIntelligence(symbol=symbol_upper, partial=True)
 
-        from app.services.pattern_forecast_service import build_pattern_trend_forecast
-        from app.services.pattern_intelligence_service import (
-            build_pattern_intelligence_payload,
-        )
-
         if is_paid_user(user_id):
-            forecast = build_pattern_trend_forecast(
-                symbol_upper,
-                self._pattern_loaded_model,
-            )
-            intelligence_payload: dict = {}
-            if forecast is not None:
-                intelligence_payload["pattern_forecast"] = forecast
-            pattern_intel = build_pattern_intelligence_payload(
-                symbol_upper,
-                self._pattern_loaded_model,
-            )
-            if pattern_intel is not None:
-                intelligence_payload["pattern_intelligence"] = pattern_intel
+            intelligence_payload = self._build_pattern_intelligence_update(symbol_upper)
             if intelligence_payload:
                 intelligence = intelligence.model_copy(update=intelligence_payload)
         if schwab_market_data_gap:
@@ -1099,6 +1091,50 @@ class PortfolioAnalysisService:
                 update={"partial": True, "data_gaps": data_gaps}
             )
         return intelligence
+
+    def _build_pattern_intelligence_update(self, symbol_upper: str) -> dict:
+        loaded_model = self._pattern_loaded_model
+        if loaded_model is None:
+            return {}
+
+        if self._pattern_analysis_service is not None:
+            try:
+                from app.services.pattern_forecast_service import (
+                    pattern_forecast_from_prediction,
+                )
+                from app.services.pattern_intelligence_service import (
+                    pattern_intelligence_from_dict,
+                )
+
+                snapshot = self._pattern_analysis_service.get_or_build(
+                    symbol_upper,
+                    loaded_model,
+                )
+                return {
+                    "pattern_forecast": pattern_forecast_from_prediction(
+                        snapshot.prediction_payload,
+                        symbol=symbol_upper,
+                    ),
+                    "pattern_intelligence": pattern_intelligence_from_dict(
+                        snapshot.pattern_intelligence
+                    ),
+                }
+            except (FileNotFoundError, ValueError, OSError):
+                return {}
+
+        from app.services.pattern_forecast_service import build_pattern_trend_forecast
+        from app.services.pattern_intelligence_service import (
+            build_pattern_intelligence_payload,
+        )
+
+        update: dict = {}
+        forecast = build_pattern_trend_forecast(symbol_upper, loaded_model)
+        if forecast is not None:
+            update["pattern_forecast"] = forecast
+        pattern_intel = build_pattern_intelligence_payload(symbol_upper, loaded_model)
+        if pattern_intel is not None:
+            update["pattern_intelligence"] = pattern_intel
+        return update
 
     @staticmethod
     def _positions_for_symbol(

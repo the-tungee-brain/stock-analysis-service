@@ -57,6 +57,7 @@ from app.services.strategy.wheel_backtest_service import WheelBacktestService
 from app.services.account_deletion_service import AccountDeletionService
 from app.services.research_overview_service import ResearchOverviewService
 from app.services.watchlist_service import WatchlistService
+from app.services.pattern_analysis_service import PatternAnalysisService
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -261,3 +262,11 @@ def get_research_overview_service(request: Request) -> ResearchOverviewService:
 
 def get_watchlist_service(request: Request) -> WatchlistService:
     return request.app.state.watchlist_service
+
+
+def get_pattern_analysis_service(request: Request) -> PatternAnalysisService:
+    return request.app.state.pattern_analysis_service
+
+
+def get_pattern_loaded_model(request: Request):
+    return getattr(request.app.state, "pattern_loaded_model", None)

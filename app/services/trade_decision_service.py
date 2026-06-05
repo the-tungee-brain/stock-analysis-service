@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.builders.trade_decision_engine import (
@@ -10,12 +11,23 @@ from app.builders.trade_decision_engine import (
     pattern_reliability_from_setup,
 )
 from app.models.trade_decision_models import TradeDecision
-from app.services.pattern_intelligence_service import build_pattern_intelligence_payload
+from app.services.pattern_intelligence_service import (
+    build_pattern_intelligence_payload,
+    pattern_intelligence_from_dict,
+)
+from models.prediction_service import LoadedModel
 from ranking_pipeline.config import default_config
 from ranking_pipeline.storage.sqlite import open_store
 
+logger = logging.getLogger(__name__)
 
-def build_trade_decision(symbol: str) -> TradeDecision:
+
+def build_trade_decision(
+    symbol: str,
+    *,
+    loaded_model: LoadedModel | None = None,
+    pattern_analysis_service=None,
+) -> TradeDecision:
     symbol_upper = symbol.strip().upper()
     cfg = default_config()
     store = open_store(cfg)
@@ -36,15 +48,19 @@ def build_trade_decision(symbol: str) -> TradeDecision:
             ranking_rank = int(row["rank"])
         universe_count = store.count_ranking_results(run_id) or None
 
-    loaded_model = None
-    try:
-        from models.prediction_service import load_deployed_model
+    if loaded_model is None:
+        try:
+            from models.prediction_service import load_deployed_model
 
-        loaded_model = load_deployed_model()
-    except Exception:
-        pass
+            loaded_model = load_deployed_model()
+        except Exception:
+            loaded_model = None
 
-    pattern = build_pattern_intelligence_payload(symbol_upper, loaded_model)
+    pattern, prediction_payload = _load_pattern_analysis(
+        symbol_upper,
+        loaded_model=loaded_model,
+        pattern_analysis_service=pattern_analysis_service,
+    )
     return _decision_from_pattern(
         symbol_upper=symbol_upper,
         as_of_date=as_of_date or (pattern.as_of_date if pattern else None),
@@ -52,7 +68,38 @@ def build_trade_decision(symbol: str) -> TradeDecision:
         ranking_rank=ranking_rank,
         universe_count=universe_count,
         pattern=pattern,
+        prediction_payload=prediction_payload,
     )
+
+
+def _load_pattern_analysis(
+    symbol_upper: str,
+    *,
+    loaded_model: LoadedModel | None,
+    pattern_analysis_service,
+) -> tuple[Any | None, dict[str, Any] | None]:
+    if loaded_model is None:
+        return None, None
+
+    if pattern_analysis_service is not None:
+        try:
+            snapshot = pattern_analysis_service.get_or_build(symbol_upper, loaded_model)
+            return (
+                pattern_intelligence_from_dict(snapshot.pattern_intelligence),
+                dict(snapshot.prediction_payload),
+            )
+        except (FileNotFoundError, ValueError, OSError):
+            return None, None
+        except Exception:
+            logger.warning(
+                "Pattern analysis service unavailable for trade decision: %s",
+                symbol_upper,
+                exc_info=True,
+            )
+
+    pattern = build_pattern_intelligence_payload(symbol_upper, loaded_model)
+    prediction_payload = _forecast_indicators_payload(symbol_upper, loaded_model)
+    return pattern, prediction_payload
 
 
 def _decision_from_pattern(
@@ -63,6 +110,7 @@ def _decision_from_pattern(
     ranking_rank: int | None,
     universe_count: int | None,
     pattern: Any,
+    prediction_payload: dict[str, Any] | None = None,
 ) -> TradeDecision:
     rs_score = None
     rs_21 = None
@@ -125,7 +173,7 @@ def _decision_from_pattern(
     except Exception:
         pass
 
-    indicators = _forecast_indicators(symbol_upper)
+    indicators = _forecast_indicators(symbol_upper, prediction_payload=prediction_payload)
     if indicators:
         dist_52w = _float_or_none(
             indicators.get("dist_52w_high") or indicators.get("dist_52w_high_pct")
@@ -157,11 +205,30 @@ def _decision_from_pattern(
     return evaluate_trade_decision(inputs)
 
 
-def _forecast_indicators(symbol: str) -> dict[str, float]:
+def _forecast_indicators(
+    symbol: str,
+    *,
+    prediction_payload: dict[str, Any] | None = None,
+) -> dict[str, float]:
+    if prediction_payload is not None:
+        raw = prediction_payload.get("indicators") or {}
+        return {k: float(v) for k, v in raw.items() if v is not None}
     try:
-        from models.prediction_service import load_deployed_model, predict_for_symbol
+        from models.prediction_service import load_deployed_model
 
         loaded = load_deployed_model()
+    except Exception:
+        return {}
+    return _forecast_indicators_payload(symbol, loaded)
+
+
+def _forecast_indicators_payload(
+    symbol: str,
+    loaded: LoadedModel | None,
+) -> dict[str, float]:
+    try:
+        from models.prediction_service import predict_for_symbol
+
         if loaded is None:
             return {}
         payload = predict_for_symbol(symbol, loaded)
