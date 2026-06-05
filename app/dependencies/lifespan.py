@@ -105,6 +105,7 @@ from app.services.portfolio_news_service import PortfolioNewsService
 from app.services.asset_type_service import AssetTypeService
 from app.services.research_overview_service import ResearchOverviewService
 from app.services.research_symbol_data_service import ResearchSymbolDataService
+from app.services.research_events_service import ResearchEventsService
 from app.services.research_price_history_service import ResearchPriceHistoryService
 from app.services.strategy.strategy_journey_service import StrategyJourneyService
 from app.services.strategy.strategy_stock_screener_service import (
@@ -402,6 +403,10 @@ async def lifespan(app: FastAPI):
         company_profile_service=company_profile_service,
         performance_builder=performance_builder,
     )
+    research_events_service = ResearchEventsService(
+        sec_research_service=sec_research_service,
+        earnings_service=earnings_service,
+    )
     enriched_news_service = EnrichedNewsService(
         enriched_news_cache=enriched_news_cache,
         news_service=news_service,
@@ -571,6 +576,7 @@ async def lifespan(app: FastAPI):
     app.state.chat_service = chat_service
     app.state.company_profile_service = company_profile_service
     app.state.research_symbol_data_service = research_symbol_data_service
+    app.state.research_events_service = research_events_service
     app.state.company_research_service = company_research_service
     app.state.portfolio_intelligence_service = portfolio_intelligence_service
     app.state.enriched_news_service = enriched_news_service

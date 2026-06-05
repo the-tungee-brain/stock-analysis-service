@@ -58,6 +58,7 @@ from app.services.account_deletion_service import AccountDeletionService
 from app.services.asset_type_service import AssetTypeService
 from app.services.research_overview_service import ResearchOverviewService
 from app.services.research_symbol_data_service import ResearchSymbolDataService
+from app.services.research_events_service import ResearchEventsService
 from app.services.watchlist_service import WatchlistService
 from app.services.pattern_analysis_service import PatternAnalysisService
 
@@ -106,6 +107,10 @@ def get_research_symbol_data_service(
     request: Request,
 ) -> ResearchSymbolDataService:
     return request.app.state.research_symbol_data_service
+
+
+def get_research_events_service(request: Request) -> ResearchEventsService:
+    return request.app.state.research_events_service
 
 
 def get_company_research_service(request: Request) -> CompanyResearchService:

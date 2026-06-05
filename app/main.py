@@ -51,6 +51,7 @@ from app.api.get_symbol_analysis_precomputed_route import (
 from app.api.get_symbol_intelligence_route import (
     router as get_symbol_intelligence_router,
 )
+from app.api.get_research_events_route import router as get_research_events_router
 from app.api.get_research_overview_bundle_route import (
     router as get_research_overview_bundle_router,
 )
@@ -168,6 +169,7 @@ protected_api.include_router(momentum_breakout_launch_readiness_router)
 protected_api.include_router(momentum_breakout_admin_metrics_router)
 protected_api.include_router(watchlist_router)
 protected_api.include_router(get_symbol_intelligence_router)
+protected_api.include_router(get_research_events_router)
 protected_api.include_router(get_research_overview_bundle_router)
 protected_api.include_router(get_symbol_analysis_precomputed_router)
 protected_api.include_router(get_option_chain_debug_router)
