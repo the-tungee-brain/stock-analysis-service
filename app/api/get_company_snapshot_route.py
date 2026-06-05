@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from app.models.company_research_models import ResearchSnapshot
-from app.services.company_profile_service import CompanyProfileService
-from app.dependencies.service_dependencies import get_company_profile_service
+from app.services.research_symbol_data_service import ResearchSymbolDataService
+from app.dependencies.service_dependencies import get_research_symbol_data_service
 
 router = APIRouter()
 
@@ -9,8 +9,8 @@ router = APIRouter()
 @router.get("/research/snapshot", response_model=ResearchSnapshot)
 async def snapshot(
     symbol: str,
-    company_profile_service: CompanyProfileService = Depends(
-        get_company_profile_service
+    research_symbol_data_service: ResearchSymbolDataService = Depends(
+        get_research_symbol_data_service
     ),
 ):
-    return company_profile_service.get_snapshot(symbol=symbol)
+    return research_symbol_data_service.get_snapshot(symbol=symbol)

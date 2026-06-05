@@ -57,6 +57,7 @@ from app.services.strategy.wheel_backtest_service import WheelBacktestService
 from app.services.account_deletion_service import AccountDeletionService
 from app.services.asset_type_service import AssetTypeService
 from app.services.research_overview_service import ResearchOverviewService
+from app.services.research_symbol_data_service import ResearchSymbolDataService
 from app.services.watchlist_service import WatchlistService
 from app.services.pattern_analysis_service import PatternAnalysisService
 
@@ -99,6 +100,12 @@ def get_chat_service(request: Request) -> ChatService:
 
 def get_company_profile_service(request: Request) -> CompanyProfileService:
     return request.app.state.company_profile_service
+
+
+def get_research_symbol_data_service(
+    request: Request,
+) -> ResearchSymbolDataService:
+    return request.app.state.research_symbol_data_service
 
 
 def get_company_research_service(request: Request) -> CompanyResearchService:
