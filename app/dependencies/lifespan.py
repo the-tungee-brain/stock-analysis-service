@@ -103,6 +103,7 @@ from app.services.morning_brief_delivery_service import MorningBriefDeliveryServ
 from app.services.portfolio_memory_service import PortfolioMemoryService
 from app.services.portfolio_news_service import PortfolioNewsService
 from app.services.research_overview_service import ResearchOverviewService
+from app.services.research_price_history_service import ResearchPriceHistoryService
 from app.services.strategy.strategy_journey_service import StrategyJourneyService
 from app.services.strategy.strategy_stock_screener_service import (
     StrategyStockScreenerService,
@@ -290,7 +291,12 @@ async def lifespan(app: FastAPI):
     chat_sessions_builder = ChatSessionsBuilder(
         chat_sessions_adapter=chat_sessions_adapter
     )
-    performance_builder = PerformanceBuilder(market_data_adapter=yfinance_adapter)
+    research_price_history_service = ResearchPriceHistoryService(
+        yahoo_fallback=yfinance_adapter
+    )
+    performance_builder = PerformanceBuilder(
+        price_history_service=research_price_history_service
+    )
     fundamentals_builder = FundamentalsBuilder(market_data_adapter=yfinance_adapter)
     yfinance_financials_builder = YFinanceFinancialsBuilder(
         yfinance_adapter=yfinance_adapter

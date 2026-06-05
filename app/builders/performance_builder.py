@@ -2,16 +2,16 @@ from datetime import timedelta
 
 import pandas as pd
 
-from app.adapters.market.market_data_adapter import MarketDataAdapter
 from app.models.company_research_models import PerformanceSnapshot
+from app.services.research_price_history_service import ResearchPriceHistoryService
 
 
 class PerformanceBuilder:
-    def __init__(self, market_data_adapter: MarketDataAdapter):
-        self.market_data_adapter = market_data_adapter
+    def __init__(self, price_history_service: ResearchPriceHistoryService):
+        self.price_history_service = price_history_service
 
     def build(self, symbol: str) -> PerformanceSnapshot:
-        closes = self.market_data_adapter.get_daily_closes_1y(symbol=symbol)
+        closes = self.price_history_service.get_daily_closes_1y(symbol=symbol)
 
         if closes.empty:
             return PerformanceSnapshot(
