@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.adapters.cache.research_overview_symbol_cache import (
+    ResearchOverviewSymbolCache,
+)
 from app.services.symbol_intelligence_service import fetch_symbol_intelligence
 from app.builders.yfinance_analysis_builder import YFinanceAnalysisBuilder
 from app.builders.yfinance_funds_builder import YFinanceFundsBuilder
+from app.core.latency_observability import observe_dependency
 from app.core.llm_routes import LLMRoute
 from app.models.company_research_models import (
     AISummary,
@@ -31,6 +38,12 @@ from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.services.portfolio_service import PortfolioService
 from app.services.schwab_auth_service import SchwabAuthService
 from app.services.ticker_service import TickerService
+
+logger = logging.getLogger(__name__)
+
+_ASSET_TYPES: frozenset[str] = frozenset(
+    {"STOCK", "ETF", "MUTUAL_FUND", "INDEX", "CRYPTO", "ADR", "BOND", "OPTION"}
+)
 
 
 class ResearchOverviewBundle(BaseModel):
@@ -70,6 +83,7 @@ class ResearchOverviewService:
         etf_research_service: EtfResearchService,
         prompt_enrichment_service: PromptEnrichmentService | None = None,
         llm_service: LLMService | None = None,
+        symbol_cache: ResearchOverviewSymbolCache | None = None,
     ):
         self.company_research_service = company_research_service
         self.company_profile_service = company_profile_service
@@ -83,6 +97,7 @@ class ResearchOverviewService:
         self.etf_research_service = etf_research_service
         self.prompt_enrichment_service = prompt_enrichment_service
         self.llm_service = llm_service
+        self.symbol_cache = symbol_cache
 
     def build_bundle(
         self,
@@ -93,54 +108,106 @@ class ResearchOverviewService:
         include_summary: bool = False,
     ) -> ResearchOverviewBundle:
         symbol_upper = symbol.strip().upper()
-        ctx = self.company_research_service.build_context(symbol=symbol_upper)
+        cached_sections = self._read_symbol_cache(symbol_upper)
+        ctx = None
+        needs_context = include_summary or not self._has_cached_core(cached_sections)
+        if needs_context:
+            ctx = self._timed_section(
+                "snapshot",
+                symbol_upper,
+                lambda: self.company_research_service.build_context(
+                    symbol=symbol_upper
+                ),
+            )
 
-        snapshot = ctx.snapshot or self.company_profile_service.get_snapshot(
-            symbol=symbol_upper
-        )
-        performance = ctx.performance or self.market_service.get_performance(
-            symbol=symbol_upper
-        )
+        snapshot = self._cached_snapshot(cached_sections)
+        if snapshot is None:
+            snapshot = (ctx.snapshot if ctx is not None else None) or self._timed_section(
+                "snapshot",
+                symbol_upper,
+                lambda: self.company_profile_service.get_snapshot(
+                    symbol=symbol_upper
+                ),
+            )
 
-        ticker_item = self._lookup_ticker(symbol_upper)
-        asset_type = ctx.asset_type or (
-            ticker_item.asset_type if ticker_item else None
-        )
+        performance = self._cached_performance(cached_sections)
+        if performance is None:
+            performance = (
+                ctx.performance if ctx is not None else None
+            ) or self._timed_section(
+                "performance",
+                symbol_upper,
+                lambda: self.market_service.get_performance(symbol=symbol_upper),
+            )
 
-        etf_holdings = ctx.etf_holdings
+        asset_type = self._cached_asset_type(cached_sections)
+        if asset_type is None:
+            ticker_item = self._lookup_ticker(symbol_upper)
+            asset_type = (ctx.asset_type if ctx is not None else None) or (
+                ticker_item.asset_type if ticker_item else None
+            )
+
+        etf_holdings = (
+            self._cached_etf_holdings(cached_sections, holdings_limit=holdings_limit)
+            or (ctx.etf_holdings if ctx is not None else None)
+        )
         street_analysis: StreetAnalysisSnapshot | None = None
         etf_funds: EtfFundsSnapshot | None = None
 
         with ThreadPoolExecutor(max_workers=4) as pool:
             intelligence_future = pool.submit(
-                fetch_symbol_intelligence,
-                user_id=user_id,
-                symbol_upper=symbol_upper,
-                include_options=False,
-                portfolio_service=self.portfolio_service,
-                schwab_auth_service=self.schwab_auth_service,
-                portfolio_analysis_service=self.portfolio_analysis_service,
+                self._timed_section,
+                "intelligence",
+                symbol_upper,
+                lambda: self._timed_section(
+                    "user_portfolio_overlay",
+                    symbol_upper,
+                    lambda: fetch_symbol_intelligence(
+                        user_id=user_id,
+                        symbol_upper=symbol_upper,
+                        include_options=False,
+                        portfolio_service=self.portfolio_service,
+                        schwab_auth_service=self.schwab_auth_service,
+                        portfolio_analysis_service=self.portfolio_analysis_service,
+                    ),
+                ),
             )
             street_future = None
             etf_funds_future = None
             etf_holdings_future = None
 
             if asset_type == "ETF":
-                etf_funds_future = pool.submit(
-                    self.yfinance_funds_builder.build,
-                    symbol=symbol_upper,
-                )
+                etf_funds = self._cached_etf_funds(cached_sections)
+                if etf_funds is None:
+                    etf_funds_future = pool.submit(
+                        self._timed_section,
+                        "etf_funds",
+                        symbol_upper,
+                        lambda: self.yfinance_funds_builder.build(
+                            symbol=symbol_upper,
+                        ),
+                    )
                 if etf_holdings is None:
                     etf_holdings_future = pool.submit(
-                        self.etf_research_service.build_holdings_context,
+                        self._timed_section,
+                        "etf_holdings",
                         symbol_upper,
-                        holdings_limit=holdings_limit,
+                        lambda: self.etf_research_service.build_holdings_context(
+                            symbol_upper,
+                            holdings_limit=holdings_limit,
+                        ),
                     )
             else:
-                street_future = pool.submit(
-                    self.yfinance_analysis_builder.build,
-                    symbol=symbol_upper,
-                )
+                street_analysis = self._cached_street_analysis(cached_sections)
+                if street_analysis is None:
+                    street_future = pool.submit(
+                        self._timed_section,
+                        "street_analysis",
+                        symbol_upper,
+                        lambda: self.yfinance_analysis_builder.build(
+                            symbol=symbol_upper,
+                        ),
+                    )
 
             intelligence = intelligence_future.result()
             if street_future is not None:
@@ -156,22 +223,48 @@ class ResearchOverviewService:
             and self.prompt_enrichment_service is not None
             and self.llm_service is not None
         ):
-            prompts = self.prompt_enrichment_service.build_stock_summary_prompt(
-                ctx=ctx
-            )
-            summary = asyncio.run(
-                self.llm_service.generate_from_prompts(
-                    prompts=prompts,
-                    response_model=AISummary,
-                    route=LLMRoute.SUMMARY,
-                    symbol=ctx.symbol,
-                    context_fingerprint=CompanyResearchService.context_fingerprint(
-                        ctx
+            if ctx is None:
+                ctx = self._timed_section(
+                    "snapshot",
+                    symbol_upper,
+                    lambda: self.company_research_service.build_context(
+                        symbol=symbol_upper
                     ),
-                    user_id=user_id,
                 )
+            prompts = self._timed_section(
+                "summary_prompt",
+                symbol_upper,
+                lambda: self.prompt_enrichment_service.build_stock_summary_prompt(
+                    ctx=ctx
+                ),
+            )
+            summary = self._timed_section(
+                "summary_openai",
+                symbol_upper,
+                lambda: asyncio.run(
+                    self.llm_service.generate_from_prompts(
+                        prompts=prompts,
+                        response_model=AISummary,
+                        route=LLMRoute.SUMMARY,
+                        symbol=ctx.symbol,
+                        context_fingerprint=CompanyResearchService.context_fingerprint(
+                            ctx
+                        ),
+                        user_id=user_id,
+                    ),
+                ),
             )
 
+        self._write_symbol_cache(
+            symbol_upper=symbol_upper,
+            asset_type=asset_type,
+            snapshot=snapshot,
+            performance=performance,
+            street_analysis=street_analysis,
+            etf_funds=etf_funds,
+            etf_holdings=etf_holdings,
+            holdings_limit=holdings_limit,
+        )
         return ResearchOverviewBundle(
             symbol=symbol_upper,
             asset_type=asset_type,
@@ -187,9 +280,138 @@ class ResearchOverviewService:
 
     def _lookup_ticker(self, symbol_upper: str) -> TickerSymbolItem | None:
         try:
-            return self.ticker_service.get_by_symbol(symbol=symbol_upper)
+            return self._timed_section(
+                "snapshot",
+                symbol_upper,
+                lambda: self.ticker_service.get_by_symbol(symbol=symbol_upper),
+            )
         except Exception:
             return None
+
+    def _timed_section(self, section: str, symbol_upper: str, fn):
+        started = time.perf_counter()
+        dependency = f"research_overview_{section}"
+        with observe_dependency(dependency):
+            result = fn()
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        logger.info(
+            "research overview section symbol=%s section=%s latency_ms=%.1f",
+            symbol_upper,
+            section,
+            elapsed_ms,
+        )
+        return result
+
+    def _read_symbol_cache(self, symbol_upper: str) -> dict[str, Any]:
+        if self.symbol_cache is None:
+            return {}
+        cached = self.symbol_cache.get(symbol_upper)
+        return cached if isinstance(cached, dict) else {}
+
+    @staticmethod
+    def _has_cached_core(cached: dict[str, Any]) -> bool:
+        return isinstance(cached.get("snapshot"), dict) and isinstance(
+            cached.get("performance"),
+            dict,
+        )
+
+    @staticmethod
+    def _cached_snapshot(cached: dict[str, Any]) -> ResearchSnapshot | None:
+        raw = cached.get("snapshot")
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return ResearchSnapshot.model_validate(raw)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _cached_performance(cached: dict[str, Any]) -> PerformanceSnapshot | None:
+        raw = cached.get("performance")
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return PerformanceSnapshot.model_validate(raw)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _cached_asset_type(cached: dict[str, Any]) -> AssetType | None:
+        value = cached.get("asset_type")
+        return value if value in _ASSET_TYPES else None
+
+    @staticmethod
+    def _cached_street_analysis(
+        cached: dict[str, Any],
+    ) -> StreetAnalysisSnapshot | None:
+        raw = cached.get("street_analysis")
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return StreetAnalysisSnapshot.model_validate(raw)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _cached_etf_funds(cached: dict[str, Any]) -> EtfFundsSnapshot | None:
+        raw = cached.get("etf_funds")
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return EtfFundsSnapshot.model_validate(raw)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _cached_etf_holdings(
+        cached: dict[str, Any],
+        *,
+        holdings_limit: int,
+    ) -> EtfHoldingsContext | None:
+        by_limit = cached.get("etf_holdings_by_limit")
+        if not isinstance(by_limit, dict):
+            return None
+        raw = by_limit.get(str(holdings_limit))
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return EtfHoldingsContext.model_validate(raw)
+        except Exception:
+            return None
+
+    def _write_symbol_cache(
+        self,
+        *,
+        symbol_upper: str,
+        asset_type: AssetType | None,
+        snapshot: ResearchSnapshot,
+        performance: PerformanceSnapshot,
+        street_analysis: StreetAnalysisSnapshot | None,
+        etf_funds: EtfFundsSnapshot | None,
+        etf_holdings: EtfHoldingsContext | None,
+        holdings_limit: int,
+    ) -> None:
+        if self.symbol_cache is None:
+            return
+        payload: dict[str, Any] = {
+            "symbol": symbol_upper,
+            "asset_type": asset_type,
+            "snapshot": snapshot.model_dump(mode="json"),
+            "performance": performance.model_dump(mode="json"),
+        }
+        if street_analysis is not None:
+            payload["street_analysis"] = street_analysis.model_dump(
+                mode="json",
+            )
+        if etf_funds is not None:
+            payload["etf_funds"] = etf_funds.model_dump(mode="json")
+        if etf_holdings is not None:
+            payload["etf_holdings_by_limit"] = {
+                str(holdings_limit): etf_holdings.model_dump(
+                    mode="json",
+                )
+            }
+        self.symbol_cache.put(symbol_upper, payload)
 
     async def build_bundle_async(
         self,
