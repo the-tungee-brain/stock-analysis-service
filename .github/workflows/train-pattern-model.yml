@@ -62,6 +62,15 @@ jobs:
           fi
           "${CMD[@]}"
 
+      - name: Verify local benchmark artifacts
+        run: |
+          set -euo pipefail
+          test -s data/raw/SPY.parquet
+          test -s "data/raw/^VIX.parquet"
+          chmod 644 data/raw/SPY.parquet "data/raw/^VIX.parquet"
+          test -r data/raw/SPY.parquet
+          test -r "data/raw/^VIX.parquet"
+
       - name: Upload model artifacts
         uses: actions/upload-artifact@v4
         with:

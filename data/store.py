@@ -137,6 +137,7 @@ def _atomic_write_raw(
             allow_zero_volume=allow_zero_volume,
         )
         _require_non_empty_raw(validated, symbol)
+        tmp_path.chmod(0o644)
         os.replace(tmp_path, path)
     finally:
         if tmp_path.exists():

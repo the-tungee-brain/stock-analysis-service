@@ -172,6 +172,14 @@ def test_save_raw_merges_newer_valid_vix_data(tmp_path, monkeypatch):
     assert loaded["close"].iloc[-1] == pytest.approx(29.0)
 
 
+def test_save_raw_writes_readable_parquet_permissions(tmp_path, monkeypatch):
+    monkeypatch.setattr("data.paths.RAW_DIR", tmp_path)
+
+    path = save_raw(_sample_ohlcv(rows=3, close=100.0, volume=1_000_000), "AAPL")
+
+    assert path.stat().st_mode & 0o777 == 0o644
+
+
 def test_download_symbol_preserves_zero_volume_for_vix(monkeypatch):
     monkeypatch.setattr("data.download.configure_yfinance", lambda: None)
     monkeypatch.setattr("data.download.yf.download", lambda *args, **kwargs: _zero_volume_yahoo_frame())
