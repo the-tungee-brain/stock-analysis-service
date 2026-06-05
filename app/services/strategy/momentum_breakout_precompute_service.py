@@ -29,6 +29,12 @@ from ranking_pipeline.storage.sqlite import RankingStore, open_store
 
 logger = logging.getLogger(__name__)
 
+BLOCK_REASON_RISK_GATE = "risk_gate"
+BLOCK_REASON_HISTORICAL_PROFIT_FACTOR = "historical_profit_factor"
+BLOCK_REASON_HISTORICAL_TRADE_COUNT = "historical_trade_count"
+BLOCK_REASON_STOP_DISTANCE = "stop_distance"
+TOP_BLOCKED_SYMBOLS_LIMIT = 10
+
 
 def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -87,6 +93,66 @@ def _result_rows(candidates: list[Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _blocked_reasons(candidate: Any) -> list[str]:
+    reasons: list[str] = []
+    if not candidate.risk_gate.allowed:
+        reasons.append(BLOCK_REASON_RISK_GATE)
+    profit_factor = candidate.historical_profit_factor
+    if (
+        profit_factor is None
+        or profit_factor < DEFAULT_MIN_HISTORICAL_PROFIT_FACTOR
+    ):
+        reasons.append(BLOCK_REASON_HISTORICAL_PROFIT_FACTOR)
+    total_trades = candidate.historical_total_trades
+    if total_trades is None or total_trades < DEFAULT_MIN_HISTORICAL_TRADES:
+        reasons.append(BLOCK_REASON_HISTORICAL_TRADE_COUNT)
+    if candidate.stop_distance_pct > DEFAULT_MAX_STOP_DISTANCE_PCT:
+        reasons.append(BLOCK_REASON_STOP_DISTANCE)
+    return reasons
+
+
+def blocked_candidate_diagnostics(candidates: list[Any]) -> dict[str, Any]:
+    counts = {
+        BLOCK_REASON_HISTORICAL_PROFIT_FACTOR: 0,
+        BLOCK_REASON_HISTORICAL_TRADE_COUNT: 0,
+        BLOCK_REASON_STOP_DISTANCE: 0,
+        BLOCK_REASON_RISK_GATE: 0,
+    }
+    top_blocked: list[dict[str, Any]] = []
+
+    for candidate in candidates:
+        reasons = _blocked_reasons(candidate)
+        if not reasons:
+            continue
+        for reason in reasons:
+            counts[reason] += 1
+        if len(top_blocked) < TOP_BLOCKED_SYMBOLS_LIMIT:
+            top_blocked.append(
+                {
+                    "symbol": candidate.symbol,
+                    "primary_block_reason": reasons[0],
+                    "block_reasons": reasons,
+                    "historical_profit_factor": candidate.historical_profit_factor,
+                    "historical_total_trades": candidate.historical_total_trades,
+                    "stop_distance_pct": candidate.stop_distance_pct,
+                    "risk_gate_action": candidate.risk_gate.action,
+                    "risk_gate_reasons": list(candidate.risk_gate.reasons),
+                }
+            )
+
+    return {
+        "blocked_by_historical_profit_factor": counts[
+            BLOCK_REASON_HISTORICAL_PROFIT_FACTOR
+        ],
+        "blocked_by_historical_trade_count": counts[
+            BLOCK_REASON_HISTORICAL_TRADE_COUNT
+        ],
+        "blocked_by_stop_distance": counts[BLOCK_REASON_STOP_DISTANCE],
+        "blocked_by_risk_gate": counts[BLOCK_REASON_RISK_GATE],
+        "top_blocked_symbols": top_blocked,
+    }
+
+
 def precompute_momentum_breakout_scan_snapshot(
     *,
     cfg: RankingPipelineConfig | None = None,
@@ -129,6 +195,7 @@ def precompute_momentum_breakout_scan_snapshot(
             )
         ]
         blocked_count = len(valid_candidates) - len(tradable_candidates)
+        blocked_diagnostics = blocked_candidate_diagnostics(valid_candidates)
         rows = _result_rows(valid_candidates)
         duration_ms = _duration_ms(started_at)
         as_of_date = _ranking_as_of_date(rank_store, universe.ranking_run_id)
@@ -153,10 +220,20 @@ def precompute_momentum_breakout_scan_snapshot(
             results=rows,
         )
         logger.info(
-            "Momentum Breakout precompute %s completed: scanned=%d valid=%d",
+            (
+                "Momentum Breakout precompute %s completed: scanned=%d valid=%d "
+                "tradable=%d blocked=%d blocked_by_pf=%d blocked_by_trades=%d "
+                "blocked_by_stop=%d blocked_by_risk_gate=%d"
+            ),
             run_id,
             len(symbol_list),
             len(valid_candidates),
+            len(tradable_candidates),
+            blocked_count,
+            blocked_diagnostics["blocked_by_historical_profit_factor"],
+            blocked_diagnostics["blocked_by_historical_trade_count"],
+            blocked_diagnostics["blocked_by_stop_distance"],
+            blocked_diagnostics["blocked_by_risk_gate"],
         )
         return {
             "run_id": run_id,
@@ -177,6 +254,7 @@ def precompute_momentum_breakout_scan_snapshot(
             "results_stored": len(rows),
             "duration_ms": duration_ms,
             "emergency_cap": cap,
+            "blocked_diagnostics": blocked_diagnostics,
         }
     except Exception as exc:
         duration_ms = _duration_ms(started_at)

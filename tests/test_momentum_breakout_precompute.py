@@ -8,6 +8,7 @@ import pytest
 from app.models.momentum_breakout_alert_models import AlertRiskGateResultDto
 from app.models.momentum_breakout_scan_models import MomentumBreakoutScanCandidateDto
 from app.services.strategy.momentum_breakout_precompute_service import (
+    blocked_candidate_diagnostics,
     precompute_momentum_breakout_scan_snapshot,
 )
 from app.services.strategy.momentum_breakout_scanner_service import (
@@ -24,6 +25,7 @@ def _candidate(
     profit_factor: float | None = 1.5,
     total_trades: int | None = 25,
     allowed: bool = True,
+    stop_distance_pct: float = 5.0,
 ) -> _ScanCandidate:
     return _ScanCandidate(
         symbol=symbol,
@@ -35,7 +37,7 @@ def _candidate(
         historical_profit_factor=profit_factor,
         historical_total_trades=total_trades,
         setup_score=setup_score,
-        stop_distance_pct=5.0,
+        stop_distance_pct=stop_distance_pct,
         volume_ratio=2.0,
         rs_percentile=85.0,
         market_regime="BULL",
@@ -179,6 +181,49 @@ def test_failed_precompute_records_status_and_error(
     assert latest.error_message == "scan exploded"
 
 
+def test_blocked_candidate_diagnostics_classify_each_gate() -> None:
+    diagnostics = blocked_candidate_diagnostics(
+        [
+            _candidate("OK"),
+            _candidate("PF", profit_factor=1.0),
+            _candidate("TRADES", total_trades=10),
+            _candidate("STOP", stop_distance_pct=9.0),
+            _candidate("RISK", allowed=False),
+            _candidate(
+                "MULTI",
+                profit_factor=None,
+                total_trades=None,
+                stop_distance_pct=10.0,
+                allowed=False,
+            ),
+        ]
+    )
+
+    assert diagnostics["blocked_by_historical_profit_factor"] == 2
+    assert diagnostics["blocked_by_historical_trade_count"] == 2
+    assert diagnostics["blocked_by_stop_distance"] == 2
+    assert diagnostics["blocked_by_risk_gate"] == 2
+    assert [row["symbol"] for row in diagnostics["top_blocked_symbols"]] == [
+        "PF",
+        "TRADES",
+        "STOP",
+        "RISK",
+        "MULTI",
+    ]
+    assert diagnostics["top_blocked_symbols"][0]["primary_block_reason"] == (
+        "historical_profit_factor"
+    )
+    assert diagnostics["top_blocked_symbols"][-1]["primary_block_reason"] == (
+        "risk_gate"
+    )
+    assert diagnostics["top_blocked_symbols"][-1]["block_reasons"] == [
+        "risk_gate",
+        "historical_profit_factor",
+        "historical_trade_count",
+        "stop_distance",
+    ]
+
+
 def test_stored_results_can_reconstruct_current_dto_shape(
     snapshot_store: MomentumBreakoutScanStore,
     fake_universe,
@@ -204,8 +249,12 @@ def test_stored_results_can_reconstruct_current_dto_shape(
     assert run.valid_setups_found == 3
     assert run.tradable_candidates_found == 1
     assert run.blocked_candidates_count == 2
+    assert result["blocked_diagnostics"]["blocked_by_historical_profit_factor"] == 1
+    assert result["blocked_diagnostics"]["blocked_by_risk_gate"] == 1
     rows = snapshot_store.list_results(result["run_id"])
     assert [row["symbol"] for row in rows] == ["HIGH", "BLOCK", "LOW"]
+    assert "blocked_diagnostics" not in rows[0]
+    assert "primary_block_reason" not in rows[0]
 
     dto = MomentumBreakoutScanCandidateDto.model_validate(rows[0])
     payload = dto.model_dump(mode="json", by_alias=True)
