@@ -85,6 +85,9 @@ def _normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(f"Missing OHLCV columns: {missing}")
 
     out = out.loc[:, list(OHLCV_COLUMNS)]
+    out = out.apply(pd.to_numeric, errors="coerce")
+    out = out.dropna(subset=list(OHLCV_COLUMNS))
+    out = out[(out.loc[:, list(OHLCV_COLUMNS)] > 0).all(axis=1)]
     out.index = pd.to_datetime(out.index)
     out.index.name = "date"
     out = out.sort_index()

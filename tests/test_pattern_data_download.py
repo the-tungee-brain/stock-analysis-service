@@ -10,7 +10,7 @@ import pytest
 from data.download import download_and_store_symbol, download_symbol
 from data.loader import load_symbol
 from data.paths import raw_parquet_path
-from data.store import OHLCV_COLUMNS
+from data.store import OHLCV_COLUMNS, _normalize_ohlcv
 
 
 @pytest.mark.integration
@@ -62,3 +62,24 @@ def test_load_symbol_reads_parquet(tmp_path, monkeypatch):
     loaded = load_symbol("AAPL")
     assert len(loaded) == 5
     assert list(loaded.columns) == list(OHLCV_COLUMNS)
+
+
+def test_normalize_ohlcv_drops_incomplete_current_day_row():
+    index = pd.date_range("2026-06-02", periods=3, freq="B", name="date")
+    raw = pd.DataFrame(
+        {
+            "Open": [100.0, 101.0, None],
+            "High": [102.0, 103.0, None],
+            "Low": [99.0, 100.0, None],
+            "Close": [101.0, 102.0, None],
+            "Volume": [1_000_000, 1_100_000, 900_000],
+        },
+        index=index,
+    )
+
+    normalized = _normalize_ohlcv(raw)
+
+    assert list(normalized.columns) == list(OHLCV_COLUMNS)
+    assert len(normalized) == 2
+    assert normalized.index.max() == index[1]
+    assert (normalized.loc[:, list(OHLCV_COLUMNS)] > 0).all().all()
