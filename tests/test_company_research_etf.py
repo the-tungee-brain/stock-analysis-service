@@ -166,3 +166,102 @@ def test_company_research_uses_asset_type_service_for_resolution():
     assert ctx.asset_type == "ETF"
     asset_type_service.resolve.assert_called_once_with("SPY")
     ticker_builder.get_by_symbol.assert_not_called()
+
+
+def test_company_research_uses_research_symbol_data_service_for_asset_type():
+    research_symbol_data_service = MagicMock()
+    research_symbol_data_service.get_asset_type.return_value = "ETF"
+    research_symbol_data_service.get_snapshot.return_value = None
+    research_symbol_data_service.get_performance.return_value = None
+
+    ticker_builder = MagicMock()
+    ticker_builder.get_by_symbol.return_value = MagicMock(asset_type="STOCK")
+
+    etf_service = MagicMock()
+    etf_service.build_holdings_context.return_value = None
+
+    fundamentals_builder = MagicMock()
+    fundamentals_builder.build_etf_metrics.return_value = {}
+
+    service = CompanyResearchService(
+        company_profile_service=MagicMock(),
+        market_service=MagicMock(),
+        news_service=MagicMock(),
+        fundamentals_builder=fundamentals_builder,
+        sec_research_service=MagicMock(),
+        earnings_service=MagicMock(),
+        ticker_symbol_builder=ticker_builder,
+        etf_research_service=etf_service,
+        research_symbol_data_service=research_symbol_data_service,
+    )
+
+    ctx = service._build_context("SPY")
+
+    assert ctx.asset_type == "ETF"
+    research_symbol_data_service.get_asset_type.assert_called_once_with("SPY")
+    ticker_builder.get_by_symbol.assert_not_called()
+
+
+def test_company_research_snapshot_loader_uses_facade_and_preserves_gap():
+    research_symbol_data_service = MagicMock()
+    research_symbol_data_service.get_asset_type.return_value = "ETF"
+    research_symbol_data_service.get_snapshot.side_effect = RuntimeError("snapshot")
+    research_symbol_data_service.get_performance.return_value = None
+
+    company_profile = MagicMock()
+    market_service = MagicMock()
+    fundamentals_builder = MagicMock()
+    fundamentals_builder.build_etf_metrics.return_value = {}
+
+    service = CompanyResearchService(
+        company_profile_service=company_profile,
+        market_service=market_service,
+        news_service=MagicMock(),
+        fundamentals_builder=fundamentals_builder,
+        sec_research_service=MagicMock(),
+        earnings_service=MagicMock(),
+        etf_research_service=MagicMock(
+            build_holdings_context=MagicMock(return_value=None)
+        ),
+        research_symbol_data_service=research_symbol_data_service,
+    )
+
+    ctx = service._build_context("SPY")
+
+    assert ctx.snapshot is None
+    assert "snapshot" in ctx.data_gaps
+    research_symbol_data_service.get_snapshot.assert_called_once_with("SPY")
+    company_profile.get_snapshot.assert_not_called()
+
+
+def test_company_research_performance_loader_uses_facade_and_preserves_gap():
+    research_symbol_data_service = MagicMock()
+    research_symbol_data_service.get_asset_type.return_value = "ETF"
+    research_symbol_data_service.get_snapshot.return_value = None
+    research_symbol_data_service.get_performance.side_effect = RuntimeError(
+        "performance"
+    )
+
+    market_service = MagicMock()
+    fundamentals_builder = MagicMock()
+    fundamentals_builder.build_etf_metrics.return_value = {}
+
+    service = CompanyResearchService(
+        company_profile_service=MagicMock(),
+        market_service=market_service,
+        news_service=MagicMock(),
+        fundamentals_builder=fundamentals_builder,
+        sec_research_service=MagicMock(),
+        earnings_service=MagicMock(),
+        etf_research_service=MagicMock(
+            build_holdings_context=MagicMock(return_value=None)
+        ),
+        research_symbol_data_service=research_symbol_data_service,
+    )
+
+    ctx = service._build_context("SPY")
+
+    assert ctx.performance is None
+    assert "performance" in ctx.data_gaps
+    research_symbol_data_service.get_performance.assert_called_once_with("SPY")
+    market_service.get_performance.assert_not_called()

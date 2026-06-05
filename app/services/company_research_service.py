@@ -21,6 +21,7 @@ from app.services.market_service import MarketService
 from app.services.news_service import NewsService
 from app.services.sec_research_service import SecResearchService
 from app.services.asset_type_service import AssetTypeService
+from app.services.research_symbol_data_service import ResearchSymbolDataService
 
 
 class CompanyResearchService:
@@ -38,6 +39,7 @@ class CompanyResearchService:
         etf_research_service: EtfResearchService | None = None,
         yfinance_financials_builder: YFinanceFinancialsBuilder | None = None,
         asset_type_service: AssetTypeService | None = None,
+        research_symbol_data_service: ResearchSymbolDataService | None = None,
     ):
         self.company_profile_service = company_profile_service
         self.market_service = market_service
@@ -51,6 +53,7 @@ class CompanyResearchService:
         self.etf_research_service = etf_research_service
         self.yfinance_financials_builder = yfinance_financials_builder
         self.asset_type_service = asset_type_service
+        self.research_symbol_data_service = research_symbol_data_service
 
     @staticmethod
     def merge_fundamentals(
@@ -266,6 +269,9 @@ class CompanyResearchService:
         return context.model_copy(update={"enriched_news": summary})
 
     def _resolve_asset_type(self, symbol: str) -> str | None:
+        if self.research_symbol_data_service is not None:
+            return self.research_symbol_data_service.get_asset_type(symbol)
+
         if self.asset_type_service is not None:
             return self.asset_type_service.resolve(symbol)
 
@@ -318,6 +324,16 @@ class CompanyResearchService:
             )
         return fundamentals
 
+    def _load_snapshot(self, symbol: str):
+        if self.research_symbol_data_service is not None:
+            return self.research_symbol_data_service.get_snapshot(symbol)
+        return self.company_profile_service.get_snapshot(symbol=symbol)
+
+    def _load_performance(self, symbol: str):
+        if self.research_symbol_data_service is not None:
+            return self.research_symbol_data_service.get_performance(symbol)
+        return self.market_service.get_performance(symbol=symbol)
+
     def _build_context(
         self,
         symbol: str,
@@ -337,7 +353,7 @@ class CompanyResearchService:
             future_snapshot = executor.submit(
                 self._run_loader,
                 "snapshot",
-                lambda: self.company_profile_service.get_snapshot(symbol=symbol),
+                lambda: self._load_snapshot(symbol),
             )
             future_peers = executor.submit(
                 self._run_loader,
@@ -347,7 +363,7 @@ class CompanyResearchService:
             future_performance = executor.submit(
                 self._run_loader,
                 "performance",
-                lambda: self.market_service.get_performance(symbol=symbol),
+                lambda: self._load_performance(symbol),
             )
             future_news = (
                 executor.submit(
