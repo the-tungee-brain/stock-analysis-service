@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.momentum_breakout_feature_guards import require_mb_alerts_enabled
 from app.dependencies.service_dependencies import get_momentum_breakout_scanner_service
@@ -15,6 +15,10 @@ from app.models.momentum_breakout_scan_models import (
 )
 from app.services.strategy.momentum_breakout_scanner_service import (
     MomentumBreakoutScannerService,
+)
+from app.services.strategy.momentum_breakout_snapshot_serving_service import (
+    MomentumBreakoutSnapshotServingService,
+    MomentumBreakoutSnapshotUnavailableError,
 )
 
 router = APIRouter(dependencies=[Depends(require_mb_alerts_enabled)])
@@ -40,6 +44,7 @@ async def get_momentum_breakout_scan_universe(
     response_model_by_alias=True,
 )
 async def scan_momentum_breakout_candidates(
+    request: Request,
     symbols: str | None = Query(
         default=None,
         description="Optional comma-separated symbols; default is ranking universe",
@@ -69,6 +74,24 @@ async def scan_momentum_breakout_candidates(
     service: MomentumBreakoutScannerService = Depends(get_momentum_breakout_scanner_service),
 ) -> MomentumBreakoutScanResponse:
     try:
+        if symbols is None or not symbols.strip():
+            snapshot_service = getattr(
+                request.app.state,
+                "momentum_breakout_snapshot_serving_service",
+                None,
+            )
+            if snapshot_service is None:
+                snapshot_service = MomentumBreakoutSnapshotServingService(
+                    scanner=service
+                )
+            return await asyncio.to_thread(
+                snapshot_service.scan,
+                limit=limit,
+                tradable_only=tradable_only,
+                min_historical_profit_factor=min_historical_profit_factor,
+                min_historical_trades=min_historical_trades,
+                max_stop_distance_pct=max_stop_distance_pct,
+            )
         return await asyncio.to_thread(
             service.scan,
             symbols=symbols,
@@ -78,6 +101,8 @@ async def scan_momentum_breakout_candidates(
             min_historical_trades=min_historical_trades,
             max_stop_distance_pct=max_stop_distance_pct,
         )
+    except MomentumBreakoutSnapshotUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

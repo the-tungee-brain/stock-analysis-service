@@ -49,6 +49,9 @@ from app.services.strategy.momentum_breakout_check_service import (
 from app.services.strategy.momentum_breakout_scanner_service import (
     MomentumBreakoutScannerService,
 )
+from app.services.strategy.momentum_breakout_snapshot_serving_service import (
+    MomentumBreakoutSnapshotServingService,
+)
 from app.services.strategy.custom_trade_plan_service import CustomTradePlanService
 from app.services.strategy.wheel_backtest_service import WheelBacktestService
 from app.services.account_deletion_service import AccountDeletionService
@@ -192,6 +195,12 @@ def get_momentum_breakout_scanner_service(
     request: Request,
 ) -> MomentumBreakoutScannerService:
     return request.app.state.momentum_breakout_scanner_service
+
+
+def get_momentum_breakout_snapshot_serving_service(
+    request: Request,
+) -> MomentumBreakoutSnapshotServingService:
+    return request.app.state.momentum_breakout_snapshot_serving_service
 
 
 def get_momentum_breakout_check_service(

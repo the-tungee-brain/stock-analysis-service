@@ -154,6 +154,9 @@ from app.services.strategy.momentum_breakout_check_service import (
 from app.services.strategy.momentum_breakout_scanner_service import (
     MomentumBreakoutScannerService,
 )
+from app.services.strategy.momentum_breakout_snapshot_serving_service import (
+    MomentumBreakoutSnapshotServingService,
+)
 from app.services.strategy.custom_trade_plan_service import CustomTradePlanService
 from app.services.strategy.wheel_backtest_service import WheelBacktestService
 
@@ -458,6 +461,9 @@ async def lifespan(app: FastAPI):
     wheel_backtest_service = WheelBacktestService(yfinance_adapter=yfinance_adapter)
     momentum_breakout_research_service = MomentumBreakoutResearchService()
     momentum_breakout_scanner_service = MomentumBreakoutScannerService()
+    momentum_breakout_snapshot_serving_service = (
+        MomentumBreakoutSnapshotServingService(scanner=momentum_breakout_scanner_service)
+    )
     momentum_breakout_check_service = MomentumBreakoutCheckService()
     custom_trade_plan_service = CustomTradePlanService()
     mb_alert_store = build_momentum_breakout_alert_store(powerpocketdb_client)
@@ -548,6 +554,9 @@ async def lifespan(app: FastAPI):
     app.state.wheel_backtest_service = wheel_backtest_service
     app.state.momentum_breakout_research_service = momentum_breakout_research_service
     app.state.momentum_breakout_scanner_service = momentum_breakout_scanner_service
+    app.state.momentum_breakout_snapshot_serving_service = (
+        momentum_breakout_snapshot_serving_service
+    )
     app.state.momentum_breakout_check_service = momentum_breakout_check_service
     app.state.custom_trade_plan_service = custom_trade_plan_service
     app.state.momentum_breakout_alert_service = momentum_breakout_alert_service

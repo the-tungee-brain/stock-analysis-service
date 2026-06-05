@@ -212,6 +212,20 @@ class MomentumBreakoutScanStore:
             return None
         return self._record_from_row(row)
 
+    def latest_completed_run(self) -> MomentumBreakoutScanRunRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM momentum_breakout_scan_runs
+                WHERE status = 'completed'
+                ORDER BY generated_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        return self._record_from_row(row)
+
     def list_results(self, run_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
