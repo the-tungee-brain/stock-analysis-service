@@ -88,6 +88,7 @@ jobs:
             rm -rf /home/ubuntu/pattern-artifacts-staging
             mkdir -p /home/ubuntu/pattern-artifacts-staging
             sudo mkdir -p /home/ubuntu/sas-pattern-artifacts
+            mkdir -p /home/ubuntu/sas-ranking-persist/data/raw
 
       - name: Deploy artifacts to OCI VM
         if: |
@@ -101,6 +102,19 @@ jobs:
           source: "artifacts/model_xgb.joblib,artifacts/model_meta.json"
           target: /home/ubuntu/pattern-artifacts-staging
           strip_components: 1
+
+      - name: Deploy benchmark OHLCV to OCI VM
+        if: |
+          (github.event_name == 'workflow_dispatch' && inputs.deploy) ||
+          (github.event_name == 'schedule' && github.ref == 'refs/heads/main')
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "data/raw/SPY.parquet,data/raw/^VIX.parquet"
+          target: /home/ubuntu/sas-ranking-persist/data/raw
+          strip_components: 2
 
       - name: Install artifacts and restart sas-server
         if: |
@@ -117,12 +131,15 @@ jobs:
             DEST=/home/ubuntu/sas-pattern-artifacts
             test -f "$STAGING/model_xgb.joblib"
             test -f "$STAGING/model_meta.json"
+            test -s /home/ubuntu/sas-ranking-persist/data/raw/SPY.parquet
+            test -s "/home/ubuntu/sas-ranking-persist/data/raw/^VIX.parquet"
             sudo cp -f "$STAGING/model_xgb.joblib" "$STAGING/model_meta.json" "$DEST"/
             sudo chmod 644 "$DEST"/model_xgb.joblib "$DEST"/model_meta.json
             rm -rf "$STAGING"
             if docker ps --format '{{.Names}}' | grep -qx sas-server; then
               docker restart sas-server
               sleep 5
+              docker exec sas-server python scripts/smoke_pattern_runtime.py --symbol NVDA --precheck-only
               docker exec sas-server python scripts/smoke_pattern_runtime.py --symbol NVDA --direct-only
               curl -sf http://localhost:8000/health || echo "Warning: health check failed after restart"
             else

@@ -105,6 +105,16 @@ jobs:
               echo "Run the Train Pattern Model workflow with deploy=true before deploying sas-server."
               exit 1
             }
+            test -s /home/ubuntu/sas-ranking-persist/data/raw/SPY.parquet || {
+              echo "Missing /home/ubuntu/sas-ranking-persist/data/raw/SPY.parquet"
+              echo "Run the Ranking pipeline bootstrap or Train Pattern Model workflow before deploying sas-server."
+              exit 1
+            }
+            if [ ! -s "/home/ubuntu/sas-ranking-persist/data/raw/^VIX.parquet" ] && [ ! -s /home/ubuntu/sas-ranking-persist/data/raw/VIX.parquet ]; then
+              echo "Missing VIX benchmark OHLCV in /home/ubuntu/sas-ranking-persist/data/raw (^VIX.parquet or VIX.parquet)"
+              echo "Run the Ranking pipeline bootstrap or Train Pattern Model workflow before deploying sas-server."
+              exit 1
+            fi
 
             # Backend
             docker pull tungxd96/sas-server:latest
@@ -161,6 +171,7 @@ jobs:
               tungxd96/sas-server:latest
 
             docker exec sas-server python -c "import ranking_pipeline, data.download; print('pipeline imports ok')"
+            docker exec sas-server python scripts/smoke_pattern_runtime.py --symbol NVDA --precheck-only
             docker exec sas-server python scripts/smoke_pattern_runtime.py --symbol NVDA --direct-only
 
             mkdir -p /home/ubuntu/logs

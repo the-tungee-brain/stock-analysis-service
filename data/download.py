@@ -20,6 +20,14 @@ logger = logging.getLogger(__name__)
 DEFAULT_YEARS = 15
 MAX_DOWNLOAD_RETRIES = 5
 RETRY_BASE_DELAY_SEC = 3.0
+ZERO_VOLUME_ALLOWED_DOWNLOAD_SYMBOLS = {"^VIX", "VIX"}
+
+
+def _normalize_downloaded_ohlcv(raw: pd.DataFrame, symbol_upper: str) -> pd.DataFrame:
+    return _normalize_ohlcv(
+        raw,
+        allow_zero_volume=symbol_upper in ZERO_VOLUME_ALLOWED_DOWNLOAD_SYMBOLS,
+    )
 
 
 def _fetch_yahoo_ohlcv(symbol_upper: str, start: datetime, end: datetime) -> pd.DataFrame | None:
@@ -37,14 +45,14 @@ def _fetch_yahoo_ohlcv(symbol_upper: str, start: datetime, end: datetime) -> pd.
             auto_adjust=True,
             progress=False,
             threads=False,
-        )
+    )
     if raw is not None and not raw.empty:
-        return _normalize_ohlcv(raw)
+        return _normalize_downloaded_ohlcv(raw, symbol_upper)
 
     with yfinance_fetch_lock():
         hist = yf.Ticker(symbol_upper).history(start=start_s, end=end_s, auto_adjust=True)
     if hist is not None and not hist.empty:
-        return _normalize_ohlcv(hist)
+        return _normalize_downloaded_ohlcv(hist, symbol_upper)
     return None
 
 

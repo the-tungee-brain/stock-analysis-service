@@ -12,8 +12,7 @@ import pandas as pd
 from analysis.pattern_intelligence import build_pattern_intelligence
 from app.adapters.cache.pattern_analysis_cache import PatternAnalysisCache
 from app.core.latency_observability import observe_dependency, record_dependency_latency
-from data.benchmarks import BENCHMARK_SYMBOL, VIX_SYMBOL, ensure_benchmark_ohlcv
-from data.loader import load_symbol
+from data.benchmarks import BENCHMARK_SYMBOL, VIX_SYMBOL, ensure_benchmark_ohlcv, load_benchmark_ohlcv
 from models.prediction_service import LoadedModel, ensure_raw_ohlcv, predict_for_symbol
 
 logger = logging.getLogger(__name__)
@@ -44,8 +43,8 @@ class PatternAnalysisService:
         symbol_upper = symbol.strip().upper()
         raw = ensure_raw_ohlcv(symbol_upper)
         ensure_benchmark_ohlcv()
-        spy = load_symbol(BENCHMARK_SYMBOL)
-        vix = load_symbol(VIX_SYMBOL)
+        spy = load_benchmark_ohlcv(BENCHMARK_SYMBOL)
+        vix = load_benchmark_ohlcv(VIX_SYMBOL)
         cache_key = build_pattern_analysis_cache_key(
             symbol=symbol_upper,
             raw_as_of=_latest_as_of(raw),

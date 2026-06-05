@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas as pd
 
-from data.benchmarks import BENCHMARK_SYMBOL, VIX_SYMBOL, ensure_benchmark_ohlcv
+from data.benchmarks import BENCHMARK_SYMBOL, VIX_SYMBOL, ensure_benchmark_ohlcv, load_benchmark_ohlcv
 from data.download import download_symbol
 from data.loader import load_symbol
 from data.store import save_raw
@@ -71,8 +71,8 @@ def build_latest_feature_row(symbol: str) -> pd.Series:
     raw = ensure_raw_ohlcv(symbol_upper)
     ensure_benchmark_ohlcv()
     features = build_features(raw)
-    spy_close = load_symbol(BENCHMARK_SYMBOL)["close"]
-    vix_close = load_symbol(VIX_SYMBOL)["close"]
+    spy_close = load_benchmark_ohlcv(BENCHMARK_SYMBOL)["close"]
+    vix_close = load_benchmark_ohlcv(VIX_SYMBOL)["close"]
     features = attach_market_context(
         features,
         stock_close=raw["close"],

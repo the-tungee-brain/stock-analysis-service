@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from data.benchmarks import BENCHMARK_SYMBOL, VIX_SYMBOL, ensure_benchmark_ohlcv
+from data.benchmarks import BENCHMARK_SYMBOL, VIX_SYMBOL, ensure_benchmark_ohlcv, load_benchmark_ohlcv
 from data.loader import load_symbol
 from features.build_features import build_features
 from features.market_context import attach_market_context
@@ -44,8 +44,8 @@ def build_trend_context(symbol: str, raw: pd.DataFrame | None = None) -> TrendCo
     ensure_benchmark_ohlcv()
 
     features = build_features(ohlcv)
-    spy_close = load_symbol(BENCHMARK_SYMBOL)["close"]
-    vix_close = load_symbol(VIX_SYMBOL)["close"]
+    spy_close = load_benchmark_ohlcv(BENCHMARK_SYMBOL)["close"]
+    vix_close = load_benchmark_ohlcv(VIX_SYMBOL)["close"]
     features = attach_market_context(
         features,
         stock_close=ohlcv["close"],

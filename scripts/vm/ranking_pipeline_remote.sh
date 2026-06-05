@@ -24,11 +24,11 @@ imports_ok() {
 }
 
 run_bootstrap() {
-  echo "=== ranking bootstrap (universe + SPY + daily + portfolio) ==="
+  echo "=== ranking bootstrap (universe + SPY/^VIX + daily + portfolio) ==="
   exec_in python scripts/run_ranking_universe_weekly.py
-  echo "Pausing 90s before SPY fetch (Yahoo rate limit after universe screen)..."
+  echo "Pausing 90s before benchmark fetch (Yahoo rate limit after universe screen)..."
   sleep 90
-  exec_in python scripts/download_symbols.py --symbols SPY
+  exec_in python scripts/download_symbols.py --symbols SPY ^VIX
   exec_in python scripts/run_ranking_daily.py
   exec_in python scripts/run_portfolio_with_risk.py
   touch "$MARKER"
@@ -37,9 +37,9 @@ run_bootstrap() {
 
 # Resume after universe finished but SPY/daily/portfolio failed (e.g. Yahoo throttle).
 run_bootstrap_resume() {
-  echo "=== ranking bootstrap resume (SPY + daily + portfolio) ==="
+  echo "=== ranking bootstrap resume (SPY/^VIX + daily + portfolio) ==="
   sleep 30
-  exec_in python scripts/download_symbols.py --symbols SPY
+  exec_in python scripts/download_symbols.py --symbols SPY ^VIX
   exec_in python scripts/run_ranking_daily.py
   exec_in python scripts/run_portfolio_with_risk.py
   touch "$MARKER"
