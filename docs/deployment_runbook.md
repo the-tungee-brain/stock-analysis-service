@@ -66,6 +66,44 @@ Diagnostics: `GET /api/v1/strategy/momentum-breakout/universe` (fields: `univers
 
 Config: `MB_SCAN_UNIVERSE_ORDER` — default `ranking_score` (`liquidity` \| `market_cap` \| `alphabetical` to override).
 
+### Momentum Breakout precompute
+
+To build a Momentum Breakout scan snapshot manually, run **Actions → Momentum
+Breakout precompute → Run workflow**. The workflow checks out the repo, configures
+Python for local validation, SSHes to the production VM, and runs only this fixed
+command inside the deployed `sas-server` container:
+
+```bash
+.venv/bin/python scripts/run_momentum_breakout_precompute.py
+```
+
+The workflow does not accept arbitrary commands or script names, does not modify
+runtime environment variables, and does not set `MB_SCAN_SERVING_MODE`.
+
+Expected verification output in the GitHub step summary and the
+`momentum-breakout-precompute-summary.json` artifact:
+
+- `run_id`
+- `as_of_date`
+- `generated_at`
+- `ranking_run_id`
+- `ranking_snapshot_id`
+- `total_eligible_symbols`
+- `symbols_scanned`
+- `excluded_by_cap`
+- `valid_setups_found`
+- `tradable_candidates_found`
+- `blocked_candidates_count`
+- `results_stored`
+- `duration_ms`
+
+Required GitHub secrets: `VM_IP` and `SSH_PRIVATE_KEY`. Rollback remains manual
+by setting:
+
+```bash
+MB_SCAN_SERVING_MODE=live_emergency
+```
+
 ### Emerging Leaders snapshot serving
 
 `GET /api/v1/research/emerging-leaders` serves the latest completed precomputed

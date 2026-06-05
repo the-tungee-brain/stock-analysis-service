@@ -1,0 +1,165 @@
+name: Momentum Breakout precompute
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: momentum-breakout-precompute
+  cancel-in-progress: false
+
+jobs:
+  precompute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      VM_HOST: ${{ secrets.VM_IP }}
+      VM_USER: ubuntu
+      CONTAINER_NAME: sas-server
+      SUMMARY_FILE: momentum-breakout-precompute-summary.json
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          install -m 600 /dev/null ~/.ssh/sas_vm_key
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/sas_vm_key
+          ssh-keyscan -H "$VM_HOST" >> ~/.ssh/known_hosts
+
+      - name: Run Momentum Breakout precompute and verify latest run
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/sas_vm_key "$VM_USER@$VM_HOST" "CONTAINER_NAME='$CONTAINER_NAME' bash -s" > "$SUMMARY_FILE" <<'REMOTE'
+          set -euo pipefail
+          CONTAINER_NAME="${CONTAINER_NAME:-sas-server}"
+
+          if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
+            echo "$CONTAINER_NAME container is not running" >&2
+            exit 1
+          fi
+
+          docker exec "$CONTAINER_NAME" sh -lc '
+            set -eu
+            cd /app
+            PYTHON_BIN=".venv/bin/python"
+            if [ ! -x "$PYTHON_BIN" ]; then
+              PYTHON_BIN="python"
+            fi
+
+            "$PYTHON_BIN" scripts/run_momentum_breakout_precompute.py >&2
+
+            "$PYTHON_BIN" - <<'"'"'PY'"'"'
+          import json
+          import sqlite3
+          from pathlib import Path
+
+          db_path = Path("/app/data/ranking/ranking_pipeline.db")
+          if not db_path.exists():
+              raise SystemExit(f"Ranking DB not found: {db_path}")
+
+          conn = sqlite3.connect(db_path)
+          conn.row_factory = sqlite3.Row
+          try:
+              run = conn.execute(
+                  """
+                  SELECT *
+                  FROM momentum_breakout_scan_runs
+                  WHERE status = ?
+                  ORDER BY generated_at DESC
+                  LIMIT 1
+                  """,
+                  ("completed",),
+              ).fetchone()
+              if run is None:
+                  raise SystemExit("No completed Momentum Breakout precompute run found")
+              if run["status"] != "completed":
+                  raise SystemExit(f"Latest run is not completed: {run['status']}")
+              if not run["generated_at"]:
+                  raise SystemExit("Latest completed run is missing generated_at")
+
+              symbols_scanned = int(run["symbols_scanned"])
+              total_eligible_symbols = int(run["total_eligible_symbols"])
+              excluded_by_cap = int(run["excluded_by_cap"])
+              valid_setups_found = int(run["valid_setups_found"])
+              duration_ms = int(run["duration_ms"])
+              if total_eligible_symbols > 500 and symbols_scanned <= 500:
+                  raise SystemExit(
+                      "Expected symbols_scanned > 500 when eligible universe > 500; "
+                      f"got symbols_scanned={symbols_scanned}, "
+                      f"total_eligible_symbols={total_eligible_symbols}"
+                  )
+              if valid_setups_found < 0:
+                  raise SystemExit("valid_setups_found is invalid")
+              if duration_ms < 0:
+                  raise SystemExit("duration_ms is invalid")
+
+              results_stored = conn.execute(
+                  """
+                  SELECT COUNT(*) AS c
+                  FROM momentum_breakout_scan_results
+                  WHERE run_id = ?
+                  """,
+                  (run["run_id"],),
+              ).fetchone()["c"]
+
+              summary = {
+                  "run_id": run["run_id"],
+                  "as_of_date": run["as_of_date"],
+                  "generated_at": run["generated_at"],
+                  "ranking_run_id": run["ranking_run_id"],
+                  "ranking_snapshot_id": run["ranking_snapshot_id"],
+                  "total_eligible_symbols": total_eligible_symbols,
+                  "symbols_scanned": symbols_scanned,
+                  "excluded_by_cap": excluded_by_cap,
+                  "valid_setups_found": valid_setups_found,
+                  "tradable_candidates_found": int(run["tradable_candidates_found"]),
+                  "blocked_candidates_count": int(run["blocked_candidates_count"]),
+                  "results_stored": int(results_stored),
+                  "duration_ms": duration_ms,
+              }
+              print(json.dumps(summary, indent=2, sort_keys=True))
+          finally:
+              conn.close()
+          PY
+          '
+          REMOTE
+
+      - name: Write step summary
+        run: |
+          set -euo pipefail
+          echo "## Momentum Breakout precompute" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+
+          summary = json.loads(Path("momentum-breakout-precompute-summary.json").read_text())
+          for key in (
+              "run_id",
+              "as_of_date",
+              "generated_at",
+              "ranking_run_id",
+              "ranking_snapshot_id",
+              "total_eligible_symbols",
+              "symbols_scanned",
+              "excluded_by_cap",
+              "valid_setups_found",
+              "tradable_candidates_found",
+              "blocked_candidates_count",
+              "results_stored",
+              "duration_ms",
+          ):
+              print(f"- `{key}`: {summary.get(key)}")
+          PY
+
+      - name: Upload summary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: momentum-breakout-precompute-summary.json
+          path: ${{ env.SUMMARY_FILE }}
