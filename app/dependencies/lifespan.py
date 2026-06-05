@@ -400,6 +400,7 @@ async def lifespan(app: FastAPI):
         asset_type_service=asset_type_service,
         yfinance_adapter=yfinance_adapter,
         company_profile_service=company_profile_service,
+        performance_builder=performance_builder,
     )
     enriched_news_service = EnrichedNewsService(
         enriched_news_cache=enriched_news_cache,
