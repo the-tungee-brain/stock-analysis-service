@@ -6,7 +6,6 @@ import requests
 
 from app.adapters.cache.finnhub_response_cache import FinnhubResponseCache
 from app.adapters.finnhub.finnhub_adapter import FinnhubAdapter
-from app.adapters.finnhub.finnhub_circuit import FinnhubUnavailableError
 
 
 def test_finnhub_response_cache_roundtrip():
@@ -56,7 +55,7 @@ def test_finnhub_adapter_uses_response_cache():
     adapter.finnhub_client.quote.assert_called_once()
 
 
-def test_finnhub_adapter_skips_upstream_when_circuit_open():
+def test_finnhub_adapter_does_not_skip_user_retry_after_failures():
     adapter = FinnhubAdapter(
         api_key="test-key",
         circuit_cooldown_seconds=60,
@@ -73,7 +72,7 @@ def test_finnhub_adapter_skips_upstream_when_circuit_open():
 
     adapter.finnhub_client.quote.reset_mock()
 
-    with pytest.raises(FinnhubUnavailableError):
+    with pytest.raises(requests.exceptions.ConnectTimeout):
         adapter.get_quote("AAPL")
 
-    adapter.finnhub_client.quote.assert_not_called()
+    adapter.finnhub_client.quote.assert_called_once_with(symbol="AAPL")

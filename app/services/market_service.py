@@ -1,11 +1,19 @@
-from app.broker.option_utils import option_chain_date_window
-from app.builders.schwab_market_builder import SchwabMarketBuilder
-from app.models.schwab_market_models import PromptQuoteSnapshot
+import logging
 from typing import Dict, List, Optional
-from app.adapters.schwab.schwab_market_adapter import ContractType, StrategyType
-from app.models.schwab_option_chain_models import OptionChain
+
+from app.adapters.schwab.schwab_market_adapter import (
+    ContractType,
+    SchwabUnsupportedSymbolError,
+    StrategyType,
+)
+from app.broker.option_utils import option_chain_date_window
 from app.builders.performance_builder import PerformanceBuilder
+from app.builders.schwab_market_builder import SchwabMarketBuilder
 from app.models.company_research_models import PerformanceSnapshot
+from app.models.schwab_market_models import PromptQuoteSnapshot
+from app.models.schwab_option_chain_models import OptionChain
+
+logger = logging.getLogger(__name__)
 
 
 class MarketService:
@@ -59,22 +67,33 @@ class MarketService:
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
         strategy: StrategyType = "SINGLE",
-    ) -> OptionChain:
+    ) -> OptionChain | None:
+        symbol_upper = symbol.strip().upper()
         if not from_date or not to_date:
             default_from, default_to = option_chain_date_window()
             from_date = from_date or default_from
             to_date = to_date or default_to
 
-        return self.schwab_market_builder.get_option_chains(
-            access_token=access_token,
-            symbol=symbol,
-            contract_type=contract_type,
-            strike_count=strike_count,
-            include_underlying_quote=include_underlying_quote,
-            from_date=from_date,
-            to_date=to_date,
-            strategy=strategy,
-        )
+        try:
+            return self.schwab_market_builder.get_option_chains(
+                access_token=access_token,
+                symbol=symbol_upper,
+                contract_type=contract_type,
+                strike_count=strike_count,
+                include_underlying_quote=include_underlying_quote,
+                from_date=from_date,
+                to_date=to_date,
+                strategy=strategy,
+            )
+        except SchwabUnsupportedSymbolError as exc:
+            logger.warning(
+                "Provider symbol unavailable provider=%s endpoint=%s symbol=%s reason=%s",
+                "schwab",
+                exc.endpoint,
+                exc.symbol.strip().upper(),
+                exc.reason,
+            )
+            return None
 
     def get_performance(self, symbol: str) -> PerformanceSnapshot:
         return self.performance_builder.build(symbol=symbol)

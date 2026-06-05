@@ -1039,6 +1039,9 @@ class PortfolioAnalysisService:
             if quote_snapshot is not None and quote_snapshot.implied_vol is not None
             else None
         )
+        schwab_market_data_gap = has_schwab and (
+            quote_snapshot is None or (include_options and option_chain is None)
+        )
 
         if ctx is None:
             return SymbolIntelligence(symbol=symbol_upper, partial=True)
@@ -1086,6 +1089,13 @@ class PortfolioAnalysisService:
                 intelligence_payload["pattern_intelligence"] = pattern_intel
             if intelligence_payload:
                 intelligence = intelligence.model_copy(update=intelligence_payload)
+        if schwab_market_data_gap:
+            data_gaps = list(intelligence.data_gaps)
+            if "schwab" not in data_gaps:
+                data_gaps.append("schwab")
+            intelligence = intelligence.model_copy(
+                update={"partial": True, "data_gaps": data_gaps}
+            )
         return intelligence
 
     @staticmethod

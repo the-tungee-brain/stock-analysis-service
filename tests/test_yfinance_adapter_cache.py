@@ -116,9 +116,8 @@ def test_get_ticker_info_returns_empty_dict_on_yahoo_http_error():
     assert info == {}
 
 
-def test_unsupported_ticker_info_404_is_negative_cached(caplog):
+def test_unsupported_ticker_info_404_calls_provider_once_per_request(caplog):
     adapter = YFinanceAdapter()
-    adapter.NEGATIVE_CACHE_TTL_SECONDS = 60
     mock_ticker = MagicMock()
 
     def _raise_no_fundamentals() -> dict:
@@ -136,15 +135,14 @@ def test_unsupported_ticker_info_404_is_negative_cached(caplog):
 
     assert first == {}
     assert second == {}
-    ticker_cls.assert_called_once_with("BEAGR")
+    assert ticker_cls.call_count == 2
     assert "Yahoo Finance ticker.info unavailable for BEAGR" in caplog.text
     assert "Yahoo Finance fundamentals unavailable" in caplog.text
     assert "No fundamentals data found" not in caplog.text
 
 
-def test_fundamentals_builder_uses_negative_cached_ticker_info():
+def test_fundamentals_builder_does_not_negative_cache_ticker_info_failures():
     adapter = YFinanceAdapter()
-    adapter.NEGATIVE_CACHE_TTL_SECONDS = 60
     builder = FundamentalsBuilder(adapter)
     mock_ticker = MagicMock()
 
@@ -162,7 +160,7 @@ def test_fundamentals_builder_uses_negative_cached_ticker_info():
 
     assert first == []
     assert second == []
-    ticker_cls.assert_called_once_with("BEAGR")
+    assert ticker_cls.call_count == 2
 
 
 def test_get_stock_chart_payload_raises_when_empty():

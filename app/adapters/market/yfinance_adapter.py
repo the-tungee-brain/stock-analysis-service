@@ -40,14 +40,10 @@ class YFinanceAdapter:
     FUNDS_DATA_TTL_SECONDS = int(
         os.getenv("YFINANCE_FUNDS_DATA_CACHE_TTL_SECONDS", "86400")
     )
-    NEGATIVE_CACHE_TTL_SECONDS = int(
-        os.getenv("YFINANCE_NEGATIVE_CACHE_TTL_SECONDS", "900")
-    )
 
     def __init__(self) -> None:
         configure_yfinance()
         self._info_cache: dict[str, tuple[float, dict]] = {}
-        self._negative_cache: dict[str, float] = {}
         self._history_cache: dict[str, tuple[float, pd.DataFrame]] = {}
         self._earnings_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._street_analysis_cache: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -67,20 +63,6 @@ class YFinanceAdapter:
     def _set_cached(self, cache: dict, key: str, value) -> None:
         with self._lock:
             cache[key] = (time.time(), value)
-
-    def _is_negative_cached(self, key: str) -> bool:
-        with self._lock:
-            cached_at = self._negative_cache.get(key)
-            if cached_at is None:
-                return False
-            if time.time() - cached_at >= self.NEGATIVE_CACHE_TTL_SECONDS:
-                del self._negative_cache[key]
-                return False
-            return True
-
-    def _set_negative_cached(self, key: str) -> None:
-        with self._lock:
-            self._negative_cache[key] = time.time()
 
     def _ticker(self, symbol: str) -> yf.Ticker:
         symbol_upper = symbol.strip().upper()
@@ -102,11 +84,6 @@ class YFinanceAdapter:
 
     def get_ticker_info(self, symbol: str) -> dict:
         symbol_upper = symbol.strip().upper()
-        negative_cache_key = f"ticker_info:{symbol_upper}"
-        if self._is_negative_cached(negative_cache_key):
-            record_dependency_latency("yfinance", 0.0, cache_status="hit")
-            return {}
-
         cached = self._get_cached(self._info_cache, symbol_upper, self.INFO_TTL_SECONDS)
         if cached is not None:
             record_dependency_latency("yfinance", 0.0, cache_status="hit")
@@ -119,7 +96,6 @@ class YFinanceAdapter:
                     info = ticker.info or {}
             except Exception as exc:
                 if is_yahoo_permanent_unavailable(exc):
-                    self._set_negative_cached(negative_cache_key)
                     logger.info(
                         "Yahoo Finance ticker.info unavailable for %s: %s",
                         symbol_upper,

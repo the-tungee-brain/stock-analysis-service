@@ -8,6 +8,22 @@ ContractType = Literal["ALL", "CALL", "PUT"]
 StrategyType = Literal["SINGLE", "ANALYTICAL"]
 
 
+class SchwabUnsupportedSymbolError(Exception):
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        symbol: str,
+        status_code: int,
+        reason: str,
+    ) -> None:
+        super().__init__(reason)
+        self.endpoint = endpoint
+        self.symbol = symbol
+        self.status_code = status_code
+        self.reason = reason
+
+
 class SchwabMarketAdapter:
     def __init__(self, session: requests.Session, base_uri: str):
         self.base_uri = base_uri.rstrip("/")
@@ -72,6 +88,13 @@ class SchwabMarketAdapter:
                 headers=self._get_auth_headers(access_token=access_token),
                 params=params,
                 timeout=10,
+            )
+        if response.status_code == 400:
+            raise SchwabUnsupportedSymbolError(
+                endpoint="option_chains",
+                symbol=symbol,
+                status_code=response.status_code,
+                reason="bad_request_invalid_or_unsupported_symbol",
             )
         response.raise_for_status()
         return response.json()

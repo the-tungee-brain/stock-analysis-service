@@ -32,6 +32,24 @@ class SchwabMarketBuilder:
             indicative=indicative,
         )
 
+        if isinstance(raw_quote_data, dict) and "invalidSymbols" in raw_quote_data:
+            invalid_symbols = _normalize_invalid_symbols(
+                raw_quote_data.get("invalidSymbols")
+            )
+            for invalid_symbol in invalid_symbols:
+                logger.warning(
+                    "Provider symbol unavailable provider=%s endpoint=%s symbol=%s reason=%s",
+                    "schwab",
+                    "quotes",
+                    invalid_symbol,
+                    "invalidSymbols",
+                )
+            raw_quote_data = {
+                key: value
+                for key, value in raw_quote_data.items()
+                if key != "invalidSymbols"
+            }
+
         return QuotesResponse.model_validate(raw_quote_data)
 
     def get_option_chains(
@@ -65,3 +83,15 @@ class SchwabMarketBuilder:
                 exc,
             )
             raise
+
+
+def _normalize_invalid_symbols(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value.strip().upper()] if value.strip() else []
+    if isinstance(value, list):
+        symbols: list[str] = []
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                symbols.append(item.strip().upper())
+        return symbols
+    return []

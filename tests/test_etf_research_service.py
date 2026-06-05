@@ -105,6 +105,23 @@ def test_securitiesdb_adapter_returns_none_on_404():
     )
 
     assert result is None
+    session.get.assert_called_once()
+
+
+def test_securitiesdb_404_is_not_negative_cached():
+    session = MagicMock()
+    response = MagicMock()
+    response.status_code = 404
+    session.get.return_value = response
+
+    adapter = SecuritiesDbAdapter(session=session, cache_ttl_seconds=60)
+
+    first = adapter.get_etf_holdings("UNKNOWN")
+    second = adapter.get_etf_holdings("UNKNOWN")
+
+    assert first is None
+    assert second is None
+    assert session.get.call_count == 2
 
 
 def test_research_context_block_includes_etf_holdings():

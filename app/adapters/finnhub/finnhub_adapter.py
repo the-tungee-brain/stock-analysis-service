@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 import types
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -15,10 +14,7 @@ from finnhub.exceptions import FinnhubAPIException
 from requests.adapters import HTTPAdapter
 
 from app.adapters.cache.finnhub_response_cache import FinnhubResponseCache
-from app.adapters.finnhub.finnhub_circuit import (
-    FinnhubCircuitBreaker,
-    FinnhubUnavailableError,
-)
+from app.adapters.finnhub.finnhub_circuit import FinnhubCircuitBreaker
 from app.core.latency_observability import observe_dependency, record_dependency_latency
 
 logger = logging.getLogger(__name__)
@@ -27,16 +23,6 @@ T = TypeVar("T")
 
 DEFAULT_TIMEOUT_SECONDS = 15.0
 DEFAULT_API_URL = "https://finnhub.io/api/v1"
-_TRANSIENT_FINNHUB_STATUSES = frozenset({429, 500, 502, 503, 504})
-_FINNHUB_RETRY_ATTEMPTS = max(
-    1, int(os.getenv("FINNHUB_RETRY_ATTEMPTS", "3"))
-)
-_FINNHUB_RETRY_BACKOFF_SECONDS = float(
-    os.getenv("FINNHUB_RETRY_BACKOFF_SECONDS", "0.35")
-)
-_FINNHUB_ENRICHMENT_ATTEMPTS = max(
-    1, int(os.getenv("FINNHUB_ENRICHMENT_RETRY_ATTEMPTS", "1"))
-)
 _FINNHUB_ENRICHMENT_TIMEOUT_SECONDS = float(
     os.getenv("FINNHUB_ENRICHMENT_TIMEOUT_SECONDS", "3")
 )
@@ -116,7 +102,6 @@ class FinnhubAdapter:
         label: str,
         fn: Callable[[], T],
         *,
-        attempts: int | None = None,
         timeout_seconds: float | None = None,
         log_failure: bool = True,
     ) -> T:
@@ -130,7 +115,6 @@ class FinnhubAdapter:
             result = self._call(
                 label,
                 fn,
-                attempts=attempts,
                 timeout_seconds=timeout_seconds,
                 log_failure=log_failure,
             )
@@ -145,70 +129,34 @@ class FinnhubAdapter:
         label: str,
         fn: Callable[[], T],
         *,
-        attempts: int | None = None,
         timeout_seconds: float | None = None,
         log_failure: bool = True,
     ) -> T:
-        if not self._circuit.allow_request():
-            raise FinnhubUnavailableError("Finnhub circuit open")
-
-        resolved_attempts = max(1, attempts or _FINNHUB_RETRY_ATTEMPTS)
-        last_api_error: FinnhubAPIException | None = None
-        for attempt in range(resolved_attempts):
-            try:
-                with _temporary_timeout(timeout_seconds):
-                    result = fn()
-            except FinnhubAPIException as exc:
-                last_api_error = exc
-                if self._should_retry_finnhub_api_error(
-                    exc,
-                    attempt,
-                    attempts=resolved_attempts,
-                ):
-                    self._sleep_before_finnhub_retry(attempt)
-                    continue
-                if self._should_record_finnhub_circuit_failure(exc):
-                    self._circuit.record_failure()
-                if log_failure:
-                    logger.warning("Finnhub %s unavailable: %s", label, exc)
-                raise
-            except (
-                requests.exceptions.Timeout,
-                requests.exceptions.ConnectionError,
-            ) as exc:
-                if attempt < resolved_attempts - 1:
-                    self._sleep_before_finnhub_retry(attempt)
-                    continue
+        try:
+            with _temporary_timeout(timeout_seconds):
+                result = fn()
+        except FinnhubAPIException as exc:
+            if self._should_record_finnhub_circuit_failure(exc):
                 self._circuit.record_failure()
-                if log_failure:
-                    logger.warning("Finnhub %s unavailable: %s", label, exc)
-                raise
-            else:
-                self._circuit.record_success()
-                return result
+            if log_failure:
+                logger.warning("Finnhub %s unavailable: %s", label, exc)
+            raise
+        except (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ) as exc:
+            self._circuit.record_failure()
+            if log_failure:
+                logger.warning("Finnhub %s unavailable: %s", label, exc)
+            raise
 
-        if last_api_error is not None:
-            raise last_api_error
-        raise FinnhubUnavailableError("Finnhub circuit open")
+        self._circuit.record_success()
+        return result
 
     @staticmethod
     def _finnhub_status_code(exc: FinnhubAPIException) -> int | None:
         code = getattr(exc, "status_code", None)
         return code if isinstance(code, int) else None
-
-    def _should_retry_finnhub_api_error(
-        self,
-        exc: FinnhubAPIException,
-        attempt: int,
-        *,
-        attempts: int | None = None,
-    ) -> bool:
-        code = self._finnhub_status_code(exc)
-        resolved_attempts = max(1, attempts or _FINNHUB_RETRY_ATTEMPTS)
-        return (
-            code in _TRANSIENT_FINNHUB_STATUSES
-            and attempt < resolved_attempts - 1
-        )
 
     def _should_record_finnhub_circuit_failure(self, exc: FinnhubAPIException) -> bool:
         code = self._finnhub_status_code(exc)
@@ -217,10 +165,6 @@ class FinnhubAdapter:
         if code in {502, 503, 504}:
             return False
         return True
-
-    @staticmethod
-    def _sleep_before_finnhub_retry(attempt: int) -> None:
-        time.sleep(_FINNHUB_RETRY_BACKOFF_SECONDS * (attempt + 1))
 
     def get_company_news(self, symbol: str, _from: str, to: str):
         cache_key = self._cache_key(symbol, _from, to)
@@ -231,7 +175,6 @@ class FinnhubAdapter:
             lambda: self.finnhub_client.company_news(
                 symbol=symbol, _from=_from, to=to
             ),
-            attempts=_FINNHUB_ENRICHMENT_ATTEMPTS,
             timeout_seconds=_FINNHUB_ENRICHMENT_TIMEOUT_SECONDS,
             log_failure=False,
         )
@@ -329,7 +272,6 @@ class FinnhubAdapter:
             lambda: self.finnhub_client.press_releases(
                 symbol=symbol, _from=_from, to=to
             ),
-            attempts=_FINNHUB_ENRICHMENT_ATTEMPTS,
             timeout_seconds=_FINNHUB_ENRICHMENT_TIMEOUT_SECONDS,
             log_failure=False,
         )

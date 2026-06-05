@@ -91,3 +91,45 @@ def test_build_symbol_intelligence_delegates_to_intelligence_service():
     assert kwargs["to_date"] == (
         today + timedelta(days=INTELLIGENCE_OPTION_LOOKAHEAD_DAYS)
     ).isoformat()
+
+
+def test_build_symbol_intelligence_marks_partial_when_schwab_market_data_unavailable():
+    ctx = MagicMock()
+    company_research_service = MagicMock()
+    company_research_service.build_context.return_value = ctx
+
+    portfolio_intelligence_service = MagicMock()
+    portfolio_intelligence_service.attach_enriched_news.return_value = ctx
+    portfolio_intelligence_service.build_symbol_intelligence.return_value = (
+        SymbolIntelligence(symbol="C-PR", signals=[])
+    )
+
+    market_service = MagicMock()
+    market_service.get_option_chains.return_value = None
+    market_service.get_enriched_quote_snapshot.return_value = {}
+
+    transaction_service = MagicMock()
+    transaction_service.get_filled_orders_by_symbol.return_value = []
+
+    service = PortfolioAnalysisService(
+        market_service=market_service,
+        prompt_enrichment_service=MagicMock(),
+        transaction_service=transaction_service,
+        schwab_auth_service=MagicMock(),
+        company_research_service=company_research_service,
+        portfolio_intelligence_service=portfolio_intelligence_service,
+        profile_adapter=MagicMock(),
+    )
+
+    result = service.build_symbol_intelligence(
+        user_id="user-1",
+        symbol="C-PR",
+        account=_make_account(),
+        positions=[],
+        access_token="token",
+        include_options=True,
+    )
+
+    assert result.symbol == "C-PR"
+    assert result.partial is True
+    assert "schwab" in result.data_gaps
