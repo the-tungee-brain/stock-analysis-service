@@ -296,3 +296,39 @@ def test_build_symbol_intelligence_reuses_pattern_analysis_snapshot(monkeypatch)
     assert payload["patternForecast"]["upProb"] == 0.75
     assert payload["patternIntelligence"]["symbol"] == "AAPL"
     assert payload["patternIntelligence"]["trendContext"]["trendBias"] == "uptrend"
+    assert "pattern_model_unavailable" not in payload["dataGaps"]
+
+
+def test_paid_symbol_intelligence_reports_missing_pattern_model(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.portfolio_analysis_service.is_paid_user",
+        lambda _user_id: True,
+    )
+
+    company_research_service = MagicMock()
+    company_research_service.build_context.return_value = MagicMock()
+
+    portfolio_intelligence_service = MagicMock()
+    portfolio_intelligence_service.attach_enriched_news.side_effect = lambda ctx: ctx
+    portfolio_intelligence_service.build_symbol_intelligence.return_value = (
+        SymbolIntelligence(symbol="NVDA", signals=[])
+    )
+
+    pattern_analysis_service = MagicMock()
+    service = PortfolioAnalysisService(
+        market_service=MagicMock(),
+        prompt_enrichment_service=MagicMock(),
+        transaction_service=MagicMock(),
+        schwab_auth_service=MagicMock(),
+        company_research_service=company_research_service,
+        portfolio_intelligence_service=portfolio_intelligence_service,
+        profile_adapter=MagicMock(),
+        pattern_analysis_service=pattern_analysis_service,
+    )
+
+    result = service.build_symbol_intelligence(user_id="paid-user", symbol="NVDA")
+
+    assert result.pattern_forecast is None
+    assert result.pattern_intelligence is None
+    assert "pattern_model_unavailable" in result.data_gaps
+    pattern_analysis_service.get_or_build.assert_not_called()

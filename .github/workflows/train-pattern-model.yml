@@ -123,7 +123,8 @@ jobs:
             if docker ps --format '{{.Names}}' | grep -qx sas-server; then
               docker restart sas-server
               sleep 5
-              curl -sf http://localhost:8000/ || echo "Warning: root health check failed after restart"
+              docker exec sas-server python scripts/smoke_pattern_runtime.py --symbol NVDA --direct-only
+              curl -sf http://localhost:8000/health || echo "Warning: health check failed after restart"
             else
               echo "sas-server container not running; artifacts installed for next deploy"
             fi

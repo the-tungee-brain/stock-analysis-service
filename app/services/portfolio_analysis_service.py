@@ -1059,6 +1059,8 @@ class PortfolioAnalysisService:
 
         profile = self._get_investment_profile(user_id)
 
+        paid_user = is_paid_user(user_id)
+
         try:
             intelligence = self.portfolio_intelligence_service.build_symbol_intelligence(
                 research=ctx,
@@ -1068,7 +1070,7 @@ class PortfolioAnalysisService:
                 orders=orders,
                 option_chain=option_chain,
                 include_peers=True,
-                include_cached_research=is_paid_user(user_id),
+                include_cached_research=paid_user,
                 underlying_iv_percent=underlying_iv_percent,
                 profile=profile,
             )
@@ -1079,10 +1081,18 @@ class PortfolioAnalysisService:
             )
             return SymbolIntelligence(symbol=symbol_upper, partial=True)
 
-        if is_paid_user(user_id):
-            intelligence_payload = self._build_pattern_intelligence_update(symbol_upper)
+        if paid_user:
+            (
+                intelligence_payload,
+                pattern_data_gap,
+            ) = self._build_pattern_intelligence_update(symbol_upper)
             if intelligence_payload:
                 intelligence = intelligence.model_copy(update=intelligence_payload)
+            elif pattern_data_gap:
+                data_gaps = list(intelligence.data_gaps)
+                if pattern_data_gap not in data_gaps:
+                    data_gaps.append(pattern_data_gap)
+                intelligence = intelligence.model_copy(update={"data_gaps": data_gaps})
         if schwab_market_data_gap:
             data_gaps = list(intelligence.data_gaps)
             if "schwab" not in data_gaps:
@@ -1092,10 +1102,13 @@ class PortfolioAnalysisService:
             )
         return intelligence
 
-    def _build_pattern_intelligence_update(self, symbol_upper: str) -> dict:
+    def _build_pattern_intelligence_update(
+        self,
+        symbol_upper: str,
+    ) -> tuple[dict, str | None]:
         loaded_model = self._pattern_loaded_model
         if loaded_model is None:
-            return {}
+            return {}, "pattern_model_unavailable"
 
         if self._pattern_analysis_service is not None:
             try:
@@ -1118,9 +1131,9 @@ class PortfolioAnalysisService:
                     "pattern_intelligence": pattern_intelligence_from_dict(
                         snapshot.pattern_intelligence
                     ),
-                }
+                }, None
             except (FileNotFoundError, ValueError, OSError):
-                return {}
+                return {}, "pattern_analysis_unavailable"
 
         from app.services.pattern_forecast_service import build_pattern_trend_forecast
         from app.services.pattern_intelligence_service import (
@@ -1134,7 +1147,9 @@ class PortfolioAnalysisService:
         pattern_intel = build_pattern_intelligence_payload(symbol_upper, loaded_model)
         if pattern_intel is not None:
             update["pattern_intelligence"] = pattern_intel
-        return update
+        if not update:
+            return {}, "pattern_analysis_unavailable"
+        return update, None
 
     @staticmethod
     def _positions_for_symbol(

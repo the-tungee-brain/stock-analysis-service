@@ -549,8 +549,10 @@ async def lifespan(app: FastAPI):
         from models.prediction_service import load_deployed_model
 
         app.state.pattern_loaded_model = load_deployed_model()
-    except FileNotFoundError:
+        app.state.pattern_model_error = None
+    except FileNotFoundError as exc:
         app.state.pattern_loaded_model = None
+        app.state.pattern_model_error = str(exc)
 
     portfolio_analysis_service.attach_pattern_model(app.state.pattern_loaded_model)
 

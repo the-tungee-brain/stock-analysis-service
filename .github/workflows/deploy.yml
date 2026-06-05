@@ -94,6 +94,17 @@ jobs:
             # Persistent ranking store only (do NOT mount over /app/data — that shadows the Python package)
             mkdir -p /home/ubuntu/sas-ranking-persist/data/raw
             mkdir -p /home/ubuntu/sas-ranking-persist/data/ranking/features
+            mkdir -p /home/ubuntu/sas-pattern-artifacts
+            test -s /home/ubuntu/sas-pattern-artifacts/model_xgb.joblib || {
+              echo "Missing /home/ubuntu/sas-pattern-artifacts/model_xgb.joblib"
+              echo "Run the Train Pattern Model workflow with deploy=true before deploying sas-server."
+              exit 1
+            }
+            test -s /home/ubuntu/sas-pattern-artifacts/model_meta.json || {
+              echo "Missing /home/ubuntu/sas-pattern-artifacts/model_meta.json"
+              echo "Run the Train Pattern Model workflow with deploy=true before deploying sas-server."
+              exit 1
+            }
 
             # Backend
             docker pull tungxd96/sas-server:latest
@@ -150,6 +161,7 @@ jobs:
               tungxd96/sas-server:latest
 
             docker exec sas-server python -c "import ranking_pipeline, data.download; print('pipeline imports ok')"
+            docker exec sas-server python scripts/smoke_pattern_runtime.py --symbol NVDA --direct-only
 
             mkdir -p /home/ubuntu/logs
             chmod +x /home/ubuntu/ranking_pipeline_remote.sh
@@ -157,4 +169,4 @@ jobs:
 
             sudo nginx -t && sudo systemctl restart nginx
             sleep 3
-            curl -f localhost:8000 || echo "Health check failed"
+            curl -f localhost:8000/health || echo "Health check failed"
