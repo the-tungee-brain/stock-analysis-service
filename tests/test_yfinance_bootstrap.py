@@ -5,6 +5,7 @@ from peewee import IntegrityError
 from app.adapters.market.yfinance_bootstrap import (
     configure_yfinance,
     format_yahoo_finance_error,
+    is_yahoo_permanent_unavailable,
 )
 
 
@@ -20,6 +21,15 @@ def test_format_yahoo_finance_error_truncates_long_plain_message():
     formatted = format_yahoo_finance_error(exc)
     assert len(formatted) <= 201
     assert formatted.endswith("…")
+
+
+def test_format_yahoo_no_fundamentals_as_expected_unavailable():
+    exc = Exception("HTTP Error 404: No fundamentals data found for symbol: BEAGR")
+
+    assert format_yahoo_finance_error(exc) == (
+        "Yahoo Finance fundamentals unavailable"
+    )
+    assert is_yahoo_permanent_unavailable(exc) is True
 
 
 def test_configure_yfinance_tolerates_cookie_cache_integrity_error():

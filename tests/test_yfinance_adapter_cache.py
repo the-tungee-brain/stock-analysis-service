@@ -5,6 +5,7 @@ import pytest
 
 from app.adapters.cache.dividend_history_cache import DividendHistoryCache
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
+from app.builders.fundamentals_builder import FundamentalsBuilder
 from app.models.dividend_research_models import (
     AnnualDividendIncome,
     DividendHistoryContext,
@@ -113,6 +114,55 @@ def test_get_ticker_info_returns_empty_dict_on_yahoo_http_error():
         info = adapter.get_ticker_info("NOK")
 
     assert info == {}
+
+
+def test_unsupported_ticker_info_404_is_negative_cached(caplog):
+    adapter = YFinanceAdapter()
+    adapter.NEGATIVE_CACHE_TTL_SECONDS = 60
+    mock_ticker = MagicMock()
+
+    def _raise_no_fundamentals() -> dict:
+        raise Exception("HTTP Error 404: No fundamentals data found for symbol: BEAGR")
+
+    type(mock_ticker).info = property(lambda _self: _raise_no_fundamentals())
+
+    with patch(
+        "app.adapters.market.yfinance_adapter.yf.Ticker",
+        return_value=mock_ticker,
+    ) as ticker_cls:
+        with caplog.at_level("INFO", logger="app.adapters.market.yfinance_adapter"):
+            first = adapter.get_ticker_info("BEAGR")
+            second = adapter.get_ticker_info("BEAGR")
+
+    assert first == {}
+    assert second == {}
+    ticker_cls.assert_called_once_with("BEAGR")
+    assert "Yahoo Finance ticker.info unavailable for BEAGR" in caplog.text
+    assert "Yahoo Finance fundamentals unavailable" in caplog.text
+    assert "No fundamentals data found" not in caplog.text
+
+
+def test_fundamentals_builder_uses_negative_cached_ticker_info():
+    adapter = YFinanceAdapter()
+    adapter.NEGATIVE_CACHE_TTL_SECONDS = 60
+    builder = FundamentalsBuilder(adapter)
+    mock_ticker = MagicMock()
+
+    def _raise_no_fundamentals() -> dict:
+        raise Exception("HTTP Error 404: No fundamentals data found for symbol: BEAGR")
+
+    type(mock_ticker).info = property(lambda _self: _raise_no_fundamentals())
+
+    with patch(
+        "app.adapters.market.yfinance_adapter.yf.Ticker",
+        return_value=mock_ticker,
+    ) as ticker_cls:
+        first = builder.build("BEAGR")
+        second = builder.build("BEAGR")
+
+    assert first == []
+    assert second == []
+    ticker_cls.assert_called_once_with("BEAGR")
 
 
 def test_get_stock_chart_payload_raises_when_empty():

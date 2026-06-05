@@ -10,6 +10,10 @@ from pathlib import Path
 from types import TracebackType
 
 _YAHOO_HTTP_ERROR_RE = re.compile(r"^HTTP Error (\d+):\s*", re.IGNORECASE)
+_YAHOO_NO_FUNDAMENTALS_RE = re.compile(
+    r"no fundamentals data found",
+    re.IGNORECASE,
+)
 
 _configured = False
 _config_lock = threading.Lock()
@@ -61,6 +65,9 @@ def format_yahoo_finance_error(exc: BaseException) -> str:
     if not raw:
         return type(exc).__name__
 
+    if _YAHOO_NO_FUNDAMENTALS_RE.search(raw):
+        return "Yahoo Finance fundamentals unavailable"
+
     match = _YAHOO_HTTP_ERROR_RE.match(raw)
     if match:
         return f"Yahoo Finance HTTP {match.group(1)}"
@@ -73,6 +80,16 @@ def format_yahoo_finance_error(exc: BaseException) -> str:
     if len(first_line) > 200:
         return f"{first_line[:200]}…"
     return first_line
+
+
+def is_yahoo_permanent_unavailable(exc: BaseException) -> bool:
+    raw = str(exc).strip()
+    if not raw:
+        return False
+    if _YAHOO_NO_FUNDAMENTALS_RE.search(raw):
+        return True
+    match = _YAHOO_HTTP_ERROR_RE.match(raw)
+    return bool(match and match.group(1) in {"400", "404"})
 
 
 def configure_yfinance() -> None:
