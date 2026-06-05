@@ -17,6 +17,7 @@ from analysis.pattern_intelligence.chart_analysis import (
 from analysis.pattern_intelligence.chart_intelligence import build_chart_intelligence
 from analysis.pattern_intelligence.scoring import build_pattern_scores
 from analysis.pattern_intelligence.service import build_pattern_intelligence
+from tests.conftest import seed_pattern_benchmarks
 from tests.test_pattern_intelligence import build_trend_context_from_frame
 from tests.test_pattern_train_and_save import _synthetic_ohlcv
 
@@ -164,7 +165,9 @@ def test_build_fib_channel_returns_parallel_lines():
     assert all(line["points"] for line in channel["lines"])
 
 
-def test_service_includes_chart_intelligence_summary():
+def test_service_includes_chart_intelligence_summary(tmp_path, monkeypatch):
+    monkeypatch.setattr("data.paths.RAW_DIR", tmp_path / "raw")
+    seed_pattern_benchmarks(rows=400)
     ohlcv = _synthetic_ohlcv(rows=400)
     result = build_pattern_intelligence("MSFT", raw=ohlcv)
     assert result.chart_intelligence
