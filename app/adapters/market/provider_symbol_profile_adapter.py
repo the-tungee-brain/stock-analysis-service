@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -45,7 +46,7 @@ class ProviderSymbolProfileAdapter:
             parsed = float(value)
         except (TypeError, ValueError):
             return None
-        if parsed != parsed:
+        if not math.isfinite(parsed):
             return None
         return parsed
 
@@ -54,9 +55,12 @@ class ProviderSymbolProfileAdapter:
         if value is None or isinstance(value, bool):
             return None
         try:
-            return int(float(value))
+            parsed = float(value)
         except (TypeError, ValueError):
             return None
+        if not math.isfinite(parsed):
+            return None
+        return int(parsed)
 
     def get(self, provider: str, symbol: str) -> ProviderSymbolProfile | None:
         provider_key = self._normalize_provider(provider)
