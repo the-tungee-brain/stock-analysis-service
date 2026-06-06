@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 from app.models.company_research_models import NewsHeadline
 from app.models.earnings_models import EarningsEvent
 from app.models.finnhub_news_models import NewsItem, NewsResponse
+from app.builders.earnings_builder import EarningsBuilder
 from app.services.earnings_service import EarningsService
 from app.services.news_service import NewsService
 
@@ -84,3 +85,48 @@ def test_earnings_detail_includes_official_releases():
     assert detail is not None
     assert len(detail.officialReleases) == 1
     assert detail.officialReleases[0].headline == "Earnings PR"
+
+
+def test_earnings_detail_soft_returns_empty_transcript_when_provider_disabled():
+    yfinance = MagicMock()
+    yfinance.get_earnings_bundle.return_value = {
+        "surprises": [
+            {
+                "period": "2026-05-15",
+                "quarter": 2,
+                "year": 2026,
+                "fiscalPeriod": "Q2 FY2026",
+                "actual": 1.2,
+                "estimate": 1.1,
+            }
+        ],
+        "upcoming": None,
+        "revenue_by_period": {},
+    }
+    transcript_provider = MagicMock()
+    transcript_provider.get_transcripts_list.return_value = {"transcripts": []}
+    transcript_provider.get_transcript.return_value = {"transcript": []}
+    builder = EarningsBuilder(
+        yfinance_adapter=yfinance,
+        finnhub_adapter=transcript_provider,
+    )
+    finnhub = MagicMock()
+    finnhub.get_company_news.return_value = MagicMock(root=[])
+    service = EarningsService(
+        earnings_builder=builder,
+        finnhub_builder=finnhub,
+        news_service=None,
+    )
+
+    detail = service.get_detail(
+        symbol="AAPL",
+        report_date=date(2026, 5, 15),
+        include_transcript=True,
+    )
+
+    assert detail is not None
+    assert detail.transcriptAvailable is False
+    assert detail.transcript == []
+    assert detail.event.transcriptId is None
+    transcript_provider.get_transcripts_list.assert_called_once_with(symbol="AAPL")
+    transcript_provider.get_transcript.assert_not_called()

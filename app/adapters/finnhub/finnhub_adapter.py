@@ -32,6 +32,13 @@ _request_timeout_override: ContextVar[float | None] = ContextVar(
 )
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _normalized_request(self, method: str, path: str, **kwargs):
     uri = f"{self.API_URL.rstrip('/')}/{path.lstrip('/')}"
     timeout = _request_timeout_override.get()
@@ -65,6 +72,7 @@ class FinnhubAdapter:
         timeout_seconds: float | None = None,
         circuit_cooldown_seconds: float | None = None,
         response_cache: FinnhubResponseCache | None = None,
+        transcripts_enabled: bool | None = None,
     ):
         timeout = float(
             timeout_seconds
@@ -78,6 +86,11 @@ class FinnhubAdapter:
         )
         self._circuit = FinnhubCircuitBreaker.from_env(cooldown_seconds=cooldown)
         self._cache = response_cache
+        self.transcripts_enabled = (
+            transcripts_enabled
+            if transcripts_enabled is not None
+            else _env_flag("FINNHUB_TRANSCRIPTS_ENABLED", default=False)
+        )
         self.finnhub_client = finnhub.Client(api_key=api_key)
         self.finnhub_client.API_URL = os.getenv(
             "FINNHUB_API_URL", DEFAULT_API_URL
@@ -246,21 +259,29 @@ class FinnhubAdapter:
         )
 
     def get_transcripts_list(self, symbol: str):
+        if not self.transcripts_enabled:
+            return {"transcripts": []}
         cache_key = self._cache_key(symbol)
         return self._cached_call(
             "transcripts_list",
             cache_key,
             "transcripts_list",
             lambda: self.finnhub_client.transcripts_list(symbol=symbol),
+            timeout_seconds=_FINNHUB_ENRICHMENT_TIMEOUT_SECONDS,
+            log_failure=False,
         )
 
     def get_transcript(self, transcript_id: str):
+        if not self.transcripts_enabled:
+            return {"transcript": []}
         cache_key = self._cache_key(transcript_id)
         return self._cached_call(
             "transcript",
             cache_key,
             "transcript",
             lambda: self.finnhub_client.transcripts(_id=transcript_id),
+            timeout_seconds=_FINNHUB_ENRICHMENT_TIMEOUT_SECONDS,
+            log_failure=False,
         )
 
     def get_press_releases(self, symbol: str, _from: str, to: str):

@@ -28,6 +28,38 @@ def test_finnhub_adapter_uses_short_timeout():
     assert adapter.finnhub_client.DEFAULT_TIMEOUT == 2.5
 
 
+def test_finnhub_transcripts_disabled_by_default_skips_client_calls():
+    adapter = FinnhubAdapter(api_key="test-key")
+    adapter.finnhub_client = MagicMock()
+
+    transcripts = adapter.get_transcripts_list("AAPL")
+    transcript = adapter.get_transcript("aapl-2026-q1")
+
+    assert transcripts == {"transcripts": []}
+    assert transcript == {"transcript": []}
+    adapter.finnhub_client.transcripts_list.assert_not_called()
+    adapter.finnhub_client.transcripts.assert_not_called()
+
+
+def test_finnhub_transcripts_can_be_enabled_explicitly():
+    adapter = FinnhubAdapter(api_key="test-key", transcripts_enabled=True)
+    adapter.finnhub_client = MagicMock()
+    adapter.finnhub_client.transcripts_list.return_value = {
+        "transcripts": [{"id": "aapl-2026-q1"}]
+    }
+    adapter.finnhub_client.transcripts.return_value = {
+        "transcript": [{"name": "CEO", "speech": ["Hello"]}]
+    }
+
+    transcripts = adapter.get_transcripts_list("AAPL")
+    transcript = adapter.get_transcript("aapl-2026-q1")
+
+    assert transcripts["transcripts"][0]["id"] == "aapl-2026-q1"
+    assert transcript["transcript"][0]["name"] == "CEO"
+    adapter.finnhub_client.transcripts_list.assert_called_once_with(symbol="AAPL")
+    adapter.finnhub_client.transcripts.assert_called_once_with(_id="aapl-2026-q1")
+
+
 def test_finnhub_timeout_does_not_retry_or_circuit_break_user_retry():
     adapter = FinnhubAdapter(
         api_key="test-key",
