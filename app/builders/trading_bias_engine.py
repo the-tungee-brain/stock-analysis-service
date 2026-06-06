@@ -532,9 +532,15 @@ def _zone_price(zones: list[Any], kind: str) -> float | None:
     if not isinstance(zone, dict):
         return None
     if kind == "support":
-        value = _float(_get(zone, "price_high", "priceHigh"))
+        value = _float(_get(zone, "display_level", "displayLevel"))
+        if value is None:
+            value = _float(_get(zone, "price_high", "priceHigh"))
     else:
-        value = _float(_get(zone, "price_low", "priceLow"))
+        value = _float(_get(zone, "breakout_level", "breakoutLevel"))
+        if value is None:
+            value = _float(_get(zone, "display_level", "displayLevel"))
+        if value is None:
+            value = _float(_get(zone, "price_low", "priceLow"))
     if value is None:
         value = _float(_get(zone, "price", "level"))
     return round(value, 2) if value is not None else None

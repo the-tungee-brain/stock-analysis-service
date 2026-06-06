@@ -13,8 +13,23 @@ from app.models.trader_playbook_models import (
 )
 from app.models.trading_bias_models import TradingBiasResponse
 
-MAX_DAILY_STOP_DISTANCE_PCT = 0.12
-MAX_DAILY_TARGET_DISTANCE_PCT = 0.25
+
+@dataclass(frozen=True)
+class TraderPlaybookConfig:
+    # Setup proximity gates are daily-plan trigger windows, bounded by actionable levels.
+    breakout_proximity_pct: float = 0.03
+    pullback_proximity_pct: float = 0.05
+    # Derived stop offsets are only used for legacy payloads without selectedLevels.
+    legacy_breakout_stop_pct: float = 0.03
+    legacy_pullback_stop_pct: float = 0.03
+    legacy_failed_breakout_stop_pct: float = 0.03
+    legacy_range_stop_pct: float = 0.025
+    # Daily swing plans reject stop distances beyond either volatility or percent caps.
+    max_stop_atr: float = 3.0
+    max_risk_percent_cap: float = 0.12
+    max_target_percent_cap: float = 0.25
+    minimum_favorable_r_multiple: float = 2.0
+    minimum_mixed_r_multiple: float = 1.2
 
 
 @dataclass(frozen=True)
@@ -38,6 +53,8 @@ class _ExtractedPattern:
     confirmed_breakout: bool
     volume_confirmed: bool
     price_structure_alignment: str
+    support_stop: float | None = None
+    resistance_stop: float | None = None
     reasons: tuple[str, ...] = ()
     selected_levels_present: bool = False
     has_actionable_support: bool = False
@@ -45,6 +62,7 @@ class _ExtractedPattern:
 
 
 def evaluate_trader_playbook(inputs: TraderPlaybookInputs) -> TraderPlaybookResponse:
+    config = TraderPlaybookConfig()
     data_gaps = _dedupe(inputs.data_gaps)
     warnings = _dedupe(inputs.warnings)
     direction = inputs.trading_bias.bias if inputs.trading_bias else "Neutral"
@@ -71,19 +89,25 @@ def evaluate_trader_playbook(inputs: TraderPlaybookInputs) -> TraderPlaybookResp
         if pattern.resistance is None:
             warnings = _with_gap(warnings, "No actionable target nearby.")
 
-    setup = _select_setup(direction=direction, pattern=pattern)
+    setup = _select_setup(direction=direction, pattern=pattern, config=config)
     levels, conditions, reasons = _build_plan(
         setup=setup,
         direction=direction,
         pattern=pattern,
+        config=config,
     )
     levels, guardrail_warnings = _enforce_level_guardrails(
         levels,
         direction=_risk_direction(setup, direction, levels),
+        config=config,
     )
     for warning in guardrail_warnings:
         warnings = _with_gap(warnings, warning)
-    risk = _risk_from_levels(levels, direction=_risk_direction(setup, direction, levels))
+    risk = _risk_from_levels(
+        levels,
+        direction=_risk_direction(setup, direction, levels),
+        config=config,
+    )
     status = _status_for_plan(
         setup=setup,
         direction=direction,
@@ -154,17 +178,22 @@ def _no_setup_response(
     )
 
 
-def _select_setup(*, direction: str, pattern: _ExtractedPattern) -> str:
+def _select_setup(
+    *,
+    direction: str,
+    pattern: _ExtractedPattern,
+    config: TraderPlaybookConfig,
+) -> str:
     if pattern.failed_breakout and direction in {"Bearish", "Neutral"}:
         return "FailedBreakout"
     if direction == "Bullish":
         if pattern.resistance is not None and pattern.close is not None:
             if pattern.close >= pattern.resistance:
                 return "BreakoutContinuation"
-            if _near(pattern.close, pattern.resistance, pct=0.03):
+            if _near(pattern.close, pattern.resistance, pct=config.breakout_proximity_pct):
                 return "BreakoutContinuation"
         if pattern.support is not None and pattern.close is not None:
-            if _near(pattern.close, pattern.support, pct=0.05):
+            if _near(pattern.close, pattern.support, pct=config.pullback_proximity_pct):
                 return "PullbackToSupport"
         if pattern.trend_bias == "uptrend":
             return "TrendContinuation"
@@ -184,6 +213,7 @@ def _build_plan(
     setup: str,
     direction: str,
     pattern: _ExtractedPattern,
+    config: TraderPlaybookConfig,
 ) -> tuple[TraderPlaybookLevels, TraderPlaybookConditions, list[str]]:
     close = pattern.close
     support = pattern.support
@@ -201,10 +231,11 @@ def _build_plan(
         entry = breakout
         stop = _nearby_stop_level(
             entry=breakout,
-            candidate=support,
+            candidate=pattern.support_stop or support,
             direction="Bullish",
-            fallback_pct=0.03,
+            fallback_pct=config.legacy_breakout_stop_pct,
             allow_fallback=not pattern.selected_levels_present,
+            config=config,
         )
         valid_if.append(f"Daily close holds above breakout level ${breakout:.2f}.")
         if stop is not None:
@@ -215,47 +246,67 @@ def _build_plan(
 
     elif setup == "PullbackToSupport" and support is not None:
         entry = support
-        stop = _below(support, 0.03)
+        stop = (
+            pattern.support_stop
+            if pattern.selected_levels_present
+            else _below(support, config.legacy_pullback_stop_pct)
+        )
         if resistance is not None:
             target1 = resistance
         valid_if.append(f"Price holds or reclaims support near ${support:.2f}.")
-        invalid_if.append(f"Setup invalidates on a close below ${stop:.2f}.")
+        if stop is not None:
+            invalid_if.append(f"Setup invalidates on a close below ${stop:.2f}.")
         reasons.append("Best daily setup is a pullback into support.")
 
     elif setup == "FailedBreakout" and resistance is not None:
         entry = resistance
-        stop = _above(resistance, 0.03)
+        stop = (
+            pattern.resistance_stop
+            if pattern.selected_levels_present
+            else _above(resistance, config.legacy_failed_breakout_stop_pct)
+        )
         if support is not None:
             target1 = support
         valid_if.append(f"Price remains below rejected resistance ${resistance:.2f}.")
-        invalid_if.append(f"Setup invalidates if price reclaims ${stop:.2f}.")
+        if stop is not None:
+            invalid_if.append(f"Setup invalidates if price reclaims ${stop:.2f}.")
         reasons.append("Pattern evidence flags a failed breakout/rejection.")
 
     elif setup == "RangeDay" and support is not None and resistance is not None:
         entry = support if close is not None and close <= (support + resistance) / 2 else resistance
         if entry == support:
-            stop = _below(support, 0.025)
+            stop = (
+                pattern.support_stop
+                if pattern.selected_levels_present
+                else _below(support, config.legacy_range_stop_pct)
+            )
             target1 = resistance
             valid_if.append(f"Range support holds near ${support:.2f}.")
-            invalid_if.append(f"Range invalidates below ${stop:.2f}.")
+            if stop is not None:
+                invalid_if.append(f"Range invalidates below ${stop:.2f}.")
         else:
-            stop = _above(resistance, 0.025)
+            stop = (
+                pattern.resistance_stop
+                if pattern.selected_levels_present
+                else _above(resistance, config.legacy_range_stop_pct)
+            )
             target1 = support
             valid_if.append(f"Range resistance rejects near ${resistance:.2f}.")
-            invalid_if.append(f"Range invalidates above ${stop:.2f}.")
+            if stop is not None:
+                invalid_if.append(f"Range invalidates above ${stop:.2f}.")
         reasons.append("Mixed evidence favors a range-bound daily plan.")
 
     elif setup == "TrendContinuation":
         if direction == "Bearish":
             entry = close or resistance
-            stop = resistance
+            stop = pattern.resistance_stop or resistance
             target1 = support
             valid_if.append("Downtrend continues below recent daily structure.")
             if stop is not None:
                 invalid_if.append(f"Bearish plan invalidates above ${stop:.2f}.")
         else:
             entry = close or support
-            stop = support
+            stop = pattern.support_stop or support
             target1 = resistance
             valid_if.append("Uptrend continues while price holds higher lows.")
             if stop is not None:
@@ -305,7 +356,12 @@ def _status_for_plan(
     return "Waiting"
 
 
-def _risk_from_levels(levels: TraderPlaybookLevels, *, direction: str) -> TraderPlaybookRisk:
+def _risk_from_levels(
+    levels: TraderPlaybookLevels,
+    *,
+    direction: str,
+    config: TraderPlaybookConfig,
+) -> TraderPlaybookRisk:
     if levels.entry is None or levels.stop is None:
         return TraderPlaybookRisk()
     target1 = levels.target1
@@ -324,9 +380,9 @@ def _risk_from_levels(levels: TraderPlaybookLevels, *, direction: str) -> Trader
     best_r = max([value for value in (r1, r2) if value is not None], default=None)
     if best_r is None:
         label = "unavailable"
-    elif best_r >= 2.0:
+    elif best_r >= config.minimum_favorable_r_multiple:
         label = "favorable"
-    elif best_r >= 1.2:
+    elif best_r >= config.minimum_mixed_r_multiple:
         label = "mixed"
     else:
         label = "poor"
@@ -360,6 +416,8 @@ def _extract_pattern(payload: dict[str, Any] | None) -> _ExtractedPattern:
             trend_bias="",
             support=None,
             resistance=None,
+            support_stop=None,
+            resistance_stop=None,
             failed_breakout=False,
             confirmed_breakout=False,
             volume_confirmed=False,
@@ -373,6 +431,8 @@ def _extract_pattern(payload: dict[str, Any] | None) -> _ExtractedPattern:
     selected_levels_present = isinstance(selected, dict) and bool(selected)
     support = None
     resistance = None
+    support_stop = None
+    resistance_stop = None
     if isinstance(selected, dict):
         support = _selected_zone_price(
             selected,
@@ -380,11 +440,23 @@ def _extract_pattern(payload: dict[str, Any] | None) -> _ExtractedPattern:
             "actionableSupport",
             kind="support",
         )
+        support_stop = _selected_zone_price(
+            selected,
+            "actionable_support",
+            "actionableSupport",
+            kind="support_stop",
+        )
         resistance = _selected_zone_price(
             selected,
             "actionable_resistance",
             "actionableResistance",
             kind="resistance",
+        )
+        resistance_stop = _selected_zone_price(
+            selected,
+            "actionable_resistance",
+            "actionableResistance",
+            kind="resistance_stop",
         )
     if not selected_levels_present:
         support = _zone_price(_get(chart, "support_zones", "supportZones") or [], "support")
@@ -412,6 +484,8 @@ def _extract_pattern(payload: dict[str, Any] | None) -> _ExtractedPattern:
         trend_bias=trend_bias.lower(),
         support=support,
         resistance=resistance,
+        support_stop=support_stop,
+        resistance_stop=resistance_stop,
         failed_breakout=failed,
         confirmed_breakout=confirmed,
         volume_confirmed=volume_confirmed,
@@ -470,6 +544,7 @@ def _enforce_level_guardrails(
     levels: TraderPlaybookLevels,
     *,
     direction: str,
+    config: TraderPlaybookConfig,
 ) -> tuple[TraderPlaybookLevels, list[str]]:
     warnings: list[str] = []
     if levels.entry is None or levels.stop is None:
@@ -478,7 +553,7 @@ def _enforce_level_guardrails(
         return _clear_trade_levels(levels), ["No usable stop level nearby."]
 
     stop_distance_pct = abs(levels.entry - levels.stop) / levels.entry
-    if stop_distance_pct > MAX_DAILY_STOP_DISTANCE_PCT:
+    if stop_distance_pct > config.max_risk_percent_cap:
         return _clear_trade_levels(levels), ["No usable stop level nearby."]
 
     updates: dict[str, float | None] = {}
@@ -488,6 +563,7 @@ def _enforce_level_guardrails(
             entry=levels.entry,
             target=value,
             direction=direction,
+            config=config,
         ):
             updates[key] = None
             warnings = _with_gap(warnings, "No usable target level nearby.")
@@ -532,23 +608,30 @@ def _nearby_stop_level(
     direction: str,
     fallback_pct: float,
     allow_fallback: bool = True,
+    config: TraderPlaybookConfig,
 ) -> float | None:
     fallback = _above(entry, fallback_pct) if direction == "Bearish" else _below(entry, fallback_pct)
     if candidate is None or candidate <= 0 or entry <= 0:
         return fallback if allow_fallback else None
     distance_pct = abs(entry - candidate) / entry
-    if distance_pct > MAX_DAILY_STOP_DISTANCE_PCT:
+    if distance_pct > config.max_risk_percent_cap:
         return fallback if allow_fallback else None
     return candidate
 
 
-def _target_is_reasonable(*, entry: float, target: float, direction: str) -> bool:
+def _target_is_reasonable(
+    *,
+    entry: float,
+    target: float,
+    direction: str,
+    config: TraderPlaybookConfig,
+) -> bool:
     if entry <= 0 or target <= 0:
         return False
     reward = _reward(entry, target, direction)
     if reward is None or reward <= 0:
         return False
-    return abs(target - entry) / entry <= MAX_DAILY_TARGET_DISTANCE_PCT
+    return abs(target - entry) / entry <= config.max_target_percent_cap
 
 
 def _below(value: float, pct: float) -> float:
@@ -571,8 +654,20 @@ def _zone_price(zones: list[Any], kind: str) -> float | None:
     zone = zones[0]
     if not isinstance(zone, dict):
         return None
-    key = ("price_high", "priceHigh") if kind == "support" else ("price_low", "priceLow")
-    value = _float(_get(zone, *key))
+    if kind == "support_stop":
+        value = _float(_get(zone, "price_low", "priceLow"))
+    elif kind == "resistance_stop":
+        value = _float(_get(zone, "price_high", "priceHigh"))
+    elif kind == "support":
+        value = _float(_get(zone, "display_level", "displayLevel"))
+        if value is None:
+            value = _float(_get(zone, "price_high", "priceHigh"))
+    else:
+        value = _float(_get(zone, "breakout_level", "breakoutLevel"))
+        if value is None:
+            value = _float(_get(zone, "display_level", "displayLevel"))
+        if value is None:
+            value = _float(_get(zone, "price_low", "priceLow"))
     if value is None:
         value = _float(_get(zone, "price", "level"))
     return _round(value)

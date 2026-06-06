@@ -12,11 +12,16 @@ from analysis.pattern_intelligence.candlestick_engine import (
 from analysis.pattern_intelligence.chart_analysis import (
     _LevelCandidate,
     _cluster_level_candidates,
+    PriceZone,
     analyze_moving_averages,
     analyze_trend_structure,
     find_support_resistance_zones,
 )
-from analysis.pattern_intelligence.chart_intelligence import build_chart_intelligence
+from analysis.pattern_intelligence.chart_intelligence import (
+    _selected_levels,
+    _zone_dict,
+    build_chart_intelligence,
+)
 from analysis.pattern_intelligence.scoring import build_pattern_scores
 from analysis.pattern_intelligence.service import build_pattern_intelligence
 from app.models.intelligence_models import ChartIntelligence
@@ -153,6 +158,41 @@ def test_chart_intelligence_selected_levels_are_additive():
         assert "levelRole" in zone
         assert "actionable_for" in zone
         assert "actionableFor" in zone
+        assert "zone_state" in zone
+        assert "zoneState" in zone
+        assert "display_level" in zone
+        assert "displayLevel" in zone
+        assert "breakout_level" in zone
+        assert "breakoutLevel" in zone
+
+
+def test_inside_resistance_uses_upper_edge_as_breakout_level():
+    zone = PriceZone(
+        price_low=464.81,
+        price_high=478.35,
+        label="Resistance: $471.58",
+        zone_type="resistance",
+        touches=2,
+        strength=0.6,
+        midpoint=471.58,
+        level_role="nearbyContext",
+        actionable_for={
+            "chartContext": True,
+            "tradeStop": False,
+            "tradeTarget": False,
+            "breakoutTrigger": False,
+        },
+        zone_state="insideZone",
+        display_level=478.35,
+        breakout_level=478.35,
+    )
+
+    payload = _zone_dict(zone)
+    selected = _selected_levels(supports=[], resistances=[payload])
+
+    assert payload["price_low"] == 464.81
+    assert selected["nearest_resistance"]["breakout_level"] == 478.35
+    assert selected["nearest_resistance"]["breakout_level"] > 466.0
 
 
 def test_generator_marks_far_historical_support_as_context_only():

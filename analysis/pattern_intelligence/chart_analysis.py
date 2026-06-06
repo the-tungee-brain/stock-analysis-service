@@ -13,6 +13,7 @@ from features.indicators import compute_indicators
 SwingKind = Literal["high", "low"]
 ZoneTimeframe = Literal["shortTerm", "intermediate", "longTerm"]
 ZoneRole = Literal["actionable", "nearbyContext", "majorHistorical"]
+ZoneState = Literal["belowPrice", "abovePrice", "insideZone", "brokenAbove", "brokenBelow"]
 ZoneSource = Literal[
     "swing",
     "movingAverage",
@@ -27,6 +28,33 @@ StructureLabel = Literal[
     "swing_high",
     "swing_low",
 ]
+
+
+@dataclass(frozen=True)
+class SupportResistanceConfig:
+    # Swing pivot window used to identify local highs/lows.
+    swing_lookback: int = 5
+    # Maximum recent swing history used for level candidates.
+    recent_swing_bars: int = 252
+    # Percent clustering fallback when ATR is unavailable or too small.
+    cluster_tolerance_pct: float = 0.012
+    # ATR-aware clustering band; prevents fixed-percent clustering from dominating.
+    cluster_atr_band: float = 0.35
+    # Zone padding keeps clustered candidates visible as bands, not hairline prices.
+    zone_pad_atr: float = 0.15
+    zone_pad_pct: float = 0.002
+    zone_cluster_pad_pct: float = 0.15
+    # Trade-mechanics gates: actionable levels must be nearby in both percent and ATR terms.
+    actionable_max_distance_pct: float = 0.08
+    actionable_max_atr_distance: float = 3.0
+    context_max_distance_pct: float = 0.14
+    context_max_atr_distance: float = 5.0
+    moving_average_context_max_distance_pct: float = 0.18
+    actionable_recent_bars: int = 65
+    short_term_bars: int = 20
+    intermediate_bars: int = 120
+    round_number_max_distance_pct: float = 0.08
+    max_zones: int = 4
 
 
 @dataclass(frozen=True)
@@ -68,6 +96,9 @@ class PriceZone:
     atr_distance: float | None = None
     level_role: ZoneRole = "nearbyContext"
     actionable_for: dict[str, bool] | None = None
+    zone_state: ZoneState = "belowPrice"
+    display_level: float | None = None
+    breakout_level: float | None = None
 
 
 @dataclass(frozen=True)
@@ -311,11 +342,18 @@ def find_support_resistance_zones(
     tolerance_pct: float = 0.012,
     max_zones: int = 4,
     recent_swing_bars: int = 252,
+    config: SupportResistanceConfig | None = None,
 ) -> tuple[list[PriceZone], list[PriceZone]]:
-    """Cluster chart levels; return supports below price and resistances above price."""
-    swings = find_swing_points(ohlcv, lookback=lookback, max_points=20)
-    if recent_swing_bars > 0 and len(ohlcv) > recent_swing_bars:
-        min_index = len(ohlcv) - recent_swing_bars
+    """Cluster chart levels into context zones and trade-mechanics candidates."""
+    cfg = config or SupportResistanceConfig(
+        swing_lookback=lookback,
+        cluster_tolerance_pct=tolerance_pct,
+        max_zones=max_zones,
+        recent_swing_bars=recent_swing_bars,
+    )
+    swings = find_swing_points(ohlcv, lookback=cfg.swing_lookback, max_points=20)
+    if cfg.recent_swing_bars > 0 and len(ohlcv) > cfg.recent_swing_bars:
+        min_index = len(ohlcv) - cfg.recent_swing_bars
         swings = [s for s in swings if s.bar_index >= min_index]
 
     close = float(ohlcv["close"].iloc[-1])
@@ -326,12 +364,12 @@ def find_support_resistance_zones(
         swings=swings,
         indicators=indicators,
         close=close,
+        config=cfg,
     )
     supports = _cluster_level_candidates(
         [candidate for candidate in candidates if candidate.zone_type == "support"],
         zone_type="support",
-        tolerance_pct=tolerance_pct,
-        max_zones=max_zones,
+        config=cfg,
         close=close,
         atr=atr,
         total_bars=len(ohlcv),
@@ -339,19 +377,15 @@ def find_support_resistance_zones(
     resistances = _cluster_level_candidates(
         [candidate for candidate in candidates if candidate.zone_type == "resistance"],
         zone_type="resistance",
-        tolerance_pct=tolerance_pct,
-        max_zones=max_zones,
+        config=cfg,
         close=close,
         atr=atr,
         total_bars=len(ohlcv),
     )
 
-    supports = [z for z in supports if z.price_high < close * 1.005]
-    resistances = [z for z in resistances if z.price_low > close * 0.995]
-
-    supports.sort(key=lambda z: close - z.price_high)
-    resistances.sort(key=lambda z: z.price_low - close)
-    return supports[:max_zones], resistances[:max_zones]
+    supports.sort(key=lambda z: _level_sort_key(z, close=close))
+    resistances.sort(key=lambda z: _level_sort_key(z, close=close))
+    return supports[: cfg.max_zones], resistances[: cfg.max_zones]
 
 
 def _level_candidates(
@@ -360,6 +394,7 @@ def _level_candidates(
     swings: list[SwingPoint],
     indicators: pd.DataFrame,
     close: float,
+    config: SupportResistanceConfig,
 ) -> list[_LevelCandidate]:
     candidates = [
         _LevelCandidate(
@@ -444,7 +479,11 @@ def _level_candidates(
         lower = np.floor(close / round_step) * round_step
         upper = np.ceil(close / round_step) * round_step
         for price, zone_type in ((lower, "support"), (upper, "resistance")):
-            if price > 0 and abs(price - close) / max(close, 1e-9) <= 0.08:
+            if (
+                price > 0
+                and abs(price - close) / max(close, 1e-9)
+                <= config.round_number_max_distance_pct
+            ):
                 candidates.append(
                     _LevelCandidate(
                         price=float(price),
@@ -466,21 +505,28 @@ def _cluster_level_candidates(
     candidates: list[_LevelCandidate],
     *,
     zone_type: Literal["support", "resistance"],
-    tolerance_pct: float,
-    max_zones: int,
+    config: SupportResistanceConfig | None = None,
     close: float,
     atr: float | None,
     total_bars: int,
+    tolerance_pct: float | None = None,
+    max_zones: int | None = None,
 ) -> list[PriceZone]:
     if not candidates:
         return []
+    cfg = config or SupportResistanceConfig(
+        cluster_tolerance_pct=tolerance_pct
+        if tolerance_pct is not None
+        else SupportResistanceConfig.cluster_tolerance_pct,
+        max_zones=max_zones if max_zones is not None else SupportResistanceConfig.max_zones,
+    )
 
     clusters: list[list[_LevelCandidate]] = []
     for candidate in sorted(candidates, key=lambda item: item.price):
         placed = False
         for cluster in clusters:
             anchor = cluster[0].price
-            tolerance = _cluster_tolerance(anchor, tolerance_pct=tolerance_pct, atr=atr)
+            tolerance = _cluster_tolerance(anchor, config=cfg, atr=atr)
             if abs(candidate.price - anchor) <= tolerance:
                 cluster.append(candidate)
                 placed = True
@@ -493,9 +539,9 @@ def _cluster_level_candidates(
         prices = [s.price for s in cluster]
         low = min(prices)
         high = max(prices)
-        pad = max((high - low) * 0.15, low * 0.002)
+        pad = max((high - low) * cfg.zone_cluster_pad_pct, low * cfg.zone_pad_pct)
         if atr is not None and atr > 0:
-            pad = max(pad, atr * 0.15)
+            pad = max(pad, atr * cfg.zone_pad_atr)
         midpoint = (low + high) / 2
         distance_pct = abs(midpoint - close) / max(close, 1e-9)
         atr_distance = abs(midpoint - close) / atr if atr and atr > 0 else None
@@ -511,18 +557,21 @@ def _cluster_level_candidates(
         touches = sum(candidate.touches for candidate in cluster)
         price_low = round(low - pad, 2)
         price_high = round(high + pad, 2)
+        zone_state = _zone_state(price_low=price_low, price_high=price_high, close=close)
         role = _level_role(
             zone_type=zone_type,
             price_low=price_low,
             price_high=price_high,
             close=close,
+            zone_state=zone_state,
             distance_pct=distance_pct,
             atr_distance=atr_distance,
             recency_bars=recency_bars,
             sources=sources,
             touches=touches,
+            config=cfg,
         )
-        timeframe = _level_timeframe(recency_bars=recency_bars, sources=sources)
+        timeframe = _level_timeframe(recency_bars=recency_bars, sources=sources, config=cfg)
         strength = _zone_strength(
             cluster=cluster,
             touches=touches,
@@ -553,6 +602,22 @@ def _cluster_level_candidates(
                     price_high=price_high,
                     midpoint=midpoint,
                     close=close,
+                    zone_state=zone_state,
+                ),
+                zone_state=zone_state,
+                display_level=_display_level(
+                    zone_type=zone_type,
+                    price_low=price_low,
+                    price_high=price_high,
+                    close=close,
+                    zone_state=zone_state,
+                ),
+                breakout_level=_breakout_level(
+                    zone_type=zone_type,
+                    price_low=price_low,
+                    price_high=price_high,
+                    close=close,
+                    zone_state=zone_state,
                 ),
             )
         )
@@ -565,12 +630,17 @@ def _cluster_level_candidates(
             -z.strength,
         )
     )
-    return zones[:max_zones]
+    return zones[: cfg.max_zones]
 
 
-def _cluster_tolerance(anchor: float, *, tolerance_pct: float, atr: float | None) -> float:
-    pct_band = abs(anchor) * tolerance_pct
-    atr_band = (atr or 0.0) * 0.35
+def _cluster_tolerance(
+    anchor: float,
+    *,
+    config: SupportResistanceConfig,
+    atr: float | None,
+) -> float:
+    pct_band = abs(anchor) * config.cluster_tolerance_pct
+    atr_band = (atr or 0.0) * config.cluster_atr_band
     return max(pct_band, atr_band)
 
 
@@ -580,17 +650,24 @@ def _level_role(
     price_low: float,
     price_high: float,
     close: float,
+    zone_state: ZoneState,
     distance_pct: float,
     atr_distance: float | None,
     recency_bars: int | None,
     sources: tuple[ZoneSource, ...],
     touches: int,
+    config: SupportResistanceConfig,
 ) -> ZoneRole:
-    recent = recency_bars is None or recency_bars <= 65
-    atr_ok = atr_distance is None or atr_distance <= 3.0
-    side_ok = price_high < close if zone_type == "support" else price_low > close
+    recent = recency_bars is None or recency_bars <= config.actionable_recent_bars
+    atr_ok = atr_distance is None or atr_distance <= config.actionable_max_atr_distance
+    side_ok = _trade_side_ok(
+        zone_type=zone_type,
+        zone_state=zone_state,
+        midpoint=(price_low + price_high) / 2,
+        close=close,
+    )
     if (
-        distance_pct <= 0.08
+        distance_pct <= config.actionable_max_distance_pct
         and atr_ok
         and recent
         and side_ok
@@ -598,12 +675,15 @@ def _level_role(
             sources=sources,
             touches=touches,
             recency_bars=recency_bars,
+            config=config,
         )
     ):
         return "actionable"
-    if distance_pct <= 0.14 or (atr_distance is not None and atr_distance <= 5.0):
+    if distance_pct <= config.context_max_distance_pct or (
+        atr_distance is not None and atr_distance <= config.context_max_atr_distance
+    ):
         return "nearbyContext"
-    if "movingAverage" in sources and distance_pct <= 0.18:
+    if "movingAverage" in sources and distance_pct <= config.moving_average_context_max_distance_pct:
         return "nearbyContext"
     return "majorHistorical"
 
@@ -613,8 +693,9 @@ def _has_actionable_structure(
     sources: tuple[ZoneSource, ...],
     touches: int,
     recency_bars: int | None,
+    config: SupportResistanceConfig,
 ) -> bool:
-    recent = recency_bars is not None and recency_bars <= 65
+    recent = recency_bars is not None and recency_bars <= config.actionable_recent_bars
     structural_sources = set(sources) - {"movingAverage", "roundNumber"}
     if touches >= 2 and recent and structural_sources:
         return True
@@ -629,12 +710,17 @@ def _level_timeframe(
     *,
     recency_bars: int | None,
     sources: tuple[ZoneSource, ...],
+    config: SupportResistanceConfig,
 ) -> ZoneTimeframe:
-    if recency_bars is not None and recency_bars <= 20:
+    if recency_bars is not None and recency_bars <= config.short_term_bars:
         return "shortTerm"
-    if "movingAverage" in sources and recency_bars is not None and recency_bars <= 65:
+    if (
+        "movingAverage" in sources
+        and recency_bars is not None
+        and recency_bars <= config.actionable_recent_bars
+    ):
         return "shortTerm"
-    if recency_bars is None or recency_bars <= 120:
+    if recency_bars is None or recency_bars <= config.intermediate_bars:
         return "intermediate"
     return "longTerm"
 
@@ -663,16 +749,100 @@ def _actionable_for(
     price_high: float,
     midpoint: float,
     close: float,
+    zone_state: ZoneState,
 ) -> dict[str, bool]:
     actionable = role == "actionable"
-    support_tradeable = actionable and zone_type == "support" and price_high < close and midpoint < close
-    resistance_tradeable = actionable and zone_type == "resistance" and price_low > close and midpoint > close
+    support_tradeable = actionable and zone_type == "support" and (
+        (zone_state == "belowPrice" and price_high < close and midpoint < close)
+        or (zone_state == "insideZone" and price_low < close)
+    )
+    resistance_tradeable = actionable and zone_type == "resistance" and (
+        (zone_state == "abovePrice" and price_low > close and midpoint > close)
+        or (zone_state == "insideZone" and price_high > close)
+    )
     return {
         "chartContext": True,
         "tradeStop": support_tradeable,
         "tradeTarget": resistance_tradeable,
         "breakoutTrigger": resistance_tradeable,
     }
+
+
+def _zone_state(*, price_low: float, price_high: float, close: float) -> ZoneState:
+    if close > price_high:
+        return "belowPrice"
+    if close < price_low:
+        return "abovePrice"
+    return "insideZone"
+
+
+def _trade_side_ok(
+    *,
+    zone_type: Literal["support", "resistance"],
+    zone_state: ZoneState,
+    midpoint: float,
+    close: float,
+) -> bool:
+    if zone_type == "support":
+        return zone_state == "belowPrice" or (
+            zone_state == "insideZone" and midpoint < close
+        )
+    return zone_state == "abovePrice" or (
+        zone_state == "insideZone" and midpoint > close
+    )
+
+
+def _display_level(
+    *,
+    zone_type: Literal["support", "resistance"],
+    price_low: float,
+    price_high: float,
+    close: float,
+    zone_state: ZoneState,
+) -> float | None:
+    if zone_type == "support":
+        if zone_state == "belowPrice":
+            return price_high
+        if zone_state == "insideZone" and price_low < close:
+            return price_low
+        return None
+    if zone_state == "abovePrice":
+        return price_low
+    if zone_state == "insideZone" and price_high > close:
+        return price_high
+    return None
+
+
+def _breakout_level(
+    *,
+    zone_type: Literal["support", "resistance"],
+    price_low: float,
+    price_high: float,
+    close: float,
+    zone_state: ZoneState,
+) -> float | None:
+    if zone_type != "resistance":
+        return None
+    if zone_state == "abovePrice":
+        return price_low
+    if zone_state == "insideZone" and price_high > close:
+        return price_high
+    return None
+
+
+def _level_sort_key(zone: PriceZone, *, close: float) -> tuple[int, float, float]:
+    state_rank = {
+        "insideZone": 0,
+        "belowPrice": 0,
+        "abovePrice": 0,
+        "brokenAbove": 1,
+        "brokenBelow": 1,
+    }.get(zone.zone_state, 1)
+    return (
+        state_rank,
+        abs((zone.midpoint or close) - close),
+        -zone.strength,
+    )
 
 
 def _latest_atr(ohlcv: pd.DataFrame, *, indicators: pd.DataFrame) -> float | None:

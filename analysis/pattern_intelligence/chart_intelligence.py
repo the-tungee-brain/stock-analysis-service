@@ -220,6 +220,12 @@ def _zone_dict(zone) -> dict[str, Any]:
         "atrDistance": zone.atr_distance,
         "level_role": zone.level_role,
         "levelRole": zone.level_role,
+        "zone_state": zone.zone_state,
+        "zoneState": zone.zone_state,
+        "display_level": zone.display_level,
+        "displayLevel": zone.display_level,
+        "breakout_level": zone.breakout_level,
+        "breakoutLevel": zone.breakout_level,
         "actionable_for": actionable_for,
         "actionableFor": actionable_for,
     }
@@ -230,8 +236,8 @@ def _selected_levels(
     supports: list[dict[str, Any]],
     resistances: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    nearest_support = _first_level(supports)
-    nearest_resistance = _first_level(resistances)
+    nearest_support = _first_level(supports, allowed_states={"belowPrice", "insideZone"})
+    nearest_resistance = _first_level(resistances, allowed_states={"abovePrice", "insideZone"})
     actionable_support = _first_level(
         supports,
         role="actionable",
@@ -265,9 +271,12 @@ def _first_level(
     *,
     role: str | None = None,
     actionable_key: str | None = None,
+    allowed_states: set[str] | None = None,
 ) -> dict[str, Any] | None:
     for level in levels:
         if role is not None and level.get("level_role") != role:
+            continue
+        if allowed_states is not None and level.get("zone_state") not in allowed_states:
             continue
         if actionable_key is not None:
             actionable_for = level.get("actionable_for") or {}
