@@ -148,6 +148,40 @@ def test_missing_market_bars_does_not_fail():
     assert result.alignment.market == "mixed"
 
 
+def test_stale_intraday_bars_return_inactive_neutral_read():
+    result = evaluate_intraday_trading_bias(
+        IntradayTradingBiasInputs(
+            symbol="AAPL",
+            bars=_bullish_bars(),
+            market_bars=_bullish_bars(),
+            now=datetime(2026, 6, 5, 16, 42, tzinfo=ET),
+        )
+    )
+
+    assert result.bias == "Neutral"
+    assert result.confidence == "Low"
+    assert result.setup_type == "None"
+    assert result.action == "Watch"
+    assert any("stale" in item.lower() for item in result.data_gaps)
+    assert any("inactive" in item.lower() for item in result.warnings)
+
+
+def test_after_market_close_returns_previous_session_neutral_read():
+    result = evaluate_intraday_trading_bias(
+        IntradayTradingBiasInputs(
+            symbol="AAPL",
+            bars=_bullish_bars(),
+            market_bars=_bullish_bars(),
+            now=datetime(2026, 6, 5, 16, 5, tzinfo=ET),
+        )
+    )
+
+    assert result.bias == "Neutral"
+    assert result.confidence == "Low"
+    assert result.setup_type == "None"
+    assert "Intraday read is stale or outside market hours" in result.data_gaps
+
+
 def test_response_shape_uses_stable_aliases():
     result = evaluate_intraday_trading_bias(
         IntradayTradingBiasInputs(

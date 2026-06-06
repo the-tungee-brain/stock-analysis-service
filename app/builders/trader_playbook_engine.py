@@ -13,6 +13,9 @@ from app.models.trader_playbook_models import (
 )
 from app.models.trading_bias_models import TradingBiasResponse
 
+MAX_DAILY_STOP_DISTANCE_PCT = 0.12
+MAX_DAILY_TARGET_DISTANCE_PCT = 0.25
+
 
 @dataclass(frozen=True)
 class TraderPlaybookInputs:
@@ -66,7 +69,12 @@ def evaluate_trader_playbook(inputs: TraderPlaybookInputs) -> TraderPlaybookResp
         direction=direction,
         pattern=pattern,
     )
-    levels = _enforce_level_guardrails(levels)
+    levels, guardrail_warnings = _enforce_level_guardrails(
+        levels,
+        direction=_risk_direction(setup, direction, levels),
+    )
+    for warning in guardrail_warnings:
+        warnings = _with_gap(warnings, warning)
     risk = _risk_from_levels(levels, direction=_risk_direction(setup, direction, levels))
     status = _status_for_plan(
         setup=setup,
@@ -89,6 +97,10 @@ def evaluate_trader_playbook(inputs: TraderPlaybookInputs) -> TraderPlaybookResp
                 warnings,
                 "No complete entry/stop plan is available from daily levels.",
             )
+    if levels.entry is not None and levels.stop is not None and levels.target1 is None:
+        if status == "Valid":
+            status = "Waiting"
+        warnings = _with_gap(warnings, "No usable target level nearby.")
 
     return TraderPlaybookResponse(
         direction=direction,
@@ -177,9 +189,12 @@ def _build_plan(
 
     if setup == "BreakoutContinuation" and breakout is not None:
         entry = breakout
-        stop = support if support is not None else _below(breakout, 0.03)
-        target1 = _target_from_r(entry, stop, direction="Bullish", r=2.0)
-        target2 = _target_from_r(entry, stop, direction="Bullish", r=3.0)
+        stop = _nearby_stop_level(
+            entry=breakout,
+            candidate=support,
+            direction="Bullish",
+            fallback_pct=0.03,
+        )
         valid_if.append(f"Daily close holds above breakout level ${breakout:.2f}.")
         invalid_if.append(f"Setup invalidates on a close back below ${stop:.2f}.")
         reasons.append("Best daily setup is a breakout continuation.")
@@ -191,9 +206,6 @@ def _build_plan(
         stop = _below(support, 0.03)
         if resistance is not None:
             target1 = resistance
-        else:
-            target1 = _target_from_r(entry, stop, direction="Bullish", r=2.0)
-            target2 = _target_from_r(entry, stop, direction="Bullish", r=3.0)
         valid_if.append(f"Price holds or reclaims support near ${support:.2f}.")
         invalid_if.append(f"Setup invalidates on a close below ${stop:.2f}.")
         reasons.append("Best daily setup is a pullback into support.")
@@ -203,9 +215,6 @@ def _build_plan(
         stop = _above(resistance, 0.03)
         if support is not None:
             target1 = support
-        else:
-            target1 = _target_from_r(entry, stop, direction="Bearish", r=2.0)
-            target2 = _target_from_r(entry, stop, direction="Bearish", r=3.0)
         valid_if.append(f"Price remains below rejected resistance ${resistance:.2f}.")
         invalid_if.append(f"Setup invalidates if price reclaims ${stop:.2f}.")
         reasons.append("Pattern evidence flags a failed breakout/rejection.")
@@ -229,8 +238,6 @@ def _build_plan(
             entry = close or resistance
             stop = resistance
             target1 = support
-            if entry is not None and stop is not None and target1 is None:
-                target2 = _target_from_r(entry, stop, direction="Bearish", r=2.0)
             valid_if.append("Downtrend continues below recent daily structure.")
             if stop is not None:
                 invalid_if.append(f"Bearish plan invalidates above ${stop:.2f}.")
@@ -238,8 +245,6 @@ def _build_plan(
             entry = close or support
             stop = support
             target1 = resistance
-            if entry is not None and stop is not None and target1 is None:
-                target2 = _target_from_r(entry, stop, direction="Bullish", r=2.0)
             valid_if.append("Uptrend continues while price holds higher lows.")
             if stop is not None:
                 invalid_if.append(f"Bullish plan invalidates below ${stop:.2f}.")
@@ -428,10 +433,51 @@ def _price_structure_alignment(trend_bias: str, payload: dict[str, Any]) -> str:
     return "mixed"
 
 
-def _enforce_level_guardrails(levels: TraderPlaybookLevels) -> TraderPlaybookLevels:
+def _enforce_level_guardrails(
+    levels: TraderPlaybookLevels,
+    *,
+    direction: str,
+) -> tuple[TraderPlaybookLevels, list[str]]:
+    warnings: list[str] = []
     if levels.entry is None or levels.stop is None:
-        return levels.model_copy(update={"target1": None, "target2": None})
-    return levels
+        return levels.model_copy(update={"target1": None, "target2": None}), warnings
+    if levels.entry <= 0 or levels.stop <= 0:
+        return _clear_trade_levels(levels), ["No usable stop level nearby."]
+
+    stop_distance_pct = abs(levels.entry - levels.stop) / levels.entry
+    if stop_distance_pct > MAX_DAILY_STOP_DISTANCE_PCT:
+        return _clear_trade_levels(levels), ["No usable stop level nearby."]
+
+    updates: dict[str, float | None] = {}
+    for key in ("target1", "target2"):
+        value = getattr(levels, key)
+        if value is not None and not _target_is_reasonable(
+            entry=levels.entry,
+            target=value,
+            direction=direction,
+        ):
+            updates[key] = None
+            warnings = _with_gap(warnings, "No usable target level nearby.")
+
+    target1 = updates.get("target1", levels.target1)
+    target2 = updates.get("target2", levels.target2)
+    if target1 is None:
+        target2 = None
+        if levels.target1 is not None:
+            warnings = _with_gap(warnings, "No usable target level nearby.")
+
+    return levels.model_copy(update={**updates, "target2": target2}), warnings
+
+
+def _clear_trade_levels(levels: TraderPlaybookLevels) -> TraderPlaybookLevels:
+    return levels.model_copy(
+        update={
+            "entry": None,
+            "stop": None,
+            "target1": None,
+            "target2": None,
+        }
+    )
 
 
 def _reward(entry: float, target: float | None, direction: str) -> float | None:
@@ -444,6 +490,31 @@ def _reward(entry: float, target: float | None, direction: str) -> float | None:
 def _target_from_r(entry: float, stop: float, *, direction: str, r: float) -> float:
     risk = abs(entry - stop)
     return entry - risk * r if direction == "Bearish" else entry + risk * r
+
+
+def _nearby_stop_level(
+    *,
+    entry: float,
+    candidate: float | None,
+    direction: str,
+    fallback_pct: float,
+) -> float:
+    fallback = _above(entry, fallback_pct) if direction == "Bearish" else _below(entry, fallback_pct)
+    if candidate is None or candidate <= 0 or entry <= 0:
+        return fallback
+    distance_pct = abs(entry - candidate) / entry
+    if distance_pct > MAX_DAILY_STOP_DISTANCE_PCT:
+        return fallback
+    return candidate
+
+
+def _target_is_reasonable(*, entry: float, target: float, direction: str) -> bool:
+    if entry <= 0 or target <= 0:
+        return False
+    reward = _reward(entry, target, direction)
+    if reward is None or reward <= 0:
+        return False
+    return abs(target - entry) / entry <= MAX_DAILY_TARGET_DISTANCE_PCT
 
 
 def _below(value: float, pct: float) -> float:

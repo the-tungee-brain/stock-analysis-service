@@ -93,20 +93,21 @@ def test_bullish_breakout_not_crossed_returns_waiting_with_valid_condition():
     assert any("above breakout level $105.00" in item for item in result.conditions.valid_if)
 
 
-def test_bullish_crossed_breakout_favorable_rr_returns_valid():
+def test_bullish_pullback_with_favorable_rr_returns_valid():
     result = evaluate_trader_playbook(
         TraderPlaybookInputs(
             symbol="AAPL",
             trading_bias=_bias("Bullish"),
             trade_decision=_decision("ENTER"),
-            pattern_intelligence=_payload(close=106, support=100, resistance=105),
+            pattern_intelligence=_payload(close=100, support=100, resistance=108),
         )
     )
 
-    assert result.best_setup == "BreakoutContinuation"
+    assert result.best_setup == "PullbackToSupport"
     assert result.status == "Valid"
     assert result.risk.risk_reward_label == "favorable"
-    assert result.risk.r_multiple_target1 == 2
+    assert result.risk.r_multiple_target1 is not None
+    assert result.levels.target2 is None
 
 
 def test_bullish_poor_rr_demotes_to_waiting_with_warning():
@@ -177,6 +178,51 @@ def test_no_entry_without_stop_and_no_target_without_entry_stop():
     if result.levels.entry is None or result.levels.stop is None:
         assert result.levels.target1 is None
         assert result.levels.target2 is None
+
+
+def test_far_stop_distance_rejects_active_plan_with_warning():
+    result = evaluate_trader_playbook(
+        TraderPlaybookInputs(
+            symbol="AAPL",
+            trading_bias=_bias("Bullish"),
+            trade_decision=_decision("ENTER"),
+            pattern_intelligence=_payload(
+                close=523,
+                support=200,
+                resistance=900,
+                trend_bias="uptrend",
+            ),
+        )
+    )
+
+    assert result.status in {"NoSetup", "Waiting"}
+    assert result.status != "Valid"
+    assert result.levels.entry is None
+    assert result.levels.stop is None
+    assert result.levels.target1 is None
+    assert result.levels.target2 is None
+    assert result.risk.risk_reward_label == "unavailable"
+    assert "No usable stop level nearby." in result.warnings
+
+
+def test_absurd_target_rejects_risk_reward():
+    result = evaluate_trader_playbook(
+        TraderPlaybookInputs(
+            symbol="AAPL",
+            trading_bias=_bias("Bullish"),
+            trade_decision=_decision("ENTER"),
+            pattern_intelligence=_payload(close=100, support=100, resistance=140),
+        )
+    )
+
+    assert result.best_setup == "PullbackToSupport"
+    assert result.status != "Valid"
+    assert result.levels.entry == 100
+    assert result.levels.stop == 97
+    assert result.levels.target1 is None
+    assert result.levels.target2 is None
+    assert result.risk.risk_reward_label == "unavailable"
+    assert "No usable target level nearby." in result.warnings
 
 
 def test_response_shape_stable():

@@ -15,6 +15,7 @@ MARKET_OPEN = time(9, 30)
 OPENING_RANGE_END = time(10, 0)
 MARKET_CLOSE = time(16, 0)
 STALE_WARNING_SECONDS = 15 * 60
+STALE_INACTIVE_SECONDS = 60 * 60
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,15 @@ def evaluate_intraday_trading_bias(
         warnings = _with_gap(
             warnings,
             f"Latest yfinance bar is stale by {round(staleness / 60)} minutes.",
+        )
+
+    if _is_inactive_intraday_read(staleness=staleness, now=inputs.now):
+        reason = "Intraday read is inactive because market is closed or bars are stale."
+        return _neutral_response(
+            data_gaps=_with_gap(data_gaps, "Intraday read is stale or outside market hours"),
+            warnings=_with_gap(warnings, reason),
+            last_updated=last_updated,
+            staleness_seconds=staleness,
         )
 
     premarket = [bar for bar in bars if bar.session == "premarket"]
@@ -496,6 +506,22 @@ def _local_time(timestamp: datetime) -> time:
     if timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=timezone.utc)
     return timestamp.astimezone(EASTERN).time()
+
+
+def _is_inactive_intraday_read(
+    *,
+    staleness: int | None,
+    now: datetime | None,
+) -> bool:
+    if staleness is not None and staleness > STALE_INACTIVE_SECONDS:
+        return True
+    now_value = now or datetime.now(timezone.utc)
+    if now_value.tzinfo is None:
+        now_value = now_value.replace(tzinfo=timezone.utc)
+    local_now = now_value.astimezone(EASTERN)
+    if local_now.weekday() >= 5:
+        return True
+    return not (MARKET_OPEN <= local_now.time() < MARKET_CLOSE)
 
 
 def _max_high(bars: list[IntradayBar]) -> float | None:
