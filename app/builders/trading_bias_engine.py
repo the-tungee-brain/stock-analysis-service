@@ -398,12 +398,34 @@ def _catalyst_component(events: list[Any]) -> _Component:
 
 def _extract_levels(payload: dict[str, Any], *, bias: str) -> TradingBiasLevels:
     chart = _get(payload, "chart_intelligence", "chartIntelligence") or {}
+    selected = _get(chart, "selected_levels", "selectedLevels") or {}
     supports = _get(chart, "support_zones", "supportZones") or []
     resistances = _get(chart, "resistance_zones", "resistanceZones") or []
-    support = _zone_price(supports, "support")
-    resistance = _zone_price(resistances, "resistance")
+    support = _selected_zone_price(selected, "nearest_support", "nearestSupport", kind="support")
+    if support is None:
+        support = _zone_price(supports, "support")
+    resistance = _selected_zone_price(
+        selected,
+        "nearest_resistance",
+        "nearestResistance",
+        kind="resistance",
+    )
+    if resistance is None:
+        resistance = _zone_price(resistances, "resistance")
+    actionable_support = _selected_zone_price(
+        selected,
+        "actionable_support",
+        "actionableSupport",
+        kind="support",
+    )
+    actionable_resistance = _selected_zone_price(
+        selected,
+        "actionable_resistance",
+        "actionableResistance",
+        kind="resistance",
+    )
     breakout = resistance
-    stop_invalid = support if bias != "Bearish" else resistance
+    stop_invalid = actionable_support if bias != "Bearish" else actionable_resistance
     return TradingBiasLevels(
         support=support,
         resistance=resistance,
@@ -516,6 +538,19 @@ def _zone_price(zones: list[Any], kind: str) -> float | None:
     if value is None:
         value = _float(_get(zone, "price", "level"))
     return round(value, 2) if value is not None else None
+
+
+def _selected_zone_price(
+    selected: dict[str, Any],
+    snake_key: str,
+    camel_key: str,
+    *,
+    kind: str,
+) -> float | None:
+    zone = _get(selected, snake_key, camel_key)
+    if not isinstance(zone, dict):
+        return None
+    return _zone_price([zone], kind)
 
 
 def _top_factors(items: tuple[str, ...]) -> list[str]:

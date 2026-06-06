@@ -10,6 +10,8 @@ from analysis.pattern_intelligence.candlestick_engine import (
     scan_candlestick_patterns,
 )
 from analysis.pattern_intelligence.chart_analysis import (
+    _LevelCandidate,
+    _cluster_level_candidates,
     analyze_moving_averages,
     analyze_trend_structure,
     find_support_resistance_zones,
@@ -17,6 +19,7 @@ from analysis.pattern_intelligence.chart_analysis import (
 from analysis.pattern_intelligence.chart_intelligence import build_chart_intelligence
 from analysis.pattern_intelligence.scoring import build_pattern_scores
 from analysis.pattern_intelligence.service import build_pattern_intelligence
+from app.models.intelligence_models import ChartIntelligence
 from tests.conftest import seed_pattern_benchmarks
 from tests.test_pattern_intelligence import build_trend_context_from_frame
 from tests.test_pattern_train_and_save import _synthetic_ohlcv
@@ -74,6 +77,7 @@ def test_chart_intelligence_payload_shape():
     assert "trendlines" in payload
     assert "support_zones" in payload
     assert "resistance_zones" in payload
+    assert "selected_levels" in payload
     assert "annotations" in payload
     assert "highlighted_candles" in payload
     assert "pattern_metadata" in payload
@@ -81,6 +85,227 @@ def test_chart_intelligence_payload_shape():
     assert payload["summary"]["thesis"]
     assert "scorecard" not in payload
     assert "narrative" not in payload
+
+
+def test_support_resistance_zones_include_metadata_and_sources():
+    ohlcv = _synthetic_ohlcv(rows=400)
+    supports, resistances = find_support_resistance_zones(ohlcv)
+    zones = supports + resistances
+    assert zones
+    assert any("priorHighLow" in zone.sources for zone in zones)
+    assert any("movingAverage" in zone.sources for zone in zones)
+    for zone in zones:
+        assert zone.midpoint is not None
+        assert zone.timeframe in {"shortTerm", "intermediate", "longTerm"}
+        assert zone.level_role in {
+            "actionable",
+            "nearbyContext",
+            "majorHistorical",
+        }
+        assert zone.actionable_for is not None
+        assert zone.actionable_for["chartContext"] is True
+
+
+def test_chart_intelligence_selected_levels_are_additive():
+    ohlcv = _synthetic_ohlcv(rows=400)
+    as_of = pd.Timestamp(ohlcv.index[-1])
+    scan = scan_candlestick_patterns(ohlcv)
+    active = active_patterns_on_date(scan, as_of)
+    primary = active[0] if active else None
+    context = build_trend_context_from_frame(ohlcv)
+    scores = build_pattern_scores(pattern=primary, context=context)
+
+    payload = build_chart_intelligence(
+        symbol="MSFT",
+        ohlcv=ohlcv,
+        pattern=primary,
+        active_patterns=active,
+        context=context,
+        scores=scores,
+        model_prediction=1,
+        ranking_score=0.62,
+    )
+
+    selected = payload["selected_levels"]
+    assert {
+        "nearest_support",
+        "nearestSupport",
+        "nearest_resistance",
+        "nearestResistance",
+        "actionable_support",
+        "actionableSupport",
+        "actionable_resistance",
+        "actionableResistance",
+        "major_support",
+        "majorSupport",
+        "major_resistance",
+        "majorResistance",
+    }.issubset(set(selected))
+    for zone in payload["support_zones"] + payload["resistance_zones"]:
+        assert "price_low" in zone
+        assert "price_high" in zone
+        assert "priceLow" in zone
+        assert "priceHigh" in zone
+        assert "strength" in zone
+        assert "touches" in zone
+        assert "type" in zone
+        assert "level_role" in zone
+        assert "levelRole" in zone
+        assert "actionable_for" in zone
+        assert "actionableFor" in zone
+
+
+def test_generator_marks_far_historical_support_as_context_only():
+    index = pd.date_range("2024-01-01", periods=260, freq="B")
+    close = np.linspace(205.0, 500.0, len(index))
+    low = close - 4.0
+    high = close + 4.0
+    low[20] = 198.0
+    close[20] = 202.0
+    high[20] = 206.0
+    ohlcv = pd.DataFrame(
+        {
+            "open": close - 1.0,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": np.full(len(index), 1_000_000.0),
+        },
+        index=index,
+    )
+
+    supports, _ = find_support_resistance_zones(
+        ohlcv,
+        max_zones=10,
+        recent_swing_bars=0,
+    )
+    historical = [zone for zone in supports if zone.midpoint and zone.midpoint < 225]
+
+    assert historical
+    assert all(zone.level_role == "majorHistorical" for zone in historical)
+    assert all(not (zone.actionable_for or {}).get("tradeStop") for zone in historical)
+
+
+def test_round_number_only_level_is_not_actionable():
+    supports = _cluster_level_candidates(
+        [
+            _LevelCandidate(
+                price=500.0,
+                zone_type="support",
+                source="roundNumber",
+                bar_index=99,
+            )
+        ],
+        zone_type="support",
+        tolerance_pct=0.012,
+        max_zones=4,
+        close=503.0,
+        atr=2.0,
+        total_bars=100,
+    )
+
+    assert supports
+    assert supports[0].level_role != "actionable"
+    assert supports[0].actionable_for is not None
+    assert supports[0].actionable_for["tradeStop"] is False
+
+    ma_round_cluster = _cluster_level_candidates(
+        [
+            _LevelCandidate(
+                price=500.0,
+                zone_type="support",
+                source="roundNumber",
+                bar_index=99,
+            ),
+            _LevelCandidate(
+                price=500.5,
+                zone_type="support",
+                source="movingAverage",
+                bar_index=99,
+            ),
+        ],
+        zone_type="support",
+        tolerance_pct=0.012,
+        max_zones=4,
+        close=503.0,
+        atr=2.0,
+        total_bars=100,
+    )
+
+    assert ma_round_cluster
+    assert ma_round_cluster[0].level_role != "actionable"
+    assert ma_round_cluster[0].actionable_for is not None
+    assert ma_round_cluster[0].actionable_for["tradeStop"] is False
+
+
+def test_actionable_support_and_resistance_must_respect_side():
+    supports = _cluster_level_candidates(
+        [
+            _LevelCandidate(
+                price=501.0,
+                zone_type="support",
+                source="swing",
+                bar_index=98,
+                touches=2,
+            )
+        ],
+        zone_type="support",
+        tolerance_pct=0.012,
+        max_zones=4,
+        close=500.0,
+        atr=2.0,
+        total_bars=100,
+    )
+    resistances = _cluster_level_candidates(
+        [
+            _LevelCandidate(
+                price=499.0,
+                zone_type="resistance",
+                source="swing",
+                bar_index=98,
+                touches=2,
+            )
+        ],
+        zone_type="resistance",
+        tolerance_pct=0.012,
+        max_zones=4,
+        close=500.0,
+        atr=2.0,
+        total_bars=100,
+    )
+
+    assert supports[0].level_role != "actionable"
+    assert supports[0].actionable_for is not None
+    assert supports[0].actionable_for["tradeStop"] is False
+    assert resistances[0].level_role != "actionable"
+    assert resistances[0].actionable_for is not None
+    assert resistances[0].actionable_for["tradeTarget"] is False
+    assert resistances[0].actionable_for["breakoutTrigger"] is False
+
+
+def test_chart_intelligence_selected_levels_null_decodes():
+    ohlcv = _synthetic_ohlcv(rows=400)
+    as_of = pd.Timestamp(ohlcv.index[-1])
+    scan = scan_candlestick_patterns(ohlcv)
+    active = active_patterns_on_date(scan, as_of)
+    primary = active[0] if active else None
+    context = build_trend_context_from_frame(ohlcv)
+    scores = build_pattern_scores(pattern=primary, context=context)
+    payload = build_chart_intelligence(
+        symbol="MSFT",
+        ohlcv=ohlcv,
+        pattern=primary,
+        active_patterns=active,
+        context=context,
+        scores=scores,
+        model_prediction=1,
+        ranking_score=0.62,
+    )
+    payload["selected_levels"] = None
+
+    decoded = ChartIntelligence(**payload)
+
+    assert decoded.selected_levels is None
 
 
 def test_chart_intelligence_includes_breakout_and_fib_channel_keys():

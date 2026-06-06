@@ -436,10 +436,10 @@ def _invalidation_for_bias(
     high_of_day: float | None,
 ) -> float | None:
     if bias == "Bullish":
-        return _first_not_none(open_range_low, vwap, support, low_of_day)
+        return _first_not_none(open_range_low, vwap, low_of_day)
     if bias == "Bearish":
-        return _first_not_none(open_range_high, vwap, resistance, high_of_day)
-    return _first_not_none(vwap, support, resistance)
+        return _first_not_none(open_range_high, vwap, high_of_day)
+    return vwap
 
 
 def _level_reason(

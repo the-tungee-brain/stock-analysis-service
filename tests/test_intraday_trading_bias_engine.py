@@ -148,6 +148,22 @@ def test_missing_market_bars_does_not_fail():
     assert result.alignment.market == "mixed"
 
 
+def test_daily_support_is_context_not_intraday_invalidation():
+    result = evaluate_intraday_trading_bias(
+        IntradayTradingBiasInputs(
+            symbol="AAPL",
+            bars=_bullish_bars(),
+            market_bars=_bullish_bars(),
+            support=50,
+            resistance=150,
+            now=datetime(2026, 6, 5, 10, 15, tzinfo=ET),
+        )
+    )
+
+    assert result.levels.support == 50
+    assert result.levels.invalidation != 50
+
+
 def test_stale_intraday_bars_return_inactive_neutral_read():
     result = evaluate_intraday_trading_bias(
         IntradayTradingBiasInputs(

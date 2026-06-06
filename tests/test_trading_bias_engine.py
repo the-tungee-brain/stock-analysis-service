@@ -174,6 +174,55 @@ def test_missing_pattern_analysis_returns_neutral_low_with_data_gap():
     assert result.data_gaps == ["Pattern analysis unavailable"]
 
 
+def test_far_historical_support_is_context_not_stop_invalidation():
+    payload = _payload()
+    payload["trend_context"]["close"] = 500
+    payload["chart_intelligence"]["selected_levels"] = {
+        "nearest_support": {
+            "price_low": 198,
+            "price_high": 200,
+            "level_role": "majorHistorical",
+            "actionable_for": {
+                "chartContext": True,
+                "tradeStop": False,
+                "tradeTarget": False,
+                "breakoutTrigger": False,
+            },
+        },
+        "nearest_resistance": {
+            "price_low": 525,
+            "price_high": 528,
+            "level_role": "nearbyContext",
+            "actionable_for": {
+                "chartContext": True,
+                "tradeStop": False,
+                "tradeTarget": False,
+                "breakoutTrigger": False,
+            },
+        },
+        "actionable_support": None,
+        "actionable_resistance": None,
+        "major_support": {
+            "price_low": 198,
+            "price_high": 200,
+            "level_role": "majorHistorical",
+        },
+        "major_resistance": None,
+    }
+
+    result = evaluate_trading_bias(
+        TradingBiasInputs(
+            symbol="AMD",
+            pattern_intelligence=payload,
+            regime_id=REGIME_RISK_ON_TREND,
+        )
+    )
+
+    assert result.levels.support == 200
+    assert result.levels.resistance == 525
+    assert result.levels.stop_invalid_level is None
+
+
 def test_response_shape_uses_stable_aliases():
     result = evaluate_trading_bias(
         TradingBiasInputs(

@@ -39,6 +39,9 @@ class _ExtractedPattern:
     volume_confirmed: bool
     price_structure_alignment: str
     reasons: tuple[str, ...] = ()
+    selected_levels_present: bool = False
+    has_actionable_support: bool = False
+    has_actionable_resistance: bool = False
 
 
 def evaluate_trader_playbook(inputs: TraderPlaybookInputs) -> TraderPlaybookResponse:
@@ -62,6 +65,11 @@ def evaluate_trader_playbook(inputs: TraderPlaybookInputs) -> TraderPlaybookResp
             alignment=_alignment(inputs, pattern),
             reasons=[],
         )
+    if pattern.selected_levels_present:
+        if pattern.support is None:
+            warnings = _with_gap(warnings, "No actionable support nearby.")
+        if pattern.resistance is None:
+            warnings = _with_gap(warnings, "No actionable target nearby.")
 
     setup = _select_setup(direction=direction, pattern=pattern)
     levels, conditions, reasons = _build_plan(
@@ -91,6 +99,8 @@ def evaluate_trader_playbook(inputs: TraderPlaybookInputs) -> TraderPlaybookResp
     if setup == "None":
         status = "NoSetup"
     if levels.entry is None or levels.stop is None:
+        levels = _clear_trade_levels(levels)
+        risk = TraderPlaybookRisk()
         status = "NoSetup" if setup == "None" else "Waiting"
         if setup != "None":
             warnings = _with_gap(
@@ -194,9 +204,11 @@ def _build_plan(
             candidate=support,
             direction="Bullish",
             fallback_pct=0.03,
+            allow_fallback=not pattern.selected_levels_present,
         )
         valid_if.append(f"Daily close holds above breakout level ${breakout:.2f}.")
-        invalid_if.append(f"Setup invalidates on a close back below ${stop:.2f}.")
+        if stop is not None:
+            invalid_if.append(f"Setup invalidates on a close back below ${stop:.2f}.")
         reasons.append("Best daily setup is a breakout continuation.")
         if close is not None and close < breakout:
             reasons.append("Breakout trigger has not crossed yet.")
@@ -357,11 +369,29 @@ def _extract_pattern(payload: dict[str, Any] | None) -> _ExtractedPattern:
     trend = _get(payload, "trend_context", "trendContext") or {}
     scores = _get(payload, "scores") or {}
     chart = _get(payload, "chart_intelligence", "chartIntelligence") or {}
-    support = _zone_price(_get(chart, "support_zones", "supportZones") or [], "support")
-    resistance = _zone_price(
-        _get(chart, "resistance_zones", "resistanceZones") or [],
-        "resistance",
-    )
+    selected = _get(chart, "selected_levels", "selectedLevels")
+    selected_levels_present = isinstance(selected, dict) and bool(selected)
+    support = None
+    resistance = None
+    if isinstance(selected, dict):
+        support = _selected_zone_price(
+            selected,
+            "actionable_support",
+            "actionableSupport",
+            kind="support",
+        )
+        resistance = _selected_zone_price(
+            selected,
+            "actionable_resistance",
+            "actionableResistance",
+            kind="resistance",
+        )
+    if not selected_levels_present:
+        support = _zone_price(_get(chart, "support_zones", "supportZones") or [], "support")
+        resistance = _zone_price(
+            _get(chart, "resistance_zones", "resistanceZones") or [],
+            "resistance",
+        )
     events = _get(chart, "breakout_events", "breakoutEvents") or []
     failed = _has_breakout_event(events, "failed_breakout")
     confirmed = _has_breakout_event(events, "confirmed_breakout")
@@ -387,6 +417,9 @@ def _extract_pattern(payload: dict[str, Any] | None) -> _ExtractedPattern:
         volume_confirmed=volume_confirmed,
         price_structure_alignment=alignment,
         reasons=tuple(reasons),
+        selected_levels_present=selected_levels_present,
+        has_actionable_support=support is not None,
+        has_actionable_resistance=resistance is not None,
     )
 
 
@@ -498,13 +531,14 @@ def _nearby_stop_level(
     candidate: float | None,
     direction: str,
     fallback_pct: float,
-) -> float:
+    allow_fallback: bool = True,
+) -> float | None:
     fallback = _above(entry, fallback_pct) if direction == "Bearish" else _below(entry, fallback_pct)
     if candidate is None or candidate <= 0 or entry <= 0:
-        return fallback
+        return fallback if allow_fallback else None
     distance_pct = abs(entry - candidate) / entry
     if distance_pct > MAX_DAILY_STOP_DISTANCE_PCT:
-        return fallback
+        return fallback if allow_fallback else None
     return candidate
 
 
@@ -542,6 +576,19 @@ def _zone_price(zones: list[Any], kind: str) -> float | None:
     if value is None:
         value = _float(_get(zone, "price", "level"))
     return _round(value)
+
+
+def _selected_zone_price(
+    selected: dict[str, Any],
+    snake_key: str,
+    camel_key: str,
+    *,
+    kind: str,
+) -> float | None:
+    zone = _get(selected, snake_key, camel_key)
+    if not isinstance(zone, dict):
+        return None
+    return _zone_price([zone], kind)
 
 
 def _has_breakout_event(events: list[Any], kind: str) -> bool:

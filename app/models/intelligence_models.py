@@ -378,6 +378,9 @@ class ChartIntelligence(BaseModel):
     resistance_zones: list[dict[str, Any]] = Field(
         default_factory=list, serialization_alias="resistanceZones"
     )
+    selected_levels: dict[str, Any] | None = Field(
+        default_factory=dict, serialization_alias="selectedLevels"
+    )
     annotations: list[dict[str, Any]] = Field(default_factory=list)
     highlighted_candles: list[dict[str, Any]] = Field(
         default_factory=list, serialization_alias="highlightedCandles"

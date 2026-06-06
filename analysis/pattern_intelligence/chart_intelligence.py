@@ -97,6 +97,10 @@ def build_chart_intelligence(
         "trendlines": overlays["trendlines"],
         "support_zones": overlays["support_zones"],
         "resistance_zones": overlays["resistance_zones"],
+        "selected_levels": _selected_levels(
+            supports=overlays["support_zones"],
+            resistances=overlays["resistance_zones"],
+        ),
         "annotations": annotations,
         "highlighted_candles": overlays["highlighted_candles"],
         "breakout_events": [breakout_event_dict(event) for event in breakout_events],
@@ -188,11 +192,86 @@ def build_visual_overlays(
 
 
 def _zone_dict(zone) -> dict[str, Any]:
+    actionable_for = zone.actionable_for or {
+        "chartContext": True,
+        "tradeStop": False,
+        "tradeTarget": False,
+        "breakoutTrigger": False,
+    }
     return {
         "price_low": zone.price_low,
         "price_high": zone.price_high,
+        "priceLow": zone.price_low,
+        "priceHigh": zone.price_high,
+        "midpoint": zone.midpoint,
         "label": zone.label,
         "zone_type": zone.zone_type,
+        "type": zone.zone_type,
         "touches": zone.touches,
         "strength": zone.strength,
+        "timeframe": zone.timeframe,
+        "source": zone.sources[0] if zone.sources else "swing",
+        "sources": list(zone.sources),
+        "recency_bars": zone.recency_bars,
+        "recencyBars": zone.recency_bars,
+        "distance_pct_from_current": zone.distance_pct_from_current,
+        "distancePctFromCurrent": zone.distance_pct_from_current,
+        "atr_distance": zone.atr_distance,
+        "atrDistance": zone.atr_distance,
+        "level_role": zone.level_role,
+        "levelRole": zone.level_role,
+        "actionable_for": actionable_for,
+        "actionableFor": actionable_for,
     }
+
+
+def _selected_levels(
+    *,
+    supports: list[dict[str, Any]],
+    resistances: list[dict[str, Any]],
+) -> dict[str, Any]:
+    nearest_support = _first_level(supports)
+    nearest_resistance = _first_level(resistances)
+    actionable_support = _first_level(
+        supports,
+        role="actionable",
+        actionable_key="tradeStop",
+    )
+    actionable_resistance = _first_level(
+        resistances,
+        role="actionable",
+        actionable_key="tradeTarget",
+    )
+    major_support = _first_level(supports, role="majorHistorical")
+    major_resistance = _first_level(resistances, role="majorHistorical")
+    return {
+        "nearest_support": nearest_support,
+        "nearestSupport": nearest_support,
+        "nearest_resistance": nearest_resistance,
+        "nearestResistance": nearest_resistance,
+        "actionable_support": actionable_support,
+        "actionableSupport": actionable_support,
+        "actionable_resistance": actionable_resistance,
+        "actionableResistance": actionable_resistance,
+        "major_support": major_support,
+        "majorSupport": major_support,
+        "major_resistance": major_resistance,
+        "majorResistance": major_resistance,
+    }
+
+
+def _first_level(
+    levels: list[dict[str, Any]],
+    *,
+    role: str | None = None,
+    actionable_key: str | None = None,
+) -> dict[str, Any] | None:
+    for level in levels:
+        if role is not None and level.get("level_role") != role:
+            continue
+        if actionable_key is not None:
+            actionable_for = level.get("actionable_for") or {}
+            if not actionable_for.get(actionable_key):
+                continue
+        return level
+    return None

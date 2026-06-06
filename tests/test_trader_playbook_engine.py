@@ -225,6 +225,189 @@ def test_absurd_target_rejects_risk_reward():
     assert "No usable target level nearby." in result.warnings
 
 
+def test_selected_major_historical_support_is_not_trade_stop():
+    payload = _payload(close=500, support=200, resistance=525)
+    payload["chart_intelligence"]["selected_levels"] = {
+        "nearest_support": {
+            "price_low": 198,
+            "price_high": 200,
+            "level_role": "majorHistorical",
+            "actionable_for": {
+                "chartContext": True,
+                "tradeStop": False,
+                "tradeTarget": False,
+                "breakoutTrigger": False,
+            },
+        },
+        "nearest_resistance": {
+            "price_low": 525,
+            "price_high": 528,
+            "level_role": "nearbyContext",
+            "actionable_for": {
+                "chartContext": True,
+                "tradeStop": False,
+                "tradeTarget": False,
+                "breakoutTrigger": False,
+            },
+        },
+        "actionable_support": None,
+        "actionable_resistance": None,
+        "major_support": {
+            "price_low": 198,
+            "price_high": 200,
+            "level_role": "majorHistorical",
+        },
+        "major_resistance": None,
+    }
+
+    result = evaluate_trader_playbook(
+        TraderPlaybookInputs(
+            symbol="AMD",
+            trading_bias=_bias("Bullish"),
+            trade_decision=_decision("ENTER"),
+            pattern_intelligence=payload,
+        )
+    )
+
+    assert result.status in {"NoSetup", "Waiting"}
+    assert result.status != "Valid"
+    assert result.levels.entry is None
+    assert result.levels.stop is None
+    assert result.levels.target1 is None
+    assert "No actionable support nearby." in result.warnings
+
+
+def test_selected_levels_without_actionable_support_does_not_fabricate_stop():
+    payload = _payload(close=523, support=200, resistance=525)
+    payload["chart_intelligence"]["selected_levels"] = {
+        "nearest_support": {
+            "price_low": 198,
+            "price_high": 200,
+            "level_role": "majorHistorical",
+            "actionable_for": {
+                "chartContext": True,
+                "tradeStop": False,
+                "tradeTarget": False,
+                "breakoutTrigger": False,
+            },
+        },
+        "nearest_resistance": {
+            "price_low": 525,
+            "price_high": 528,
+            "level_role": "actionable",
+            "actionable_for": {
+                "chartContext": True,
+                "tradeTarget": True,
+                "breakoutTrigger": True,
+            },
+        },
+        "actionable_support": None,
+        "actionable_resistance": {
+            "price_low": 525,
+            "price_high": 528,
+            "level_role": "actionable",
+            "actionable_for": {
+                "chartContext": True,
+                "tradeTarget": True,
+                "breakoutTrigger": True,
+            },
+        },
+        "major_support": {
+            "price_low": 198,
+            "price_high": 200,
+            "level_role": "majorHistorical",
+        },
+        "major_resistance": None,
+    }
+
+    result = evaluate_trader_playbook(
+        TraderPlaybookInputs(
+            symbol="AMD",
+            trading_bias=_bias("Bullish"),
+            trade_decision=_decision("ENTER"),
+            pattern_intelligence=payload,
+        )
+    )
+
+    assert result.best_setup == "BreakoutContinuation"
+    assert result.status == "Waiting"
+    assert result.levels.entry is None
+    assert result.levels.stop is None
+    assert result.levels.target1 is None
+    assert result.risk.risk_reward_label == "unavailable"
+    assert "No actionable support nearby." in result.warnings
+
+
+def test_selected_levels_null_falls_back_to_legacy_zones():
+    payload = _payload(close=103, support=99, resistance=105)
+    payload["chart_intelligence"]["selected_levels"] = None
+
+    result = evaluate_trader_playbook(
+        TraderPlaybookInputs(
+            symbol="AAPL",
+            trading_bias=_bias("Bullish"),
+            trade_decision=_decision(),
+            pattern_intelligence=payload,
+        )
+    )
+
+    assert result.levels.support == 99
+    assert result.levels.resistance == 105
+
+
+def test_selected_actionable_levels_drive_trade_plan():
+    payload = _payload(close=500, support=485, resistance=525)
+    payload["chart_intelligence"]["selected_levels"] = {
+        "nearest_support": {
+            "price_low": 482,
+            "price_high": 485,
+            "level_role": "actionable",
+            "actionable_for": {"chartContext": True, "tradeStop": True},
+        },
+        "nearest_resistance": {
+            "price_low": 525,
+            "price_high": 528,
+            "level_role": "actionable",
+            "actionable_for": {
+                "chartContext": True,
+                "tradeTarget": True,
+                "breakoutTrigger": True,
+            },
+        },
+        "actionable_support": {
+            "price_low": 482,
+            "price_high": 485,
+            "level_role": "actionable",
+            "actionable_for": {"chartContext": True, "tradeStop": True},
+        },
+        "actionable_resistance": {
+            "price_low": 525,
+            "price_high": 528,
+            "level_role": "actionable",
+            "actionable_for": {
+                "chartContext": True,
+                "tradeTarget": True,
+                "breakoutTrigger": True,
+            },
+        },
+        "major_support": None,
+        "major_resistance": None,
+    }
+
+    result = evaluate_trader_playbook(
+        TraderPlaybookInputs(
+            symbol="AMD",
+            trading_bias=_bias("Bullish"),
+            trade_decision=_decision(),
+            pattern_intelligence=payload,
+        )
+    )
+
+    assert result.levels.support == 485
+    assert result.levels.resistance == 525
+    assert result.levels.stop is not None
+
+
 def test_response_shape_stable():
     result = evaluate_trader_playbook(
         TraderPlaybookInputs(
