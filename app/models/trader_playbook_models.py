@@ -15,6 +15,7 @@ PlaybookBestSetup = Literal[
     "None",
 ]
 PlaybookStatus = Literal["Valid", "Waiting", "Invalid", "NoSetup"]
+PlaybookSide = Literal["Long", "Short", "NoTrade"]
 RiskRewardLabel = Literal["favorable", "mixed", "poor", "unavailable"]
 AlignmentState = Literal["aligned", "mixed", "against"]
 AlignmentWithUnavailable = Literal["aligned", "mixed", "against", "unavailable"]
@@ -104,6 +105,7 @@ class TraderPlaybookResponse(BaseModel):
     horizon: Literal["1-5 sessions"] = "1-5 sessions"
     data_mode: Literal["daily"] = Field(default="daily", serialization_alias="dataMode")
     best_setup: PlaybookBestSetup = Field(serialization_alias="bestSetup")
+    side: PlaybookSide = "NoTrade"
     status: PlaybookStatus
     conditions: TraderPlaybookConditions
     levels: TraderPlaybookLevels

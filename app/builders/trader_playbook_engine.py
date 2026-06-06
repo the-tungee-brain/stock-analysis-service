@@ -16,6 +16,8 @@ from app.models.trading_bias_models import TradingBiasResponse
 
 @dataclass(frozen=True)
 class TraderPlaybookConfig:
+    # Tomcrest's default playbook is long-only; bearish short plans stay as evidence.
+    allow_short_setups: bool = False
     # Setup proximity gates are daily-plan trigger windows, bounded by actionable levels.
     breakout_proximity_pct: float = 0.03
     pullback_proximity_pct: float = 0.05
@@ -61,8 +63,12 @@ class _ExtractedPattern:
     has_actionable_resistance: bool = False
 
 
-def evaluate_trader_playbook(inputs: TraderPlaybookInputs) -> TraderPlaybookResponse:
-    config = TraderPlaybookConfig()
+def evaluate_trader_playbook(
+    inputs: TraderPlaybookInputs,
+    *,
+    config: TraderPlaybookConfig | None = None,
+) -> TraderPlaybookResponse:
+    config = config or TraderPlaybookConfig()
     data_gaps = _dedupe(inputs.data_gaps)
     warnings = _dedupe(inputs.warnings)
     direction = inputs.trading_bias.bias if inputs.trading_bias else "Neutral"
@@ -96,21 +102,31 @@ def evaluate_trader_playbook(inputs: TraderPlaybookInputs) -> TraderPlaybookResp
         pattern=pattern,
         config=config,
     )
+    side = _side_for_plan(setup=setup, direction=direction, levels=levels)
+    if side == "Short" and not config.allow_short_setups:
+        side = "NoTrade"
+        levels = _clear_trade_levels(levels)
+        warnings = _with_gap(
+            warnings,
+            "Bearish setup detected, but short playbooks are not enabled.",
+        )
+        reasons = _dedupe(reasons + ["Bearish failed-breakout evidence is present, but no long setup is available."])
+
     levels, guardrail_warnings = _enforce_level_guardrails(
         levels,
-        direction=_risk_direction(setup, direction, levels),
+        side=side,
         config=config,
     )
     for warning in guardrail_warnings:
         warnings = _with_gap(warnings, warning)
     risk = _risk_from_levels(
         levels,
-        direction=_risk_direction(setup, direction, levels),
+        side=side,
         config=config,
     )
     status = _status_for_plan(
         setup=setup,
-        direction=direction,
+        side=side,
         levels=levels,
         risk=risk,
         pattern=pattern,
@@ -122,11 +138,13 @@ def evaluate_trader_playbook(inputs: TraderPlaybookInputs) -> TraderPlaybookResp
             status = "Waiting"
     if setup == "None":
         status = "NoSetup"
+    if side == "NoTrade":
+        status = "NoSetup"
     if levels.entry is None or levels.stop is None:
         levels = _clear_trade_levels(levels)
         risk = TraderPlaybookRisk()
-        status = "NoSetup" if setup == "None" else "Waiting"
-        if setup != "None":
+        status = "NoSetup" if setup == "None" or side == "NoTrade" else "Waiting"
+        if setup != "None" and side != "NoTrade":
             warnings = _with_gap(
                 warnings,
                 "No complete entry/stop plan is available from daily levels.",
@@ -140,6 +158,7 @@ def evaluate_trader_playbook(inputs: TraderPlaybookInputs) -> TraderPlaybookResp
         direction=direction,
         confidence=confidence,
         best_setup=setup,
+        side=side,
         status=status,
         conditions=conditions,
         levels=levels,
@@ -164,6 +183,7 @@ def _no_setup_response(
         direction=direction,  # type: ignore[arg-type]
         confidence=confidence,  # type: ignore[arg-type]
         best_setup="None",
+        side="NoTrade",
         status="NoSetup",
         conditions=TraderPlaybookConditions(
             valid_if=[],
@@ -329,19 +349,19 @@ def _build_plan(
 def _status_for_plan(
     *,
     setup: str,
-    direction: str,
+    side: str,
     levels: TraderPlaybookLevels,
     risk: TraderPlaybookRisk,
     pattern: _ExtractedPattern,
 ) -> str:
     close = pattern.close
-    if setup == "None":
+    if setup == "None" or side == "NoTrade":
         return "NoSetup"
     if close is None or levels.entry is None or levels.stop is None:
         return "Waiting"
-    if direction == "Bullish" and close <= levels.stop:
+    if side == "Long" and close <= levels.stop:
         return "Invalid"
-    if direction == "Bearish" and close >= levels.stop:
+    if side == "Short" and close >= levels.stop:
         return "Invalid"
     if risk.risk_reward_label in {"poor", "unavailable"}:
         return "Waiting"
@@ -359,22 +379,22 @@ def _status_for_plan(
 def _risk_from_levels(
     levels: TraderPlaybookLevels,
     *,
-    direction: str,
+    side: str,
     config: TraderPlaybookConfig,
 ) -> TraderPlaybookRisk:
-    if levels.entry is None or levels.stop is None:
+    if levels.entry is None or levels.stop is None or side == "NoTrade":
         return TraderPlaybookRisk()
     target1 = levels.target1
     target2 = levels.target2
     if target1 is None and target2 is None:
         return TraderPlaybookRisk()
 
-    risk_per_share = abs(levels.entry - levels.stop)
+    risk_per_share = _risk_per_share(levels.entry, levels.stop, side)
     if risk_per_share <= 0:
         return TraderPlaybookRisk()
 
-    reward1 = _reward(levels.entry, target1, direction)
-    reward2 = _reward(levels.entry, target2, direction)
+    reward1 = _reward(levels.entry, target1, side)
+    reward2 = _reward(levels.entry, target2, side)
     r1 = reward1 / risk_per_share if reward1 is not None else None
     r2 = reward2 / risk_per_share if reward2 is not None else None
     best_r = max([value for value in (r1, r2) if value is not None], default=None)
@@ -397,16 +417,21 @@ def _risk_from_levels(
     )
 
 
-def _risk_direction(
+def _side_for_plan(
+    *,
     setup: str,
     direction: str,
     levels: TraderPlaybookLevels,
 ) -> str:
-    if setup == "FailedBreakout":
-        return "Bearish"
+    if setup == "None":
+        return "NoTrade"
+    if setup == "FailedBreakout" or direction == "Bearish":
+        return "Short"
     if setup == "RangeDay" and levels.entry is not None and levels.target1 is not None:
-        return "Bearish" if levels.target1 < levels.entry else "Bullish"
-    return direction
+        return "Short" if levels.target1 < levels.entry else "Long"
+    if direction == "Bullish":
+        return "Long"
+    return "NoTrade"
 
 
 def _extract_pattern(payload: dict[str, Any] | None) -> _ExtractedPattern:
@@ -543,16 +568,21 @@ def _price_structure_alignment(trend_bias: str, payload: dict[str, Any]) -> str:
 def _enforce_level_guardrails(
     levels: TraderPlaybookLevels,
     *,
-    direction: str,
+    side: str,
     config: TraderPlaybookConfig,
 ) -> tuple[TraderPlaybookLevels, list[str]]:
     warnings: list[str] = []
+    if side == "NoTrade":
+        return _clear_trade_levels(levels), warnings
     if levels.entry is None or levels.stop is None:
         return levels.model_copy(update={"target1": None, "target2": None}), warnings
     if levels.entry <= 0 or levels.stop <= 0:
         return _clear_trade_levels(levels), ["No usable stop level nearby."]
 
-    stop_distance_pct = abs(levels.entry - levels.stop) / levels.entry
+    risk_per_share = _risk_per_share(levels.entry, levels.stop, side)
+    if risk_per_share <= 0:
+        return _clear_trade_levels(levels), ["No usable stop level nearby."]
+    stop_distance_pct = risk_per_share / levels.entry
     if stop_distance_pct > config.max_risk_percent_cap:
         return _clear_trade_levels(levels), ["No usable stop level nearby."]
 
@@ -562,7 +592,7 @@ def _enforce_level_guardrails(
         if value is not None and not _target_is_reasonable(
             entry=levels.entry,
             target=value,
-            direction=direction,
+            side=side,
             config=config,
         ):
             updates[key] = None
@@ -589,10 +619,18 @@ def _clear_trade_levels(levels: TraderPlaybookLevels) -> TraderPlaybookLevels:
     )
 
 
-def _reward(entry: float, target: float | None, direction: str) -> float | None:
+def _risk_per_share(entry: float, stop: float, side: str) -> float:
+    if side == "Long":
+        return entry - stop
+    if side == "Short":
+        return stop - entry
+    return 0.0
+
+
+def _reward(entry: float, target: float | None, side: str) -> float | None:
     if target is None:
         return None
-    reward = target - entry if direction != "Bearish" else entry - target
+    reward = target - entry if side == "Long" else entry - target if side == "Short" else 0.0
     return reward if reward > 0 else 0.0
 
 
@@ -623,12 +661,12 @@ def _target_is_reasonable(
     *,
     entry: float,
     target: float,
-    direction: str,
+    side: str,
     config: TraderPlaybookConfig,
 ) -> bool:
     if entry <= 0 or target <= 0:
         return False
-    reward = _reward(entry, target, direction)
+    reward = _reward(entry, target, side)
     if reward is None or reward <= 0:
         return False
     return abs(target - entry) / entry <= config.max_target_percent_cap

@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from app.builders.trader_playbook_engine import (
+    TraderPlaybookConfig,
     TraderPlaybookInputs,
     evaluate_trader_playbook,
 )
@@ -87,6 +88,7 @@ def test_bullish_breakout_not_crossed_returns_waiting_with_valid_condition():
     )
 
     assert result.best_setup == "BreakoutContinuation"
+    assert result.side == "Long"
     assert result.status == "Waiting"
     assert result.levels.entry == 105
     assert result.levels.stop == 99
@@ -104,6 +106,7 @@ def test_bullish_pullback_with_favorable_rr_returns_valid():
     )
 
     assert result.best_setup == "PullbackToSupport"
+    assert result.side == "Long"
     assert result.status == "Valid"
     assert result.risk.risk_reward_label == "favorable"
     assert result.risk.r_multiple_target1 is not None
@@ -121,12 +124,13 @@ def test_bullish_poor_rr_demotes_to_waiting_with_warning():
     )
 
     assert result.best_setup == "PullbackToSupport"
+    assert result.side == "Long"
     assert result.status in {"Waiting", "NoSetup"}
     assert result.risk.risk_reward_label == "poor"
     assert "Risk/reward is poor for this daily setup." in result.warnings
 
 
-def test_failed_breakout_evidence_returns_failed_breakout_plan():
+def test_failed_breakout_evidence_returns_no_trade_when_shorts_disabled():
     payload = _payload(close=99, support=95, resistance=105, trend_bias="mixed")
     payload["chart_intelligence"]["summary"]["outlook"]["label"] = "Bearish"
     payload["chart_intelligence"]["breakout_events"] = [
@@ -143,10 +147,96 @@ def test_failed_breakout_evidence_returns_failed_breakout_plan():
     )
 
     assert result.best_setup == "FailedBreakout"
+    assert result.side == "NoTrade"
+    assert result.status == "NoSetup"
+    assert result.levels.entry is None
+    assert result.levels.stop is None
+    assert result.levels.target1 is None
+    assert "Bearish setup detected, but short playbooks are not enabled." in result.warnings
+
+
+def test_failed_breakout_evidence_returns_short_plan_when_enabled():
+    payload = _payload(close=99, support=95, resistance=105, trend_bias="mixed")
+    payload["chart_intelligence"]["summary"]["outlook"]["label"] = "Bearish"
+    payload["chart_intelligence"]["breakout_events"] = [
+        {"kind": "failed_breakout", "price": 104, "label": "Failed breakout"}
+    ]
+
+    result = evaluate_trader_playbook(
+        TraderPlaybookInputs(
+            symbol="AAPL",
+            trading_bias=_bias("Neutral"),
+            trade_decision=_decision(),
+            pattern_intelligence=payload,
+        ),
+        config=TraderPlaybookConfig(allow_short_setups=True),
+    )
+
+    assert result.best_setup == "FailedBreakout"
+    assert result.side == "Short"
     assert result.status == "Valid"
     assert result.levels.entry == 105
     assert result.levels.stop == 108.15
+    assert result.levels.target1 == 95
+    assert result.risk.risk_per_share == 3.15
+    assert result.risk.reward_to_target1 == 10
     assert any("rejected resistance" in item for item in result.conditions.valid_if)
+
+
+def test_long_plan_rejects_target_below_entry():
+    result = evaluate_trader_playbook(
+        TraderPlaybookInputs(
+            symbol="AAPL",
+            trading_bias=_bias("Bullish"),
+            trade_decision=_decision("ENTER"),
+            pattern_intelligence=_payload(close=100, support=100, resistance=95),
+        )
+    )
+
+    assert result.side in {"Long", "NoTrade"}
+    assert result.status != "Valid"
+    assert result.levels.target1 is None
+    assert result.risk.risk_reward_label == "unavailable"
+
+
+def test_long_plan_rejects_stop_above_entry():
+    result = evaluate_trader_playbook(
+        TraderPlaybookInputs(
+            symbol="AAPL",
+            trading_bias=_bias("Bullish"),
+            trade_decision=_decision("ENTER"),
+            pattern_intelligence=_payload(close=100, support=106, resistance=200),
+        )
+    )
+
+    assert result.status != "Valid"
+    assert result.levels.entry is None
+    assert result.levels.stop is None
+    assert result.risk.risk_reward_label == "unavailable"
+
+
+def test_short_plan_accepts_target_below_entry_and_stop_above_entry():
+    payload = _payload(close=99, support=95, resistance=105, trend_bias="mixed")
+    payload["chart_intelligence"]["summary"]["outlook"]["label"] = "Bearish"
+    payload["chart_intelligence"]["breakout_events"] = [
+        {"kind": "failed_breakout", "price": 104, "label": "Failed breakout"}
+    ]
+
+    result = evaluate_trader_playbook(
+        TraderPlaybookInputs(
+            symbol="AAPL",
+            trading_bias=_bias("Neutral"),
+            trade_decision=_decision(),
+            pattern_intelligence=payload,
+        ),
+        config=TraderPlaybookConfig(allow_short_setups=True),
+    )
+
+    assert result.side == "Short"
+    assert result.levels.entry == 105
+    assert result.levels.stop == 108.15
+    assert result.levels.target1 == 95
+    assert result.risk.r_multiple_target1 is not None
 
 
 def test_missing_pattern_analysis_returns_no_setup_with_data_gap():
@@ -161,6 +251,7 @@ def test_missing_pattern_analysis_returns_no_setup_with_data_gap():
     )
 
     assert result.best_setup == "None"
+    assert result.side == "NoTrade"
     assert result.status == "NoSetup"
     assert "Pattern analysis unavailable" in result.data_gaps
 
@@ -330,6 +421,7 @@ def test_selected_levels_without_actionable_support_does_not_fabricate_stop():
     )
 
     assert result.best_setup == "BreakoutContinuation"
+    assert result.side == "Long"
     assert result.status == "Waiting"
     assert result.levels.entry is None
     assert result.levels.stop is None
@@ -405,6 +497,7 @@ def test_selected_actionable_levels_drive_trade_plan():
 
     assert result.levels.support == 485
     assert result.levels.resistance == 525
+    assert result.side == "Long"
     assert result.levels.stop is not None
 
 
@@ -425,6 +518,7 @@ def test_response_shape_stable():
         "horizon",
         "dataMode",
         "bestSetup",
+        "side",
         "status",
         "conditions",
         "levels",
