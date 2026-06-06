@@ -27,6 +27,7 @@ from app.api.get_stock_summary_route import router as get_stock_summary_route
 from app.api.get_business_details_route import router as get_business_details_route
 from app.api.get_position_guidance_route import router as get_position_guidance_router
 from app.api.get_trade_decision_route import router as get_trade_decision_route
+from app.api.get_trading_bias_route import router as get_trading_bias_route
 from app.api.get_emerging_leaders_route import router as get_emerging_leaders_route
 from app.api.get_emerging_leaders_validation_route import (
     router as get_emerging_leaders_validation_router,
@@ -183,6 +184,7 @@ protected_api.include_router(get_performance_snapshot_route)
 protected_api.include_router(get_stock_summary_route)
 protected_api.include_router(get_business_details_route)
 protected_api.include_router(get_trade_decision_route)
+protected_api.include_router(get_trading_bias_route)
 protected_api.include_router(get_position_guidance_router)
 protected_api.include_router(get_emerging_leaders_route)
 protected_api.include_router(get_emerging_leaders_validation_router)
