@@ -132,6 +132,8 @@ class OpenAIAdapter(BaseLLM):
         system_prompt: str,
         user_prompt: List[Dict[str, Any]],
         *,
+        developer_context: str | None = None,
+        context_messages: List[Dict[str, Any]] | None = None,
         max_output_tokens: int | None = None,
     ) -> AsyncGenerator[str, None]:
         input_messages = [
@@ -141,8 +143,19 @@ class OpenAIAdapter(BaseLLM):
                     {"type": "input_text", "text": system_prompt},
                 ],
             },
-            *user_prompt,
         ]
+        if developer_context:
+            input_messages.append(
+                {
+                    "role": "developer",
+                    "content": [
+                        {"type": "input_text", "text": developer_context},
+                    ],
+                }
+            )
+        if context_messages:
+            input_messages.extend(context_messages)
+        input_messages.extend(user_prompt)
 
         queue: asyncio.Queue[StreamQueueItem] = asyncio.Queue()
         loop = asyncio.get_running_loop()
@@ -194,13 +207,18 @@ class OpenAIAdapter(BaseLLM):
         prompts: List[str],
         *,
         response_model: Type[BaseModel] | None = None,
+        developer_context: str | None = None,
         max_output_tokens: int | None = None,
     ) -> str:
         system_msg, user_msg = prompts
         input_messages = [
             {"role": "system", "content": system_msg},
-            {"role": "user", "content": user_msg},
         ]
+        if developer_context:
+            input_messages.append(
+                {"role": "developer", "content": developer_context}
+            )
+        input_messages.append({"role": "user", "content": user_msg})
         kwargs: dict[str, Any] = {
             "model": model or settings.OPENAI_MODEL,
             "input": input_messages,
@@ -227,6 +245,7 @@ class OpenAIAdapter(BaseLLM):
         prompts: List[str],
         *,
         response_model: Type[BaseModel] | None = None,
+        developer_context: str | None = None,
         max_output_tokens: int | None = None,
     ) -> str:
         return await asyncio.to_thread(
@@ -234,6 +253,7 @@ class OpenAIAdapter(BaseLLM):
             model,
             prompts,
             response_model=response_model,
+            developer_context=developer_context,
             max_output_tokens=max_output_tokens,
         )
 
@@ -242,6 +262,7 @@ class OpenAIAdapter(BaseLLM):
         model: Optional[ResponsesModel],
         prompts: List[str],
         *,
+        developer_context: str | None = None,
         max_output_tokens: int | None = None,
     ) -> AsyncGenerator[str, None]:
         system_msg, user_msg = prompts
@@ -249,6 +270,7 @@ class OpenAIAdapter(BaseLLM):
             model=model,
             system_prompt=system_msg,
             user_prompt=[{"role": "user", "content": user_msg}],
+            developer_context=developer_context,
             max_output_tokens=max_output_tokens,
         ):
             yield chunk

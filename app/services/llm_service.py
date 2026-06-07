@@ -20,6 +20,7 @@ from app.models.news_analytics_models import (
     StockNewsView,
 )
 from app.services.news_service import COMPANY_NEWS_LLM_LIMIT
+from app.services.chat_output_guard import ChatOutputGuard
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -42,14 +43,58 @@ class LLMService:
         model: Optional[ResponsesModel],
         system_prompt: Optional[str],
         user_prompt: List[Dict[str, Any]],
+        *,
+        developer_context: str | None = None,
+        context_messages: list[dict[str, Any]] | None = None,
     ) -> AsyncGenerator[str, None]:
+        output_guard = ChatOutputGuard(
+            allow_structured_examples=self._allows_structured_chat_examples(
+                user_prompt
+            )
+        )
         async for chunk in self.openai_adapter.generate_stream(
             model=model,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            developer_context=developer_context,
+            context_messages=context_messages,
             max_output_tokens=settings.MAX_OUTPUT_TOKENS_STREAM,
         ):
-            yield chunk
+            for visible_chunk in output_guard.feed(chunk):
+                yield visible_chunk
+        for visible_chunk in output_guard.flush():
+            yield visible_chunk
+
+    @staticmethod
+    def _allows_structured_chat_examples(user_prompt: List[Dict[str, Any]]) -> bool:
+        text_parts: list[str] = []
+        for message in user_prompt:
+            content = message.get("content")
+            if isinstance(content, str):
+                text_parts.append(content)
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict):
+                        value = item.get("text")
+                        if isinstance(value, str):
+                            text_parts.append(value)
+
+        text = "\n".join(text_parts).lower()
+        structured_terms = (
+            "json",
+            "schema",
+            "code",
+            "code block",
+            "example payload",
+            "sample payload",
+            "example response",
+            "api response",
+            "curl",
+            "python",
+            "typescript",
+            "javascript",
+        )
+        return any(term in text for term in structured_terms)
 
     @staticmethod
     def build_headlines_only_view(
@@ -208,12 +253,14 @@ class LLMService:
         route: LLMRoute,
         user_id: str | None = None,
         model: Optional[ResponsesModel] = None,
+        developer_context: str | None = None,
     ) -> AsyncGenerator[str, None]:
         resolved_model = model or resolve_background_llm_model(user_id, route)
         max_tokens = settings.max_tokens_for_route(route)
         async for chunk in self.openai_adapter.generate_stream_from_prompts(
             model=resolved_model,
             prompts=prompts,
+            developer_context=developer_context,
             max_output_tokens=max_tokens,
         ):
             yield chunk
@@ -228,6 +275,7 @@ class LLMService:
         context_fingerprint: str | None = None,
         user_id: str | None = None,
         model: Optional[ResponsesModel] = None,
+        developer_context: str | None = None,
         max_output_tokens: int | None = None,
     ) -> T:
         resolved_model = model or resolve_background_llm_model(user_id, route)
@@ -253,6 +301,7 @@ class LLMService:
             model=resolved_model,
             prompts=prompts,
             response_model=response_model,
+            developer_context=developer_context,
             max_output_tokens=resolved_max_tokens,
         )
 

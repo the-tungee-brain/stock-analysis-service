@@ -337,6 +337,30 @@ def test_refresh_universe_refuses_zero_pass_oracle_results(
     assert store.active_snapshot_id() is None
 
 
+def test_universe_screen_downloads_without_retry(monkeypatch: pytest.MonkeyPatch):
+    from ranking_pipeline.pipeline import weekly_universe
+
+    calls: list[dict] = []
+    monkeypatch.setattr(weekly_universe, "raw_exists", lambda _symbol: False)
+    monkeypatch.setattr(weekly_universe, "save_raw", lambda _frame, _symbol: None)
+
+    def fake_download_symbol(symbol: str, *, years: int, retry: bool = True):
+        calls.append({"symbol": symbol, "years": years, "retry": retry})
+        return _synthetic_ohlcv(80)
+
+    monkeypatch.setattr(weekly_universe, "download_symbol", fake_download_symbol)
+
+    result = weekly_universe._screen_one(
+        "AAA",
+        RankingPipelineConfig().liquidity,
+        60,
+        market_cap=2e9,
+    )
+
+    assert result["symbol"] == "AAA"
+    assert calls == [{"symbol": "AAA", "years": 1, "retry": False}]
+
+
 def test_daily_restores_active_universe_from_completed_oracle_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

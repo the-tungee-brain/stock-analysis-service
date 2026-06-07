@@ -70,7 +70,7 @@ def _screen_one(
         if raw_exists(sym):
             ohlcv = load_raw(sym)
         else:
-            ohlcv = download_symbol(sym, years=1)
+            ohlcv = download_symbol(sym, years=1, retry=False)
             save_raw(ohlcv, sym)
         screen_ohlcv = ohlcv.tail(lookback_days).copy()
         del ohlcv

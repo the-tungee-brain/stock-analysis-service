@@ -71,6 +71,7 @@ from app.core.llm_config import settings
 from app.core.access_control import max_active_users
 
 from app.services.chat_service import ChatService
+from app.services.ai_context_builder import AIContextBuilder
 from app.services.company_profile_service import CompanyProfileService
 from app.services.company_research_service import CompanyResearchService
 from app.services.llm_service import LLMService
@@ -550,6 +551,12 @@ async def lifespan(app: FastAPI):
         alert_store=mb_alert_store,
         paper_store=mb_paper_trade_store,
     )
+    ai_context_builder = AIContextBuilder(
+        portfolio_analysis_service=portfolio_analysis_service,
+        momentum_breakout_snapshot_serving_service=(
+            momentum_breakout_snapshot_serving_service
+        ),
+    )
 
     try:
         from models.prediction_service import load_deployed_model
@@ -572,6 +579,7 @@ async def lifespan(app: FastAPI):
     app.state.prompt_enrichment_service = prompt_enrichment_service
     app.state.market_service = market_service
     app.state.llm_service = llm_service
+    app.state.ai_context_builder = ai_context_builder
     app.state.portfolio_service = portfolio_service
     app.state.schwab_redis_token_manager = schwab_redis_token_manager
     app.state.schwab_auth_service = schwab_auth_service

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from app.auth.dependencies import get_current_user_id
 from app.core.llm_model_policy import resolve_llm_model
 from app.dependencies.service_dependencies import (
+    get_ai_context_builder,
     get_chat_service,
     get_company_research_service,
     get_llm_service,
@@ -17,6 +18,7 @@ from app.dependencies.service_dependencies import (
     get_prompt_enrichment_service,
     get_schwab_auth_service,
 )
+from app.services.ai_context_builder import AIContextBuilder
 from app.services.chat_service import ChatService
 from app.services.company_research_service import CompanyResearchService
 from app.services.llm_service import LLMService
@@ -56,6 +58,7 @@ async def research_chat(
     portfolio_analysis_service: PortfolioAnalysisService = Depends(
         get_portfolio_analysis_service
     ),
+    ai_context_builder: AIContextBuilder = Depends(get_ai_context_builder),
 ):
     symbol = request.symbol.strip().upper()
     prompt = request.prompt.strip()
@@ -99,12 +102,16 @@ async def research_chat(
         holdings_block = None
         intelligence_block = None
         option_chain_block = None
+        account = None
+        positions = []
+        access_token = None
         try:
             schwab_token = schwab_auth_service.get_valid_token_by_user_id(
                 user_id=user_id
             )
+            access_token = schwab_token.access_token
             account_map = portfolio_service.get_enriched_account(
-                access_token=schwab_token.access_token
+                access_token=access_token
             )
             account = account_map["account"]
             positions = account.securitiesAccount.positions
@@ -114,7 +121,7 @@ async def research_chat(
                 symbol=symbol,
                 account=account,
                 positions=positions,
-                access_token=schwab_token.access_token,
+                access_token=access_token,
             )
         except SchwabReauthRequired:
             holdings_block = None
@@ -133,11 +140,20 @@ async def research_chat(
             intelligence_block=intelligence_block,
             option_chain_block=option_chain_block,
         )
+        ai_context = ai_context_builder.build(
+            user_id=user_id,
+            message=prompt,
+            account=account,
+            positions=positions,
+            symbol=symbol,
+            access_token=access_token,
+        )
 
         async for chunk in llm_service.analyze_option_position(
             model=model,
             system_prompt=RESEARCH_CHAT_SYSTEM_MESSAGE,
             user_prompt=[*recent_messages, user_message],
+            context_messages=[ai_context.developer_message],
         ):
             assistant_content_parts.append(chunk)
             yield chunk

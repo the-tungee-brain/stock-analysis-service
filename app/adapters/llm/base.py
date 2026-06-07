@@ -9,6 +9,9 @@ class BaseLLM(ABC):
         model: Optional[str],
         system_prompt: str,
         user_prompt: List[Dict[str, Any]],
+        *,
+        developer_context: str | None = None,
+        context_messages: List[Dict[str, Any]] | None = None,
     ) -> AsyncGenerator[str, None]:
         pass
 
@@ -17,5 +20,7 @@ class BaseLLM(ABC):
         self,
         model: Optional[str],
         prompts: List[str],
+        *,
+        developer_context: str | None = None,
     ) -> str:
         pass

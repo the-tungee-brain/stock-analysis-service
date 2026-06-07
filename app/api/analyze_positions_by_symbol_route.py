@@ -5,11 +5,13 @@ from fastapi.responses import StreamingResponse
 
 from app.models.schwab_models import Position, SchwabAccounts
 from app.services.llm_service import LLMService
+from app.services.ai_context_builder import AIContextBuilder
 from app.services.portfolio_analysis_service import PortfolioAnalysisService
 from app.services.prompt_enrichment_service import PromptEnrichmentService
 from app.services.portfolio_service import PortfolioService
 from app.services.chat_service import ChatService
 from app.dependencies.service_dependencies import (
+    get_ai_context_builder,
     get_llm_service,
     get_portfolio_analysis_service,
     get_prompt_enrichment_service,
@@ -89,6 +91,7 @@ async def analyze_positions_by_symbol(
         get_prompt_enrichment_service
     ),
     chat_service: ChatService = Depends(get_chat_service),
+    ai_context_builder: AIContextBuilder = Depends(get_ai_context_builder),
 ):
     positions = PortfolioService._annotate_option_strategies(request.positions)
     chat_model = resolve_llm_model(request.model, user_id)
@@ -161,6 +164,14 @@ async def analyze_positions_by_symbol(
             include_context=include_context,
             json_response=json_v1,
         )
+        ai_context = ai_context_builder.build(
+            user_id=user_id,
+            message=request.prompt or request.user_display_message,
+            account=request.account,
+            positions=positions,
+            symbol=request.symbol,
+        )
+        developer_context = ai_context.developer_message["content"][0]["text"]
         if json_v1 and request.analysis_instructions:
             user_prompt = {
                 "role": "user",
@@ -180,6 +191,7 @@ async def analyze_positions_by_symbol(
                 response_model=PortfolioAnalysisV1LLMResponse,
                 route=LLMRoute.NEWS,
                 user_id=user_id,
+                developer_context=developer_context,
                 max_output_tokens=settings.MAX_OUTPUT_TOKENS_STREAM,
             )
             if request.symbol is None:
@@ -208,6 +220,7 @@ async def analyze_positions_by_symbol(
             model=chat_model,
             system_prompt=system_prompt,
             user_prompt=[*llm_history, user_prompt],
+            context_messages=[ai_context.developer_message],
         ):
             assistant_content_parts.append(chunk)
             yield chunk

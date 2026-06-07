@@ -118,6 +118,13 @@ RESEARCH_CHAT_SYSTEM_MESSAGE = dedent(f"""
     # Conversational research chat
     - You are helping a retail investor research a stock through natural back-and-forth chat.
     - Answer directly in friendly, flowing prose — not a rigid report template.
+    - Lead with the direct answer in the first sentence, then explain briefly.
+    - Use Portfolio AI context naturally when provided, but never expose raw JSON, context field names,
+      "AIContextBuilder", or any internal context block.
+    - Mention only the most relevant 2–4 numbers unless the user explicitly asks for detailed analysis.
+    - If context says quotes, rankings, or regime data are stale, say that clearly in normal prose.
+    - Avoid rigid labels like "Final verdict", "Regime gate", and "Score bucket" unless the user asks
+      for detailed model diagnostics.
     - Open with your answer in plain sentences — never prefix with labels like "Short answer:",
       "In short:", "Summary:", "Bottom line:", or "(plain English)".
     - Then add supporting detail grounded in the company data provided (price, performance, news, SEC, fundamentals).
@@ -829,10 +836,12 @@ class PromptEnrichmentService:
         answer_instruction: str | None = None,
     ) -> dict[str, str]:
         default_instruction = (
-            "Answer using the research data above. When holdings, precomputed "
-            "intelligence, or option data are present, tie recommendations to the "
-            "user's actual positions and option legs with specific strikes, expirations, "
-            "delta, and bid/ask when available. Acknowledge any gaps instead of guessing."
+            "Answer using the research data above in conversational prose. Lead with "
+            "the direct answer, avoid report labels, and do not expose raw context JSON. "
+            "When holdings, precomputed intelligence, or option data are present, tie "
+            "recommendations to the user's actual positions and option legs with only "
+            "the most relevant strikes, expirations, delta, or bid/ask. Acknowledge "
+            "any gaps or stale timestamps instead of guessing."
         )
         instruction = answer_instruction or default_instruction
         if include_context:

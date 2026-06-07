@@ -3,6 +3,7 @@ from app.builders.yfinance_analysis_builder import YFinanceAnalysisBuilder
 from app.builders.yfinance_funds_builder import YFinanceFundsBuilder
 from app.builders.yfinance_financials_builder import YFinanceFinancialsBuilder
 from app.services.llm_service import LLMService
+from app.services.ai_context_builder import AIContextBuilder
 from app.services.market_service import MarketService
 from app.services.schwab_auth_service import SchwabAuthService
 from app.services.prompt_enrichment_service import PromptEnrichmentService
@@ -68,6 +69,10 @@ from app.services.pattern_analysis_service import PatternAnalysisService
 
 def get_llm_service(request: Request) -> LLMService:
     return request.app.state.llm_service
+
+
+def get_ai_context_builder(request: Request) -> AIContextBuilder:
+    return request.app.state.ai_context_builder
 
 
 def get_portfolio_service(request: Request) -> PortfolioService:
