@@ -223,24 +223,34 @@ class OracleScreeningStore:
             f"""
                 MERGE INTO {SCREEN_RESULTS_TABLE} t
                 USING (
-                    SELECT :run_id AS run_id, :symbol AS symbol FROM dual
+                    SELECT
+                        :run_id AS run_id,
+                        :symbol AS symbol,
+                        :last_close AS last_close,
+                        :market_cap AS market_cap,
+                        :avg_dollar_volume_20d AS avg_dollar_volume_20d,
+                        :score AS score,
+                        :passed_filters AS passed_filters,
+                        :status AS status,
+                        :reasons_json AS reasons_json
+                    FROM dual
                 ) s
                 ON (t.run_id = s.run_id AND t.symbol = s.symbol)
                 WHEN MATCHED THEN UPDATE SET
-                    t.last_close = :last_close,
-                    t.market_cap = :market_cap,
-                    t.avg_dollar_volume_20d = :avg_dollar_volume_20d,
-                    t.score = :score,
-                    t.passed_filters = :passed_filters,
-                    t.status = :status,
-                    t.reasons_json = :reasons_json,
+                    t.last_close = s.last_close,
+                    t.market_cap = s.market_cap,
+                    t.avg_dollar_volume_20d = s.avg_dollar_volume_20d,
+                    t.score = s.score,
+                    t.passed_filters = s.passed_filters,
+                    t.status = s.status,
+                    t.reasons_json = s.reasons_json,
                     t.updated_at = SYSTIMESTAMP
                 WHEN NOT MATCHED THEN INSERT (
                     run_id, symbol, last_close, market_cap, avg_dollar_volume_20d,
                     score, passed_filters, status, reasons_json
                 ) VALUES (
-                    :run_id, :symbol, :last_close, :market_cap, :avg_dollar_volume_20d,
-                    :score, :passed_filters, :status, :reasons_json
+                    s.run_id, s.symbol, s.last_close, s.market_cap, s.avg_dollar_volume_20d,
+                    s.score, s.passed_filters, s.status, s.reasons_json
                 )
             """,
             payload,
@@ -250,16 +260,22 @@ class OracleScreeningStore:
         self._write_conn().cursor().execute(
             f"""
                 MERGE INTO {SCREEN_ERRORS_TABLE} t
-                USING (SELECT :run_id AS run_id, :symbol AS symbol FROM dual) s
+                USING (
+                    SELECT
+                        :run_id AS run_id,
+                        :symbol AS symbol,
+                        :error_message AS error_message
+                    FROM dual
+                ) s
                 ON (t.run_id = s.run_id AND t.symbol = s.symbol)
                 WHEN MATCHED THEN UPDATE SET
-                    t.error_message = :error_message,
+                    t.error_message = s.error_message,
                     t.attempts = t.attempts + 1,
                     t.updated_at = SYSTIMESTAMP
                 WHEN NOT MATCHED THEN INSERT (
                     run_id, symbol, error_type, error_message
                 ) VALUES (
-                    :run_id, :symbol, 'screen_error', :error_message
+                    s.run_id, s.symbol, 'screen_error', s.error_message
                 )
             """,
             {"run_id": run_id, "symbol": symbol, "error_message": error[:1000]},
@@ -302,18 +318,26 @@ class OracleScreeningStore:
         cur.execute(
             f"""
                 MERGE INTO {SCREEN_CHECKPOINTS_TABLE} t
-                USING (SELECT :run_id AS run_id FROM dual) s
+                USING (
+                    SELECT
+                        :run_id AS run_id,
+                        :processed_count AS processed_count,
+                        :passed_count AS passed_count,
+                        :rss_mb AS rss_mb,
+                        :checkpoint_json AS checkpoint_json
+                    FROM dual
+                ) s
                 ON (t.run_id = s.run_id)
                 WHEN MATCHED THEN UPDATE SET
-                    t.processed_count = :processed_count,
-                    t.passed_count = :passed_count,
-                    t.rss_mb = :rss_mb,
-                    t.checkpoint_json = :checkpoint_json,
+                    t.processed_count = s.processed_count,
+                    t.passed_count = s.passed_count,
+                    t.rss_mb = s.rss_mb,
+                    t.checkpoint_json = s.checkpoint_json,
                     t.updated_at = SYSTIMESTAMP
                 WHEN NOT MATCHED THEN INSERT (
                     run_id, processed_count, passed_count, rss_mb, checkpoint_json
                 ) VALUES (
-                    :run_id, :processed_count, :passed_count, :rss_mb, :checkpoint_json
+                    s.run_id, s.processed_count, s.passed_count, s.rss_mb, s.checkpoint_json
                 )
             """,
             {

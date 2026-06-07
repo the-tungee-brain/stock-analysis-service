@@ -297,6 +297,36 @@ def test_refresh_universe_resumes_completed_oracle_symbols(
     assert store.load_universe_symbols(snapshot_id) == ["AAA", "BBB", "CCC"]
 
 
+def test_oracle_screening_merges_expose_all_bind_placeholders():
+    from ranking_pipeline.storage.oracle_screening import OracleScreeningStore
+
+    cursor = _RecordingCursor()
+    store = OracleScreeningStore(_RecordingPool(cursor))
+    store.upsert_result(
+        "run-1",
+        {
+            "symbol": "AAA",
+            "last_close": 10.0,
+            "market_cap": 2e9,
+            "avg_dollar_volume_20d": 50e6,
+            "passed_filters": True,
+            "reasons": {"min_price": True},
+        },
+    )
+    store.upsert_error("run-1", "BBB", "rate limited")
+    store.update_progress(
+        "run-1",
+        processed_count=2,
+        passed_count=1,
+        rss_mb=123.0,
+        commit=True,
+    )
+
+    for sql, params in cursor.executions:
+        missing = [key for key in params if f":{key}" not in sql]
+        assert missing == []
+
+
 class _FakeScreenStore:
     def __init__(self, existing: list[str] | None = None) -> None:
         self.run_id = "run-1"
@@ -370,6 +400,42 @@ class _FakeScreenStore:
 
     def close(self) -> None:
         return None
+
+
+class _RecordingCursor:
+    def __init__(self) -> None:
+        self.executions: list[tuple[str, dict]] = []
+
+    def setinputsizes(self, **_kwargs) -> None:
+        return None
+
+    def execute(self, sql: str, params: dict | None = None):
+        if params is not None:
+            self.executions.append((sql, params))
+        return self
+
+
+class _RecordingConnection:
+    def __init__(self, cursor: _RecordingCursor) -> None:
+        self._cursor = cursor
+        self.commits = 0
+
+    def cursor(self) -> _RecordingCursor:
+        return self._cursor
+
+    def commit(self) -> None:
+        self.commits += 1
+
+    def close(self) -> None:
+        return None
+
+
+class _RecordingPool:
+    def __init__(self, cursor: _RecordingCursor) -> None:
+        self._connection = _RecordingConnection(cursor)
+
+    def acquire(self) -> _RecordingConnection:
+        return self._connection
 
 
 class _FakeMetadataResolver:
