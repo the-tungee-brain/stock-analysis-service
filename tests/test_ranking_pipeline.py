@@ -405,6 +405,19 @@ def test_oracle_screening_merges_expose_all_bind_placeholders():
         assert missing == []
 
 
+def test_oracle_screening_iter_results_uses_null_initial_cursor():
+    from ranking_pipeline.storage.oracle_screening import OracleScreeningStore
+
+    cursor = _PagedResultsCursor()
+    store = OracleScreeningStore(_RecordingPool(cursor))
+
+    pages = list(store.iter_results("run-1", page_size=2, passed_only=True))
+
+    assert [row["symbol"] for page in pages for row in page] == ["AAA", "BBB"]
+    assert cursor.last_symbol_binds == [None, "BBB"]
+    assert "(:last_symbol IS NULL OR symbol > :last_symbol)" in cursor.executions[0][0]
+
+
 class _FakeScreenStore:
     def __init__(self, existing: list[str] | None = None) -> None:
         self.run_id = "run-1"
@@ -521,6 +534,36 @@ class _RecordingCursor:
             self.executions.append((sql, params))
         return self
 
+    def fetchall(self):
+        return []
+
+    def fetchone(self):
+        return None
+
+
+class _PagedResultsCursor(_RecordingCursor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.last_symbol_binds: list[str | None] = []
+        self._rows: list[tuple] = []
+
+    def execute(self, sql: str, params: dict | None = None):
+        super().execute(sql, params)
+        last_symbol = params["last_symbol"] if params else None
+        self.last_symbol_binds.append(last_symbol)
+        self._rows = (
+            [
+                ("AAA", 10.0, 2e9, 50e6, 1),
+                ("BBB", 11.0, 3e9, 60e6, 1),
+            ]
+            if last_symbol is None
+            else []
+        )
+        return self
+
+    def fetchall(self):
+        return self._rows
+
 
 class _RecordingConnection:
     def __init__(self, cursor: _RecordingCursor) -> None:
@@ -535,6 +578,12 @@ class _RecordingConnection:
 
     def close(self) -> None:
         return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        self.close()
 
 
 class _RecordingPool:

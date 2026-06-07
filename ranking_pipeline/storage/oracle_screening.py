@@ -476,7 +476,7 @@ class OracleScreeningStore:
         page_size: int = 500,
         passed_only: bool = False,
     ) -> Iterator[list[dict[str, Any]]]:
-        last_symbol = ""
+        last_symbol: str | None = None
         passed_clause = "AND passed_filters = 1" if passed_only else ""
         while True:
             with self._pool.acquire() as conn:
@@ -486,7 +486,7 @@ class OracleScreeningStore:
                            passed_filters
                     FROM {SCREEN_RESULTS_TABLE}
                     WHERE run_id = :run_id
-                      AND symbol > :last_symbol
+                      AND (:last_symbol IS NULL OR symbol > :last_symbol)
                       {passed_clause}
                     ORDER BY symbol
                     FETCH FIRST :page_size ROWS ONLY
