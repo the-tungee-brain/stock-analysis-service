@@ -222,6 +222,8 @@ def test_refresh_universe_persists_batches_without_retaining_all_members(
     assert screen_store.upserted_symbols == ["AAA", "BBB", "CCC", "DDD", "EEE"]
     assert screen_store.commit_progress_counts == [2, 4, 5]
     assert screen_store.finalized == ("run-1", 5, 3)
+    assert screen_store.full_completed_load_called is False
+    assert screen_store.full_results_load_called is False
     assert store.load_universe_symbols(snapshot_id) == ["AAA", "CCC", "EEE"]
 
 
@@ -265,6 +267,9 @@ def test_refresh_universe_resumes_completed_oracle_symbols(
 
     assert screened == ["BBB", "CCC"]
     assert screen_store.upserted_symbols == ["BBB", "CCC"]
+    assert screen_store.completed_queries == [["AAA", "BBB"], ["CCC"]]
+    assert screen_store.full_completed_load_called is False
+    assert screen_store.full_results_load_called is False
     assert store.load_universe_symbols(snapshot_id) == ["AAA", "BBB", "CCC"]
 
 
@@ -285,6 +290,9 @@ class _FakeScreenStore:
         self.upserted_symbols: list[str] = []
         self.commit_progress_counts: list[int] = []
         self.finalized: tuple[str, int, int] | None = None
+        self.completed_queries: list[list[str]] = []
+        self.full_completed_load_called = False
+        self.full_results_load_called = False
 
     def start_or_resume_run(self, **_kwargs) -> ScreenRun:
         return ScreenRun(
@@ -295,7 +303,12 @@ class _FakeScreenStore:
         )
 
     def completed_symbols(self, _run_id: str) -> set[str]:
-        return set(self.results)
+        self.full_completed_load_called = True
+        raise AssertionError("full completed result load should not be used")
+
+    def completed_symbols_for(self, _run_id: str, symbols: list[str]) -> set[str]:
+        self.completed_queries.append(list(symbols))
+        return {symbol for symbol in symbols if symbol in self.results}
 
     def upsert_result(self, _run_id: str, result: dict) -> None:
         self.upserted_symbols.append(result["symbol"])
@@ -323,7 +336,13 @@ class _FakeScreenStore:
         self.finalized = (run_id, processed_count, passed_count)
 
     def load_results(self, _run_id: str) -> list[dict]:
-        return list(self.results.values())
+        self.full_results_load_called = True
+        raise AssertionError("full result load should not be used")
+
+    def iter_results(self, _run_id: str, *, page_size: int):
+        values = sorted(self.results.values(), key=lambda row: row["symbol"])
+        for idx in range(0, len(values), page_size):
+            yield values[idx : idx + page_size]
 
     def close(self) -> None:
         return None

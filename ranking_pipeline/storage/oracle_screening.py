@@ -7,7 +7,7 @@ import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterator
 
 import oracledb
 
@@ -183,11 +183,24 @@ class OracleScreeningStore:
         conn.commit()
         return ScreenRun(run_id=run_id, snapshot_id=snapshot_id, processed_count=0, passed_count=0)
 
-    def completed_symbols(self, run_id: str) -> set[str]:
+    def completed_symbols_for(self, run_id: str, symbols: list[str]) -> set[str]:
+        if not symbols:
+            return set()
+        params: dict[str, Any] = {"run_id": run_id}
+        placeholders: list[str] = []
+        for idx, symbol in enumerate(symbols):
+            key = f"symbol_{idx}"
+            params[key] = symbol.strip().upper()
+            placeholders.append(f":{key}")
         with self._pool.acquire() as conn:
             rows = conn.cursor().execute(
-                f"SELECT symbol FROM {SCREEN_RESULTS_TABLE} WHERE run_id = :run_id",
-                {"run_id": run_id},
+                f"""
+                SELECT symbol
+                FROM {SCREEN_RESULTS_TABLE}
+                WHERE run_id = :run_id
+                  AND symbol IN ({", ".join(placeholders)})
+                """,
+                params,
             ).fetchall()
         return {str(row[0]).strip().upper() for row in rows}
 
@@ -353,27 +366,45 @@ class OracleScreeningStore:
         )
         conn.commit()
 
-    def load_results(self, run_id: str) -> list[dict[str, Any]]:
-        with self._pool.acquire() as conn:
-            rows = conn.cursor().execute(
-                f"""
-                SELECT symbol, last_close, market_cap, avg_dollar_volume_20d, passed_filters
-                FROM {SCREEN_RESULTS_TABLE}
-                WHERE run_id = :run_id
-                ORDER BY symbol
-                """,
-                {"run_id": run_id},
-            ).fetchall()
-        return [
-            {
-                "symbol": str(row[0]).strip().upper(),
-                "last_close": row[1],
-                "market_cap": row[2],
-                "avg_dollar_volume_20d": row[3],
-                "passed_filters": bool(row[4]),
-            }
-            for row in rows
-        ]
+    def iter_results(
+        self,
+        run_id: str,
+        *,
+        page_size: int = 500,
+    ) -> Iterator[list[dict[str, Any]]]:
+        last_symbol = ""
+        while True:
+            with self._pool.acquire() as conn:
+                rows = conn.cursor().execute(
+                    f"""
+                    SELECT symbol, last_close, market_cap, avg_dollar_volume_20d,
+                           passed_filters
+                    FROM {SCREEN_RESULTS_TABLE}
+                    WHERE run_id = :run_id
+                      AND symbol > :last_symbol
+                    ORDER BY symbol
+                    FETCH FIRST :page_size ROWS ONLY
+                    """,
+                    {
+                        "run_id": run_id,
+                        "last_symbol": last_symbol,
+                        "page_size": page_size,
+                    },
+                ).fetchall()
+            if not rows:
+                break
+            page = [
+                {
+                    "symbol": str(row[0]).strip().upper(),
+                    "last_close": row[1],
+                    "market_cap": row[2],
+                    "avg_dollar_volume_20d": row[3],
+                    "passed_filters": bool(row[4]),
+                }
+                for row in rows
+            ]
+            last_symbol = page[-1]["symbol"]
+            yield page
 
 
 def build_oracle_pool() -> oracledb.ConnectionPool:

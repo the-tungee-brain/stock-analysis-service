@@ -157,25 +157,22 @@ def refresh_universe(
         resume=resume,
     )
     snapshot_id = screen_run.snapshot_id
-    processed_symbols = oracle_store.completed_symbols(screen_run.run_id)
-    if processed_symbols:
+    done = screen_run.processed_count
+    passed_so_far = screen_run.passed_count
+    if done:
         logger.info(
             "Resuming universe screen run %s snapshot %s: %d/%d symbols already persisted",
             screen_run.run_id,
             screen_run.snapshot_id,
-            len(processed_symbols),
+            done,
             total,
         )
-
-    remaining_symbols = [sym for sym in symbols if sym not in processed_symbols]
-    done = len(processed_symbols)
-    passed_so_far = screen_run.passed_count if done else 0
     pending_since_commit = 0
 
     logger.info(
         "Screening %d US listing candidates (%d remaining, run_id=%s, batch_size=%d, workers=%d, commit_interval=%d)",
         total,
-        len(remaining_symbols),
+        max(0, total - done),
         screen_run.run_id,
         batch,
         workers,
@@ -190,7 +187,14 @@ def refresh_universe(
     )
 
     try:
-        for batch_symbols in _chunks(remaining_symbols, batch):
+        for candidate_batch in _chunks(symbols, batch):
+            completed_in_batch = oracle_store.completed_symbols_for(
+                screen_run.run_id,
+                candidate_batch,
+            )
+            batch_symbols = [sym for sym in candidate_batch if sym not in completed_in_batch]
+            if not batch_symbols:
+                continue
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 futures = {
                     pool.submit(
@@ -217,7 +221,6 @@ def refresh_universe(
                     oracle_store.upsert_result(screen_run.run_id, member)
                     if member.get("error"):
                         oracle_store.upsert_error(screen_run.run_id, symbol, str(member["error"]))
-                    processed_symbols.add(symbol)
                     done += 1
                     pending_since_commit += 1
                     if member.get("passed_filters"):
@@ -267,10 +270,13 @@ def refresh_universe(
             processed_count=done,
             passed_count=passed_so_far,
         )
-        members = oracle_store.load_results(screen_run.run_id)
-        store.save_universe_snapshot(snapshot_id, members)
-        passed = sum(1 for member in members if member.get("passed_filters"))
-        del members
+        store.start_universe_snapshot(snapshot_id)
+        passed = 0
+        for page in oracle_store.iter_results(screen_run.run_id, page_size=batch):
+            store.append_universe_members(snapshot_id, page)
+            passed += sum(1 for member in page if member.get("passed_filters"))
+            del page
+        store.finalize_universe_snapshot(snapshot_id)
         logger.info("Universe snapshot %s: %d / %d passed", snapshot_id, passed, total)
         return snapshot_id
     except KeyboardInterrupt:
