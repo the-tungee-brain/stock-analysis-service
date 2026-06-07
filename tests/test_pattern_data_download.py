@@ -204,7 +204,6 @@ def test_download_symbol_preserves_zero_volume_for_vix_alias(monkeypatch):
 def test_download_symbol_filters_zero_volume_for_equities(monkeypatch):
     monkeypatch.setattr("data.download.configure_yfinance", lambda: None)
     monkeypatch.setattr("data.download.yf.download", lambda *args, **kwargs: _zero_volume_yahoo_frame())
-    monkeypatch.setattr("data.download.time.sleep", lambda _: None)
 
     with pytest.raises(ValueError, match="No data returned for AAPL"):
         download_symbol("AAPL", years=1)
@@ -219,10 +218,25 @@ def test_download_symbol_without_retry_attempts_once(monkeypatch):
         raise RuntimeError("rate limited")
 
     monkeypatch.setattr("data.download._fetch_yahoo_ohlcv", fail_fetch)
-    monkeypatch.setattr("data.download.time.sleep", lambda _: pytest.fail("unexpected retry delay"))
 
     with pytest.raises(ValueError, match="No data returned for AAPL"):
         download_symbol("AAPL", years=1, retry=False)
+
+    assert calls == 1
+
+
+def test_download_symbol_retry_true_is_ignored(monkeypatch):
+    calls = 0
+
+    def fail_fetch(*args, **kwargs):  # noqa: ANN002, ANN003
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("rate limited")
+
+    monkeypatch.setattr("data.download._fetch_yahoo_ohlcv", fail_fetch)
+
+    with pytest.raises(ValueError, match="No data returned for AAPL"):
+        download_symbol("AAPL", years=1, retry=True)
 
     assert calls == 1
 

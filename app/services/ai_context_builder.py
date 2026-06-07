@@ -38,6 +38,7 @@ COMMON_WORDS = {
     "EXIT",
     "GDP",
     "HOLD",
+    "I",
     "IPO",
     "IRA",
     "IRS",

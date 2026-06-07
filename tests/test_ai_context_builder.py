@@ -58,6 +58,51 @@ def test_aapl_question_includes_owned_position_and_symbol_intelligence():
     assert intelligence[0]["signals"][0]["label"] == "Trend"
 
 
+def test_first_person_i_is_not_inferred_as_symbol():
+    calls = []
+
+    def intelligence_provider(**kwargs):
+        calls.append(kwargs["symbol"])
+        return {"symbol": kwargs["symbol"], "signals": []}
+
+    result = _builder(symbol_intelligence_provider=intelligence_provider).build(
+        user_id="user-1",
+        message="I want to understand my portfolio risk.",
+        account=_make_account(),
+        positions=[],
+        now=NOW,
+    )
+
+    assert "I" not in result.included_symbols
+    assert "I" not in result.context["app_intelligence"][
+        "relevant_symbol_intelligence"
+    ]
+    assert calls == []
+
+
+def test_explicit_single_letter_symbol_is_still_allowed():
+    calls = []
+
+    def intelligence_provider(**kwargs):
+        calls.append(kwargs["symbol"])
+        return {"symbol": kwargs["symbol"], "signals": []}
+
+    result = _builder(symbol_intelligence_provider=intelligence_provider).build(
+        user_id="user-1",
+        message="What is happening here?",
+        account=_make_account(),
+        positions=[],
+        symbol="I",
+        now=NOW,
+    )
+
+    intelligence = result.context["app_intelligence"][
+        "relevant_symbol_intelligence"
+    ]
+    assert calls == ["I"]
+    assert intelligence[0]["symbol"] == "I"
+
+
 def test_portfolio_question_includes_summary_and_top_risk_positions():
     account = _make_account(liquidation_value=100_000)
     positions = [

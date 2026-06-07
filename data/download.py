@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import time
 from datetime import datetime, timedelta
 from typing import Sequence
 
@@ -18,8 +17,6 @@ from data.symbols import get_symbols
 logger = logging.getLogger(__name__)
 
 DEFAULT_YEARS = 15
-MAX_DOWNLOAD_RETRIES = 5
-RETRY_BASE_DELAY_SEC = 3.0
 ZERO_VOLUME_ALLOWED_DOWNLOAD_SYMBOLS = {"^VIX", "VIX"}
 
 
@@ -60,7 +57,7 @@ def download_symbol(
     symbol: str,
     *,
     years: int = DEFAULT_YEARS,
-    retry: bool = True,
+    retry: bool = False,
 ) -> pd.DataFrame:
     """Download ``years`` of daily OHLCV for one symbol."""
     symbol_upper = symbol.strip().upper()
@@ -68,25 +65,13 @@ def download_symbol(
     start = end - timedelta(days=int(years * 365.25))
 
     last_err: BaseException | None = None
-    max_attempts = MAX_DOWNLOAD_RETRIES if retry else 1
-    for attempt in range(1, max_attempts + 1):
-        try:
-            frame = _fetch_yahoo_ohlcv(symbol_upper, start, end)
-            if frame is not None and not frame.empty:
-                return frame
-        except Exception as exc:
-            last_err = exc
-            logger.warning(
-                "Yahoo OHLCV attempt %d/%d failed for %s: %s",
-                attempt,
-                max_attempts,
-                symbol_upper,
-                exc,
-            )
-        if attempt < max_attempts:
-            delay = RETRY_BASE_DELAY_SEC * (2 ** (attempt - 1))
-            logger.info("Retrying %s in %.0fs", symbol_upper, delay)
-            time.sleep(delay)
+    try:
+        frame = _fetch_yahoo_ohlcv(symbol_upper, start, end)
+        if frame is not None and not frame.empty:
+            return frame
+    except Exception as exc:
+        last_err = exc
+        logger.warning("Yahoo OHLCV failed for %s: %s", symbol_upper, exc)
 
     raise ValueError(f"No data returned for {symbol_upper}") from last_err
 
@@ -96,7 +81,7 @@ def download_symbol_incremental(
     *,
     years: int = DEFAULT_YEARS,
     overlap_days: int = 3,
-    retry: bool = True,
+    retry: bool = False,
 ) -> pd.DataFrame:
     """Fetch only bars after the last stored date (full history if missing)."""
     symbol_upper = symbol.strip().upper()
@@ -131,7 +116,7 @@ def download_and_store_symbol(
     symbol: str,
     *,
     years: int = DEFAULT_YEARS,
-    retry: bool = True,
+    retry: bool = False,
 ):
     """Download OHLCV and persist to ``data/raw/{symbol}.parquet``."""
     df = download_symbol(symbol, years=years, retry=retry)
@@ -142,7 +127,7 @@ def download_and_store_all(
     symbols: list[str] | None = None,
     *,
     years: int = DEFAULT_YEARS,
-    retry: bool = True,
+    retry: bool = False,
 ) -> dict[str, pd.DataFrame]:
     """Download and store OHLCV for every symbol in the universe."""
     tickers = symbols or get_symbols()
@@ -170,12 +155,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--no-retry",
         action="store_true",
-        help="Attempt each external OHLCV download once without retry backoff.",
+        help="Deprecated; downloads are always single-attempt.",
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     symbols = args.symbols or get_symbols()
-    results = download_and_store_all(symbols, years=args.years, retry=not args.no_retry)
+    results = download_and_store_all(symbols, years=args.years, retry=False)
     for symbol, frame in results.items():
         print(f"Saved {symbol}: {len(frame)} rows")
     return 0

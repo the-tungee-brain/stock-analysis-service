@@ -1,8 +1,7 @@
 import asyncio
-import json
 from typing import AsyncGenerator, List, Dict, Any, Type, TypeVar, Optional
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from openai.types.shared import ResponsesModel
 
 from app.adapters.cache.llm_output_cache import LLMOutputCache
@@ -305,24 +304,7 @@ class LLMService:
             max_output_tokens=resolved_max_tokens,
         )
 
-        try:
-            parsed = self._parse_response(ai_response, response_model)
-        except (ValidationError, ValueError, json.JSONDecodeError):
-            retry_prompts = [
-                prompts[0],
-                (
-                    f"{prompts[1]}\n\n"
-                    "Your previous answer was not valid JSON. "
-                    f"Return ONLY a valid JSON object matching the required schema for {response_model.__name__}."
-                ),
-            ]
-            ai_response = await self.openai_adapter.generate(
-                model=resolved_model,
-                prompts=retry_prompts,
-                response_model=response_model,
-                max_output_tokens=resolved_max_tokens,
-            )
-            parsed = self._parse_response(ai_response, response_model)
+        parsed = self._parse_response(ai_response, response_model)
 
         if (
             self.llm_output_cache is not None

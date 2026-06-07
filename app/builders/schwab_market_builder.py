@@ -32,10 +32,8 @@ class SchwabMarketBuilder:
             indicative=indicative,
         )
 
-        if isinstance(raw_quote_data, dict) and "invalidSymbols" in raw_quote_data:
-            invalid_symbols = _normalize_invalid_symbols(
-                raw_quote_data.get("invalidSymbols")
-            )
+        if isinstance(raw_quote_data, dict):
+            invalid_symbols = _invalid_symbols_from_quote_response(raw_quote_data)
             for invalid_symbol in invalid_symbols:
                 logger.warning(
                     "Provider symbol unavailable provider=%s endpoint=%s symbol=%s reason=%s",
@@ -44,11 +42,7 @@ class SchwabMarketBuilder:
                     invalid_symbol,
                     "invalidSymbols",
                 )
-            raw_quote_data = {
-                key: value
-                for key, value in raw_quote_data.items()
-                if key != "invalidSymbols"
-            }
+            raw_quote_data = _quote_payload_without_errors(raw_quote_data)
 
         return QuotesResponse.model_validate(raw_quote_data)
 
@@ -95,3 +89,22 @@ def _normalize_invalid_symbols(value: object) -> list[str]:
                 symbols.append(item.strip().upper())
         return symbols
     return []
+
+
+def _invalid_symbols_from_quote_response(raw: dict) -> list[str]:
+    invalid_symbols = _normalize_invalid_symbols(raw.get("invalidSymbols"))
+    errors = raw.get("errors")
+    if isinstance(errors, dict):
+        invalid_symbols.extend(
+            _normalize_invalid_symbols(errors.get("invalidSymbols"))
+        )
+    return sorted(set(invalid_symbols))
+
+
+def _quote_payload_without_errors(raw: dict) -> dict:
+    cleaned = {
+        key: value
+        for key, value in raw.items()
+        if key not in {"invalidSymbols", "errors"}
+    }
+    return cleaned

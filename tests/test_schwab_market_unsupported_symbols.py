@@ -24,6 +24,19 @@ def test_quotes_invalid_symbols_return_empty_without_validation_error(caplog):
     assert "ValidationError" not in caplog.text
 
 
+def test_quotes_nested_invalid_symbols_return_empty_without_validation_error(caplog):
+    adapter = MagicMock()
+    adapter.get_quotes.return_value = {"errors": {"invalidSymbols": ["I"]}}
+    builder = SchwabMarketBuilder(adapter)
+
+    result = builder.get_quotes(access_token="token", symbols=["I"])
+
+    assert result.root == {}
+    assert "Provider symbol unavailable provider=schwab" in caplog.text
+    assert "symbol=I" in caplog.text
+    assert "ValidationError" not in caplog.text
+
+
 def test_option_chain_400_is_classified_as_unsupported_symbol():
     session = MagicMock()
     session.get.return_value = MagicMock(status_code=400)
