@@ -310,6 +310,129 @@ class ProviderSymbolProfileAdapter:
             finally:
                 self.client.release(con)
 
+    def upsert_success_many(
+        self,
+        provider: str,
+        items: list[tuple[str, dict[str, Any]]],
+        *,
+        fetched_at: datetime | None = None,
+    ) -> int:
+        provider_key = self._normalize_provider(provider)
+        if not provider_key or not items:
+            return 0
+
+        resolved_fetched_at = fetched_at or datetime.now(timezone.utc)
+        params: list[dict[str, Any]] = []
+        for symbol, info in items:
+            symbol_key = self._normalize_symbol(symbol)
+            if not symbol_key or not info:
+                continue
+            payload = sanitize_json_value(info)
+            params.append(
+                {
+                    "provider": provider_key,
+                    "symbol": symbol_key,
+                    "status": "available",
+                    "fetched_at": resolved_fetched_at,
+                    "raw_json": json.dumps(payload, sort_keys=True, default=str),
+                    **self._normalized_fields(info),
+                }
+            )
+        if not params:
+            return 0
+
+        sql = f"""
+            MERGE INTO {self.table_name} t
+            USING (
+                SELECT
+                    :provider       AS provider,
+                    :symbol         AS symbol,
+                    :status         AS status,
+                    :fetched_at     AS fetched_at,
+                    :name           AS name,
+                    :currency       AS currency,
+                    :exchange_name  AS exchange_name,
+                    :quote_type     AS quote_type,
+                    :asset_type     AS asset_type,
+                    :sector         AS sector,
+                    :industry       AS industry,
+                    :country        AS country,
+                    :website        AS website,
+                    :current_price  AS current_price,
+                    :previous_close AS previous_close,
+                    :market_cap     AS market_cap,
+                    :total_assets   AS total_assets,
+                    :volume         AS volume,
+                    :avg_volume     AS avg_volume,
+                    :trailing_pe    AS trailing_pe,
+                    :forward_pe     AS forward_pe,
+                    :price_to_book  AS price_to_book,
+                    :dividend_yield AS dividend_yield,
+                    :dividend_rate  AS dividend_rate,
+                    :expense_ratio  AS expense_ratio,
+                    :beta           AS beta,
+                    :raw_json       AS raw_json
+                FROM dual
+            ) s
+            ON (t.provider = s.provider AND t.symbol = s.symbol)
+            WHEN MATCHED THEN
+                UPDATE SET
+                    t.status         = s.status,
+                    t.fetched_at     = s.fetched_at,
+                    t.updated_at     = systimestamp,
+                    t.name           = s.name,
+                    t.currency       = s.currency,
+                    t.exchange_name  = s.exchange_name,
+                    t.quote_type     = s.quote_type,
+                    t.asset_type     = s.asset_type,
+                    t.sector         = s.sector,
+                    t.industry       = s.industry,
+                    t.country        = s.country,
+                    t.website        = s.website,
+                    t.current_price  = s.current_price,
+                    t.previous_close = s.previous_close,
+                    t.market_cap     = s.market_cap,
+                    t.total_assets   = s.total_assets,
+                    t.volume         = s.volume,
+                    t.avg_volume     = s.avg_volume,
+                    t.trailing_pe    = s.trailing_pe,
+                    t.forward_pe     = s.forward_pe,
+                    t.price_to_book  = s.price_to_book,
+                    t.dividend_yield = s.dividend_yield,
+                    t.dividend_rate  = s.dividend_rate,
+                    t.expense_ratio  = s.expense_ratio,
+                    t.beta           = s.beta,
+                    t.raw_json       = s.raw_json
+            WHEN NOT MATCHED THEN
+                INSERT (
+                    provider, symbol, status, fetched_at, updated_at, name, currency,
+                    exchange_name, quote_type, asset_type, sector, industry, country,
+                    website, current_price, previous_close, market_cap, total_assets,
+                    volume, avg_volume, trailing_pe, forward_pe, price_to_book,
+                    dividend_yield, dividend_rate, expense_ratio, beta, raw_json
+                )
+                VALUES (
+                    s.provider, s.symbol, s.status, s.fetched_at, systimestamp,
+                    s.name, s.currency, s.exchange_name, s.quote_type, s.asset_type,
+                    s.sector, s.industry, s.country, s.website, s.current_price,
+                    s.previous_close, s.market_cap, s.total_assets, s.volume,
+                    s.avg_volume, s.trailing_pe, s.forward_pe, s.price_to_book,
+                    s.dividend_yield, s.dividend_rate, s.expense_ratio, s.beta,
+                    s.raw_json
+                )
+        """
+
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                cur.setinputsizes(raw_json=oracledb.DB_TYPE_CLOB)
+                cur.executemany(sql, params)
+                con.commit()
+            finally:
+                self.client.release(con)
+        return len(params)
+
     def _normalized_fields(self, info: dict[str, Any]) -> dict[str, Any]:
         return {
             "name": self._optional_str(info.get("longName") or info.get("shortName")),

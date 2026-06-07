@@ -62,7 +62,7 @@ jobs:
           host: ${{ secrets.VM_IP }}
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: data/download.py,ranking_pipeline/config.py,ranking_pipeline/storage/sqlite.py,ranking_pipeline/storage/oracle_screening.py,ranking_pipeline/pipeline/daily.py,ranking_pipeline/pipeline/ohlcv_batch.py,ranking_pipeline/pipeline/weekly_universe.py,scripts/run_ranking_universe_weekly.py
+          source: app/adapters/market/provider_symbol_profile_adapter.py,data/download.py,ranking_pipeline/config.py,ranking_pipeline/storage/sqlite.py,ranking_pipeline/storage/oracle_screening.py,ranking_pipeline/providers/__init__.py,ranking_pipeline/providers/symbol_metadata.py,ranking_pipeline/pipeline/daily.py,ranking_pipeline/pipeline/ohlcv_batch.py,ranking_pipeline/pipeline/weekly_universe.py,scripts/run_ranking_universe_weekly.py,scripts/backfill_provider_symbol_metadata.py
           target: /home/ubuntu/ranking-pipeline-patch/
 
       - name: Run ranking pipeline in sas-server
@@ -74,12 +74,16 @@ jobs:
           command_timeout: 360m
           script: |
             chmod +x /home/ubuntu/ranking_pipeline_remote.sh
+            docker cp /home/ubuntu/ranking-pipeline-patch/app/adapters/market/provider_symbol_profile_adapter.py sas-server:/app/app/adapters/market/provider_symbol_profile_adapter.py
             docker cp /home/ubuntu/ranking-pipeline-patch/data/download.py sas-server:/app/data/download.py
             docker cp /home/ubuntu/ranking-pipeline-patch/ranking_pipeline/config.py sas-server:/app/ranking_pipeline/config.py
             docker cp /home/ubuntu/ranking-pipeline-patch/ranking_pipeline/storage/sqlite.py sas-server:/app/ranking_pipeline/storage/sqlite.py
             docker cp /home/ubuntu/ranking-pipeline-patch/ranking_pipeline/storage/oracle_screening.py sas-server:/app/ranking_pipeline/storage/oracle_screening.py
+            docker cp /home/ubuntu/ranking-pipeline-patch/ranking_pipeline/providers/__init__.py sas-server:/app/ranking_pipeline/providers/__init__.py
+            docker cp /home/ubuntu/ranking-pipeline-patch/ranking_pipeline/providers/symbol_metadata.py sas-server:/app/ranking_pipeline/providers/symbol_metadata.py
             docker cp /home/ubuntu/ranking-pipeline-patch/ranking_pipeline/pipeline/daily.py sas-server:/app/ranking_pipeline/pipeline/daily.py
             docker cp /home/ubuntu/ranking-pipeline-patch/ranking_pipeline/pipeline/ohlcv_batch.py sas-server:/app/ranking_pipeline/pipeline/ohlcv_batch.py
             docker cp /home/ubuntu/ranking-pipeline-patch/ranking_pipeline/pipeline/weekly_universe.py sas-server:/app/ranking_pipeline/pipeline/weekly_universe.py
             docker cp /home/ubuntu/ranking-pipeline-patch/scripts/run_ranking_universe_weekly.py sas-server:/app/scripts/run_ranking_universe_weekly.py
+            docker cp /home/ubuntu/ranking-pipeline-patch/scripts/backfill_provider_symbol_metadata.py sas-server:/app/scripts/backfill_provider_symbol_metadata.py
             /home/ubuntu/ranking_pipeline_remote.sh ${{ needs.resolve-mode.outputs.mode }}

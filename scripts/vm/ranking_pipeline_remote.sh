@@ -14,7 +14,7 @@ exec_in() {
 
 imports_ok() {
   local err
-  err="$(exec_in python -c "import ranking_pipeline, data.download; print('ok')" 2>&1)" || {
+  err="$(exec_in python -c "import ranking_pipeline, data.download, ranking_pipeline.providers.symbol_metadata; print('ok')" 2>&1)" || {
     echo "Import check failed inside $CONTAINER:" >&2
     echo "$err" >&2
     exec_in sh -c 'echo "PYTHONPATH=${PYTHONPATH:-<unset>}"; ls -d /app/ranking_pipeline /app/data/download.py 2>&1' >&2 || true

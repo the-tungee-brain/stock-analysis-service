@@ -12,13 +12,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-import yfinance as yf
-
-from app.adapters.market.yfinance_bootstrap import configure_yfinance, yfinance_fetch_lock
 from data.download import download_symbol
 from data.store import load_raw, raw_exists, save_raw
 from ranking_pipeline.config import RankingPipelineConfig, default_config
 from ranking_pipeline.pipeline.progress_log import log_batch_progress
+from ranking_pipeline.providers.symbol_metadata import (
+    ProviderFirstSymbolMetadataResolver,
+    build_provider_first_symbol_metadata_resolver,
+)
 from ranking_pipeline.storage.oracle_screening import (
     OracleScreeningStore,
     open_oracle_screening_store,
@@ -58,21 +59,11 @@ def _chunks(items: list[str], size: int) -> Iterable[list[str]]:
         yield items[i : i + size]
 
 
-def _fetch_market_cap(symbol: str) -> float | None:
-    configure_yfinance()
-    try:
-        with yfinance_fetch_lock():
-            info = yf.Ticker(symbol).info
-        cap = info.get("marketCap")
-        return float(cap) if cap else None
-    except Exception:
-        return None
-
-
 def _screen_one(
     symbol: str,
     filters,
     lookback_days: int,
+    market_cap: float | None = None,
 ) -> dict:
     sym = symbol.strip().upper()
     try:
@@ -83,8 +74,12 @@ def _screen_one(
             save_raw(ohlcv, sym)
         screen_ohlcv = ohlcv.tail(lookback_days).copy()
         del ohlcv
-        cap = _fetch_market_cap(sym)
-        metrics = screen_symbol_ohlcv(sym, screen_ohlcv, market_cap=cap, filters=filters)
+        metrics = screen_symbol_ohlcv(
+            sym,
+            screen_ohlcv,
+            market_cap=market_cap,
+            filters=filters,
+        )
         del screen_ohlcv
         reasons = {
             "min_price": bool(metrics.last_close > filters.min_price),
@@ -124,6 +119,7 @@ def refresh_universe(
     commit_interval: int | None = None,
     resume: bool = True,
     screen_store: OracleScreeningStore | None = None,
+    metadata_resolver: ProviderFirstSymbolMetadataResolver | None = None,
 ) -> str:
     """Download listings, screen liquidity, persist snapshot. Returns snapshot_id."""
     global _STOP_REQUESTED
@@ -149,6 +145,7 @@ def refresh_universe(
     log_every = max(1, int(memory_log_interval or cfg.universe_memory_log_interval))
     commit_every = max(1, int(commit_interval or cfg.universe_commit_interval))
     oracle_store = screen_store or open_oracle_screening_store()
+    resolver = metadata_resolver or build_provider_first_symbol_metadata_resolver()
     screen_run = oracle_store.start_or_resume_run(
         snapshot_id=snapshot_id,
         total_count=total,
@@ -195,6 +192,10 @@ def refresh_universe(
             batch_symbols = [sym for sym in candidate_batch if sym not in completed_in_batch]
             if not batch_symbols:
                 continue
+            metadata_by_symbol = resolver.resolve_many(
+                batch_symbols,
+                required_fields=("market_cap",),
+            )
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 futures = {
                     pool.submit(
@@ -202,6 +203,11 @@ def refresh_universe(
                         sym,
                         cfg.liquidity,
                         cfg.liquidity.screening_lookback_days,
+                        (
+                            metadata_by_symbol[sym].market_cap
+                            if sym in metadata_by_symbol
+                            else None
+                        ),
                     ): sym
                     for sym in batch_symbols
                 }

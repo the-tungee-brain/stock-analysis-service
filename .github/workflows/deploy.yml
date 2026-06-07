@@ -133,6 +133,7 @@ jobs:
               -e RANKING_UNIVERSE_BATCH_SIZE=250 \
               -e RANKING_UNIVERSE_MEMORY_LOG_INTERVAL=100 \
               -e RANKING_UNIVERSE_COMMIT_INTERVAL=250 \
+              -e RANKING_YFINANCE_METADATA_FALLBACK=true \
               -e YFINANCE_MIN_INTERVAL_SEC=0.4 \
               -e PATTERN_ARTIFACT_DIR=/app/artifacts \
               --memory=5g \

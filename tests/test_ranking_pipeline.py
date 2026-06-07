@@ -11,6 +11,7 @@ import pytest
 from data.store import append_raw, merge_ohlcv, raw_exists
 from ranking_pipeline.config import RankingPipelineConfig
 from ranking_pipeline.features.ranking_features import compute_ranking_features
+from ranking_pipeline.providers.symbol_metadata import SymbolMetadata
 from ranking_pipeline.scoring.composite import score_universe_slice
 from ranking_pipeline.storage.oracle_screening import ScreenRun
 from ranking_pipeline.storage.sqlite import RankingStore
@@ -198,17 +199,34 @@ def test_refresh_universe_persists_batches_without_retaining_all_members(
     )
     monkeypatch.setattr(weekly_universe, "_rss_mb", lambda: 123.0)
 
-    def fake_screen_one(symbol: str, _filters, _lookback_days: int):
+    seen_market_caps: dict[str, float | None] = {}
+
+    def fake_screen_one(
+        symbol: str,
+        _filters,
+        _lookback_days: int,
+        market_cap: float | None = None,
+    ):
+        seen_market_caps[symbol] = market_cap
         return {
             "symbol": symbol,
             "last_close": 10.0,
-            "market_cap": 2e9,
+            "market_cap": market_cap,
             "avg_dollar_volume_20d": 50e6,
             "passed_filters": symbol in {"AAA", "CCC", "EEE"},
         }
 
     monkeypatch.setattr(weekly_universe, "_screen_one", fake_screen_one)
     screen_store = _FakeScreenStore()
+    metadata_resolver = _FakeMetadataResolver(
+        {
+            "AAA": 2e9,
+            "BBB": 3e9,
+            "CCC": 4e9,
+            "DDD": 5e9,
+            "EEE": 6e9,
+        }
+    )
 
     snapshot_id = weekly_universe.refresh_universe(
         batch_size=2,
@@ -217,11 +235,14 @@ def test_refresh_universe_persists_batches_without_retaining_all_members(
         commit_interval=2,
         resume=False,
         screen_store=screen_store,
+        metadata_resolver=metadata_resolver,
     )
 
     assert screen_store.upserted_symbols == ["AAA", "BBB", "CCC", "DDD", "EEE"]
     assert screen_store.commit_progress_counts == [2, 4, 5]
     assert screen_store.finalized == ("run-1", 5, 3)
+    assert metadata_resolver.calls == [["AAA", "BBB"], ["CCC", "DDD"], ["EEE"]]
+    assert seen_market_caps == {"AAA": 2e9, "BBB": 3e9, "CCC": 4e9, "DDD": 5e9, "EEE": 6e9}
     assert screen_store.full_completed_load_called is False
     assert screen_store.full_results_load_called is False
     assert store.load_universe_symbols(snapshot_id) == ["AAA", "CCC", "EEE"]
@@ -245,29 +266,32 @@ def test_refresh_universe_resumes_completed_oracle_symbols(
     monkeypatch.setattr(weekly_universe, "_rss_mb", lambda: 123.0)
     screened: list[str] = []
 
-    def fake_screen_one(symbol: str, _filters, _lookback_days: int):
+    def fake_screen_one(symbol: str, _filters, _lookback_days: int, market_cap: float | None = None):
         screened.append(symbol)
         return {
             "symbol": symbol,
             "last_close": 10.0,
-            "market_cap": 2e9,
+            "market_cap": market_cap,
             "avg_dollar_volume_20d": 50e6,
             "passed_filters": True,
         }
 
     monkeypatch.setattr(weekly_universe, "_screen_one", fake_screen_one)
     screen_store = _FakeScreenStore(existing=["AAA"])
+    metadata_resolver = _FakeMetadataResolver({"BBB": 3e9, "CCC": 4e9})
 
     snapshot_id = weekly_universe.refresh_universe(
         batch_size=2,
         max_workers=1,
         commit_interval=2,
         screen_store=screen_store,
+        metadata_resolver=metadata_resolver,
     )
 
     assert screened == ["BBB", "CCC"]
     assert screen_store.upserted_symbols == ["BBB", "CCC"]
     assert screen_store.completed_queries == [["AAA", "BBB"], ["CCC"]]
+    assert metadata_resolver.calls == [["BBB"], ["CCC"]]
     assert screen_store.full_completed_load_called is False
     assert screen_store.full_results_load_called is False
     assert store.load_universe_symbols(snapshot_id) == ["AAA", "BBB", "CCC"]
@@ -346,6 +370,19 @@ class _FakeScreenStore:
 
     def close(self) -> None:
         return None
+
+
+class _FakeMetadataResolver:
+    def __init__(self, market_caps: dict[str, float]) -> None:
+        self.market_caps = market_caps
+        self.calls: list[list[str]] = []
+
+    def resolve_many(self, symbols: list[str], *, required_fields):
+        self.calls.append(list(symbols))
+        return {
+            symbol: SymbolMetadata(symbol=symbol, market_cap=self.market_caps.get(symbol))
+            for symbol in symbols
+        }
 
 
 def test_merge_ohlcv_dedupes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
