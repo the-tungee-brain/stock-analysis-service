@@ -398,11 +398,13 @@ def _catalyst_component(events: list[Any]) -> _Component:
 
 def _extract_levels(payload: dict[str, Any], *, bias: str) -> TradingBiasLevels:
     chart = _get(payload, "chart_intelligence", "chartIntelligence") or {}
-    selected = _get(chart, "selected_levels", "selectedLevels") or {}
+    selected_payload = _get(chart, "selected_levels", "selectedLevels")
+    selected = selected_payload if isinstance(selected_payload, dict) else {}
+    selected_levels_present = isinstance(selected_payload, dict) and bool(selected_payload)
     supports = _get(chart, "support_zones", "supportZones") or []
     resistances = _get(chart, "resistance_zones", "resistanceZones") or []
     support = _selected_zone_price(selected, "nearest_support", "nearestSupport", kind="support")
-    if support is None:
+    if support is None and not selected_levels_present:
         support = _zone_price(supports, "support")
     resistance = _selected_zone_price(
         selected,
@@ -410,7 +412,7 @@ def _extract_levels(payload: dict[str, Any], *, bias: str) -> TradingBiasLevels:
         "nearestResistance",
         kind="resistance",
     )
-    if resistance is None:
+    if resistance is None and not selected_levels_present:
         resistance = _zone_price(resistances, "resistance")
     actionable_support = _selected_zone_price(
         selected,

@@ -82,6 +82,8 @@ def test_chart_intelligence_payload_shape():
     assert "trendlines" in payload
     assert "support_zones" in payload
     assert "resistance_zones" in payload
+    assert "reference_price" in payload
+    assert "referencePrice" in payload
     assert "selected_levels" in payload
     assert "annotations" in payload
     assert "highlighted_candles" in payload
@@ -133,10 +135,16 @@ def test_chart_intelligence_selected_levels_are_additive():
 
     selected = payload["selected_levels"]
     assert {
+        "reference_price",
+        "referencePrice",
         "nearest_support",
         "nearestSupport",
+        "next_support",
+        "nextSupport",
         "nearest_resistance",
         "nearestResistance",
+        "next_resistance",
+        "nextResistance",
         "actionable_support",
         "actionableSupport",
         "actionable_resistance",
@@ -188,11 +196,183 @@ def test_inside_resistance_uses_upper_edge_as_breakout_level():
     )
 
     payload = _zone_dict(zone)
-    selected = _selected_levels(supports=[], resistances=[payload])
+    selected = _selected_levels(supports=[], resistances=[payload], reference_price=466.0)
 
     assert payload["price_low"] == 464.81
-    assert selected["nearest_resistance"]["breakout_level"] == 478.35
-    assert selected["nearest_resistance"]["breakout_level"] > 466.0
+    assert payload["breakout_level"] == 478.35
+    assert selected["nearest_resistance"] is None
+
+
+def test_selected_levels_are_strictly_side_valid():
+    support_above_price = _zone_dict(
+        PriceZone(
+            price_low=309.65,
+            price_high=310.25,
+            label="Support: $309.65",
+            zone_type="support",
+            touches=2,
+            strength=0.6,
+            midpoint=309.95,
+            level_role="nearbyContext",
+            actionable_for={
+                "chartContext": True,
+                "tradeStop": False,
+                "tradeTarget": False,
+                "breakoutTrigger": False,
+            },
+            zone_state="abovePrice",
+            display_level=None,
+        )
+    )
+    nearest_support = _zone_dict(
+        PriceZone(
+            price_low=305.5,
+            price_high=305.93,
+            label="Support: $305.93",
+            zone_type="support",
+            touches=2,
+            strength=0.7,
+            midpoint=305.72,
+            level_role="actionable",
+            actionable_for={
+                "chartContext": True,
+                "tradeStop": True,
+                "tradeTarget": False,
+                "breakoutTrigger": False,
+            },
+            zone_state="belowPrice",
+            display_level=305.93,
+        )
+    )
+    next_support = _zone_dict(
+        PriceZone(
+            price_low=300.5,
+            price_high=300.91,
+            label="Support: $300.91",
+            zone_type="support",
+            touches=2,
+            strength=0.64,
+            midpoint=300.7,
+            level_role="nearbyContext",
+            actionable_for={
+                "chartContext": True,
+                "tradeStop": False,
+                "tradeTarget": False,
+                "breakoutTrigger": False,
+            },
+            zone_state="belowPrice",
+            display_level=300.91,
+        )
+    )
+    nearest_resistance = _zone_dict(
+        PriceZone(
+            price_low=309.09,
+            price_high=309.6,
+            label="Resistance: $309.09",
+            zone_type="resistance",
+            touches=2,
+            strength=0.72,
+            midpoint=309.35,
+            level_role="actionable",
+            actionable_for={
+                "chartContext": True,
+                "tradeStop": False,
+                "tradeTarget": True,
+                "breakoutTrigger": True,
+            },
+            zone_state="abovePrice",
+            display_level=309.09,
+            breakout_level=309.09,
+        )
+    )
+    next_resistance = _zone_dict(
+        PriceZone(
+            price_low=316.03,
+            price_high=316.5,
+            label="Resistance: $316.03",
+            zone_type="resistance",
+            touches=2,
+            strength=0.6,
+            midpoint=316.27,
+            level_role="nearbyContext",
+            actionable_for={
+                "chartContext": True,
+                "tradeStop": False,
+                "tradeTarget": False,
+                "breakoutTrigger": False,
+            },
+            zone_state="abovePrice",
+            display_level=316.03,
+            breakout_level=316.03,
+        )
+    )
+    resistance_below_price = _zone_dict(
+        PriceZone(
+            price_low=304.0,
+            price_high=305.0,
+            label="Resistance: $304.00",
+            zone_type="resistance",
+            touches=2,
+            strength=0.55,
+            midpoint=304.5,
+            level_role="nearbyContext",
+            actionable_for={
+                "chartContext": True,
+                "tradeStop": False,
+                "tradeTarget": False,
+                "breakoutTrigger": False,
+            },
+            zone_state="belowPrice",
+            display_level=None,
+        )
+    )
+
+    selected = _selected_levels(
+        supports=[support_above_price, next_support, nearest_support],
+        resistances=[next_resistance, resistance_below_price, nearest_resistance],
+        reference_price=307.34,
+    )
+
+    assert selected["reference_price"] == 307.34
+    assert selected["nearest_support"]["display_level"] == 305.93
+    assert selected["next_support"]["display_level"] == 300.91
+    assert selected["nearest_resistance"]["display_level"] == 309.09
+    assert selected["next_resistance"]["display_level"] == 316.03
+    assert selected["actionable_support"]["display_level"] == 305.93
+    assert selected["actionable_resistance"]["display_level"] == 309.09
+
+
+def test_selected_levels_do_not_fabricate_missing_sides():
+    wrong_side_support = _zone_dict(
+        PriceZone(
+            price_low=309.65,
+            price_high=310.25,
+            label="Support: $309.65",
+            zone_type="support",
+            touches=2,
+            strength=0.6,
+            midpoint=309.95,
+            level_role="nearbyContext",
+            actionable_for={
+                "chartContext": True,
+                "tradeStop": False,
+                "tradeTarget": False,
+                "breakoutTrigger": False,
+            },
+            zone_state="abovePrice",
+            display_level=None,
+        )
+    )
+
+    selected = _selected_levels(
+        supports=[wrong_side_support],
+        resistances=[],
+        reference_price=307.34,
+    )
+
+    assert selected["nearest_support"] is None
+    assert selected["next_support"] is None
+    assert selected["actionable_support"] is None
 
 
 def test_generator_marks_far_historical_support_as_context_only():

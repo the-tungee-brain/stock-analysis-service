@@ -378,6 +378,10 @@ class ChartIntelligence(BaseModel):
     resistance_zones: list[dict[str, Any]] = Field(
         default_factory=list, serialization_alias="resistanceZones"
     )
+    reference_price: float | None = Field(
+        default=None,
+        serialization_alias="referencePrice",
+    )
     selected_levels: dict[str, Any] | None = Field(
         default_factory=dict, serialization_alias="selectedLevels"
     )

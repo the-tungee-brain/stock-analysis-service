@@ -32,6 +32,7 @@ def build_chart_intelligence(
     ranking_score: float | None,
 ) -> dict[str, Any]:
     structure = analyze_trend_structure(ohlcv)
+    reference_price = _latest_close(ohlcv)
     supports, resistances = find_support_resistance_zones(ohlcv)
     volume_ctx = analyze_volume(ohlcv, structure)
     ma_ctx = analyze_moving_averages(ohlcv)
@@ -97,9 +98,12 @@ def build_chart_intelligence(
         "trendlines": overlays["trendlines"],
         "support_zones": overlays["support_zones"],
         "resistance_zones": overlays["resistance_zones"],
+        "reference_price": reference_price,
+        "referencePrice": reference_price,
         "selected_levels": _selected_levels(
             supports=overlays["support_zones"],
             resistances=overlays["resistance_zones"],
+            reference_price=reference_price,
         ),
         "annotations": annotations,
         "highlighted_candles": overlays["highlighted_candles"],
@@ -231,30 +235,68 @@ def _zone_dict(zone) -> dict[str, Any]:
     }
 
 
+def _latest_close(ohlcv) -> float | None:
+    try:
+        value = float(ohlcv["close"].iloc[-1])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def _selected_levels(
     *,
     supports: list[dict[str, Any]],
     resistances: list[dict[str, Any]],
+    reference_price: float | None = None,
 ) -> dict[str, Any]:
-    nearest_support = _first_level(supports, allowed_states={"belowPrice", "insideZone"})
-    nearest_resistance = _first_level(resistances, allowed_states={"abovePrice", "insideZone"})
+    support_levels = sorted(
+        [
+            level
+            for level in supports
+            if _is_active_support(level, reference_price=reference_price)
+        ],
+        key=lambda level: _level_display_price(level) or float("-inf"),
+        reverse=True,
+    )
+    resistance_levels = sorted(
+        [
+            level
+            for level in resistances
+            if _is_active_resistance(level, reference_price=reference_price)
+        ],
+        key=lambda level: _level_display_price(level) or float("inf"),
+    )
+    nearest_support = support_levels[0] if support_levels else None
+    next_support = support_levels[1] if len(support_levels) > 1 else None
+    nearest_resistance = resistance_levels[0] if resistance_levels else None
+    next_resistance = resistance_levels[1] if len(resistance_levels) > 1 else None
     actionable_support = _first_level(
-        supports,
+        support_levels,
         role="actionable",
         actionable_key="tradeStop",
+        reference_price=reference_price,
+        side="support",
     )
     actionable_resistance = _first_level(
-        resistances,
+        resistance_levels,
         role="actionable",
         actionable_key="tradeTarget",
+        reference_price=reference_price,
+        side="resistance",
     )
     major_support = _first_level(supports, role="majorHistorical")
     major_resistance = _first_level(resistances, role="majorHistorical")
     return {
+        "reference_price": reference_price,
+        "referencePrice": reference_price,
         "nearest_support": nearest_support,
         "nearestSupport": nearest_support,
+        "next_support": next_support,
+        "nextSupport": next_support,
         "nearest_resistance": nearest_resistance,
         "nearestResistance": nearest_resistance,
+        "next_resistance": next_resistance,
+        "nextResistance": next_resistance,
         "actionable_support": actionable_support,
         "actionableSupport": actionable_support,
         "actionable_resistance": actionable_resistance,
@@ -272,11 +314,23 @@ def _first_level(
     role: str | None = None,
     actionable_key: str | None = None,
     allowed_states: set[str] | None = None,
+    reference_price: float | None = None,
+    side: str | None = None,
 ) -> dict[str, Any] | None:
     for level in levels:
         if role is not None and level.get("level_role") != role:
             continue
         if allowed_states is not None and level.get("zone_state") not in allowed_states:
+            continue
+        if side == "support" and not _is_active_support(
+            level,
+            reference_price=reference_price,
+        ):
+            continue
+        if side == "resistance" and not _is_active_resistance(
+            level,
+            reference_price=reference_price,
+        ):
             continue
         if actionable_key is not None:
             actionable_for = level.get("actionable_for") or {}
@@ -284,3 +338,48 @@ def _first_level(
                 continue
         return level
     return None
+
+
+def _level_display_price(level: dict[str, Any]) -> float | None:
+    for key in ("display_level", "displayLevel", "midpoint"):
+        value = level.get(key)
+        if isinstance(value, (int, float)) and value > 0:
+            return float(value)
+    low = level.get("price_low", level.get("priceLow"))
+    high = level.get("price_high", level.get("priceHigh"))
+    if isinstance(low, (int, float)) and isinstance(high, (int, float)):
+        return (float(low) + float(high)) / 2
+    return None
+
+
+def _is_active_support(
+    level: dict[str, Any],
+    *,
+    reference_price: float | None,
+) -> bool:
+    if level.get("zone_state") != "belowPrice":
+        return False
+    price = _level_display_price(level)
+    return (
+        price is not None
+        and reference_price is not None
+        and price < reference_price
+    )
+
+
+def _is_active_resistance(
+    level: dict[str, Any],
+    *,
+    reference_price: float | None,
+) -> bool:
+    if level.get("zone_state") != "abovePrice":
+        return False
+    price = _level_display_price(level)
+    breakout = level.get("breakout_level", level.get("breakoutLevel"))
+    breakout_price = float(breakout) if isinstance(breakout, (int, float)) else price
+    return (
+        price is not None
+        and reference_price is not None
+        and price > reference_price
+        and breakout_price > reference_price
+    )
