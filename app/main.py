@@ -50,6 +50,9 @@ from app.api.chat_sessions_route import router as chat_sessions_router
 from app.api.get_account_positions_route import router as get_account_positions_router
 from app.api.get_portfolio_brief_route import router as get_portfolio_brief_router
 from app.api.get_portfolio_news_route import router as get_portfolio_news_router
+from app.api.get_portfolio_optimization_route import (
+    router as get_portfolio_optimization_router,
+)
 from app.api.get_symbol_analysis_precomputed_route import (
     router as get_symbol_analysis_precomputed_router,
 )
@@ -158,6 +161,7 @@ protected_api.include_router(delete_account_router)
 protected_api.include_router(get_account_positions_router)
 protected_api.include_router(get_portfolio_brief_router)
 protected_api.include_router(get_portfolio_news_router)
+protected_api.include_router(get_portfolio_optimization_router)
 protected_api.include_router(portfolio_memory_router)
 protected_api.include_router(strategy_router)
 protected_api.include_router(strategy_playbook_ask_router)
