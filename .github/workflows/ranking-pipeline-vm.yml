@@ -56,6 +56,15 @@ jobs:
           target: /home/ubuntu/
           strip_components: 2
 
+      - name: Copy ranking pipeline patch files to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: data/download.py,ranking_pipeline/config.py,ranking_pipeline/storage/sqlite.py,ranking_pipeline/storage/oracle_screening.py,ranking_pipeline/pipeline/daily.py,ranking_pipeline/pipeline/ohlcv_batch.py,ranking_pipeline/pipeline/weekly_universe.py,scripts/run_ranking_universe_weekly.py
+          target: /home/ubuntu/ranking-pipeline-patch/
+
       - name: Run ranking pipeline in sas-server
         uses: appleboy/ssh-action@v1.0.0
         with:
@@ -65,4 +74,12 @@ jobs:
           command_timeout: 360m
           script: |
             chmod +x /home/ubuntu/ranking_pipeline_remote.sh
+            docker cp /home/ubuntu/ranking-pipeline-patch/data/download.py sas-server:/app/data/download.py
+            docker cp /home/ubuntu/ranking-pipeline-patch/ranking_pipeline/config.py sas-server:/app/ranking_pipeline/config.py
+            docker cp /home/ubuntu/ranking-pipeline-patch/ranking_pipeline/storage/sqlite.py sas-server:/app/ranking_pipeline/storage/sqlite.py
+            docker cp /home/ubuntu/ranking-pipeline-patch/ranking_pipeline/storage/oracle_screening.py sas-server:/app/ranking_pipeline/storage/oracle_screening.py
+            docker cp /home/ubuntu/ranking-pipeline-patch/ranking_pipeline/pipeline/daily.py sas-server:/app/ranking_pipeline/pipeline/daily.py
+            docker cp /home/ubuntu/ranking-pipeline-patch/ranking_pipeline/pipeline/ohlcv_batch.py sas-server:/app/ranking_pipeline/pipeline/ohlcv_batch.py
+            docker cp /home/ubuntu/ranking-pipeline-patch/ranking_pipeline/pipeline/weekly_universe.py sas-server:/app/ranking_pipeline/pipeline/weekly_universe.py
+            docker cp /home/ubuntu/ranking-pipeline-patch/scripts/run_ranking_universe_weekly.py sas-server:/app/scripts/run_ranking_universe_weekly.py
             /home/ubuntu/ranking_pipeline_remote.sh ${{ needs.resolve-mode.outputs.mode }}

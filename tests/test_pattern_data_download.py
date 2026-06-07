@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from data.benchmarks import VIX_SYMBOL, ensure_benchmark_ohlcv
-from data.download import download_and_store_symbol, download_symbol
+from data.download import download_and_store_symbol, download_symbol, main as download_main
 from data.loader import load_symbol
 from data.paths import raw_parquet_path
 from data.store import OHLCV_COLUMNS, _normalize_ohlcv, save_raw
@@ -208,6 +208,40 @@ def test_download_symbol_filters_zero_volume_for_equities(monkeypatch):
 
     with pytest.raises(ValueError, match="No data returned for AAPL"):
         download_symbol("AAPL", years=1)
+
+
+def test_download_symbol_without_retry_attempts_once(monkeypatch):
+    calls = 0
+
+    def fail_fetch(*args, **kwargs):  # noqa: ANN002, ANN003
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("rate limited")
+
+    monkeypatch.setattr("data.download._fetch_yahoo_ohlcv", fail_fetch)
+    monkeypatch.setattr("data.download.time.sleep", lambda _: pytest.fail("unexpected retry delay"))
+
+    with pytest.raises(ValueError, match="No data returned for AAPL"):
+        download_symbol("AAPL", years=1, retry=False)
+
+    assert calls == 1
+
+
+def test_download_cli_no_retry_passes_single_attempt_mode(monkeypatch, capsys):
+    seen: dict[str, object] = {}
+
+    def fake_download_and_store_all(symbols, *, years, retry):  # noqa: ANN001
+        seen["symbols"] = symbols
+        seen["years"] = years
+        seen["retry"] = retry
+        return {"SPY": _sample_ohlcv(rows=1)}
+
+    monkeypatch.setattr("data.download.download_and_store_all", fake_download_and_store_all)
+
+    assert download_main(["--symbols", "SPY", "--years", "1", "--no-retry"]) == 0
+
+    assert seen == {"symbols": ["SPY"], "years": 1, "retry": False}
+    assert "Saved SPY: 1 rows" in capsys.readouterr().out
 
 
 def test_missing_vix_benchmark_refresh_creates_non_empty_parquet(tmp_path, monkeypatch):

@@ -35,11 +35,11 @@ def update_symbol_ohlcv(symbol: str, config: RankingPipelineConfig) -> tuple[str
                     len(existing),
                     min_bars,
                 )
-                _, df = download_and_store_symbol(sym, years=DEFAULT_YEARS)
+                _, df = download_and_store_symbol(sym, years=DEFAULT_YEARS, retry=False)
             else:
-                df = download_symbol_incremental(sym)
+                df = download_symbol_incremental(sym, retry=False)
         else:
-            df = download_symbol_incremental(sym)
+            df = download_symbol_incremental(sym, retry=False)
         last = pd.Timestamp(df.index.max()).strftime("%Y-%m-%d")
         return sym, len(df), last
     except Exception:

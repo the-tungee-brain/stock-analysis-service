@@ -20,8 +20,44 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Limit symbols screened (useful for dev/smoke tests)",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Symbols to process per batch (default: config/env)",
+    )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        help="Concurrent screening workers (default: config/env)",
+    )
+    parser.add_argument(
+        "--memory-log-interval",
+        type=int,
+        default=None,
+        help="Log RSS memory every N processed symbols (default: config/env)",
+    )
+    parser.add_argument(
+        "--commit-interval",
+        type=int,
+        default=None,
+        help="Commit Oracle screening results every N symbols (default: config/env)",
+    )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Ignore any existing universe screening checkpoint and restart the snapshot.",
+    )
     args = parser.parse_args(argv)
-    snapshot_id = refresh_universe(max_candidates=args.max_candidates)
+    snapshot_id = refresh_universe(
+        max_candidates=args.max_candidates,
+        batch_size=args.batch_size,
+        max_workers=args.max_workers,
+        memory_log_interval=args.memory_log_interval,
+        commit_interval=args.commit_interval,
+        resume=not args.no_resume,
+    )
     print({"snapshot_id": snapshot_id})
     return 0
 

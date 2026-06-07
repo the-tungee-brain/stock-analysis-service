@@ -60,6 +60,10 @@ class RankingPipelineConfig:
     execution_costs: ExecutionCostConfig = field(default_factory=ExecutionCostConfig)
     backtest_top_n: int = 20
     backtest_hold_days: int = 5
+    universe_batch_size: int = 250
+    universe_max_workers: int = 2
+    universe_memory_log_interval: int = 100
+    universe_commit_interval: int = 250
 
     def normalized_weights(self) -> dict[str, float]:
         total = sum(self.group_weights.values())
@@ -83,6 +87,18 @@ def default_config() -> RankingPipelineConfig:
     env_workers = os.getenv("RANKING_MAX_WORKERS")
     if env_workers:
         cfg.max_workers = int(env_workers)
+    env_universe_workers = os.getenv("RANKING_UNIVERSE_MAX_WORKERS")
+    if env_universe_workers:
+        cfg.universe_max_workers = int(env_universe_workers)
+    env_universe_batch = os.getenv("RANKING_UNIVERSE_BATCH_SIZE")
+    if env_universe_batch:
+        cfg.universe_batch_size = int(env_universe_batch)
+    env_memory_log = os.getenv("RANKING_UNIVERSE_MEMORY_LOG_INTERVAL")
+    if env_memory_log:
+        cfg.universe_memory_log_interval = int(env_memory_log)
+    env_commit_interval = os.getenv("RANKING_UNIVERSE_COMMIT_INTERVAL")
+    if env_commit_interval:
+        cfg.universe_commit_interval = int(env_commit_interval)
     env_target = os.getenv("RANKING_CLASSIFICATION_TARGET")
     if env_target:
         cfg.classification_target = ClassificationTarget(env_target.strip().lower())

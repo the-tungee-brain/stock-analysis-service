@@ -12,6 +12,7 @@ from data.store import append_raw, merge_ohlcv, raw_exists
 from ranking_pipeline.config import RankingPipelineConfig
 from ranking_pipeline.features.ranking_features import compute_ranking_features
 from ranking_pipeline.scoring.composite import score_universe_slice
+from ranking_pipeline.storage.oracle_screening import ScreenRun
 from ranking_pipeline.storage.sqlite import RankingStore
 from ranking_pipeline.universe.filters import compute_adv_dollars, screen_symbol_ohlcv
 
@@ -148,6 +149,184 @@ def test_sqlite_ranking_roundtrip(tmp_path: Path):
     latest = store.get_latest_ranking_run()
     assert latest is not None
     assert latest.run_id == "run-1"
+
+
+def test_sqlite_universe_snapshot_incremental_finalize(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from data import paths
+
+    monkeypatch.setattr(paths, "RANKING_DIR", tmp_path / "ranking")
+    db = tmp_path / "rank.db"
+    store = RankingStore(db)
+
+    store.start_universe_snapshot("snap-1")
+    store.append_universe_members(
+        "snap-1",
+        [
+            {
+                "symbol": "AAA",
+                "last_close": 10.0,
+                "market_cap": 2e9,
+                "avg_dollar_volume_20d": 50e6,
+                "passed_filters": True,
+            }
+        ],
+    )
+    store.append_universe_members(
+        "snap-1",
+        [{"symbol": "BBB", "passed_filters": False}],
+    )
+
+    assert store.finalize_universe_snapshot("snap-1") == 1
+    assert store.load_universe_symbols("snap-1") == ["AAA"]
+    assert store.active_snapshot_id() == "snap-1"
+
+
+def test_refresh_universe_persists_batches_without_retaining_all_members(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from data import paths
+    from ranking_pipeline.pipeline import weekly_universe
+
+    monkeypatch.setattr(paths, "RANKING_DIR", tmp_path / "ranking")
+    store = RankingStore(tmp_path / "rank.db")
+    monkeypatch.setattr(weekly_universe, "open_store", lambda _cfg: store)
+    monkeypatch.setattr(
+        weekly_universe,
+        "fetch_all_us_equity_symbols",
+        lambda: ["AAA", "BBB", "CCC", "DDD", "EEE"],
+    )
+    monkeypatch.setattr(weekly_universe, "_rss_mb", lambda: 123.0)
+
+    def fake_screen_one(symbol: str, _filters, _lookback_days: int):
+        return {
+            "symbol": symbol,
+            "last_close": 10.0,
+            "market_cap": 2e9,
+            "avg_dollar_volume_20d": 50e6,
+            "passed_filters": symbol in {"AAA", "CCC", "EEE"},
+        }
+
+    monkeypatch.setattr(weekly_universe, "_screen_one", fake_screen_one)
+    screen_store = _FakeScreenStore()
+
+    snapshot_id = weekly_universe.refresh_universe(
+        batch_size=2,
+        max_workers=1,
+        memory_log_interval=2,
+        commit_interval=2,
+        resume=False,
+        screen_store=screen_store,
+    )
+
+    assert screen_store.upserted_symbols == ["AAA", "BBB", "CCC", "DDD", "EEE"]
+    assert screen_store.commit_progress_counts == [2, 4, 5]
+    assert screen_store.finalized == ("run-1", 5, 3)
+    assert store.load_universe_symbols(snapshot_id) == ["AAA", "CCC", "EEE"]
+
+
+def test_refresh_universe_resumes_completed_oracle_symbols(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from data import paths
+    from ranking_pipeline.pipeline import weekly_universe
+
+    monkeypatch.setattr(paths, "RANKING_DIR", tmp_path / "ranking")
+    store = RankingStore(tmp_path / "rank.db")
+    monkeypatch.setattr(weekly_universe, "open_store", lambda _cfg: store)
+    monkeypatch.setattr(
+        weekly_universe,
+        "fetch_all_us_equity_symbols",
+        lambda: ["AAA", "BBB", "CCC"],
+    )
+    monkeypatch.setattr(weekly_universe, "_rss_mb", lambda: 123.0)
+    screened: list[str] = []
+
+    def fake_screen_one(symbol: str, _filters, _lookback_days: int):
+        screened.append(symbol)
+        return {
+            "symbol": symbol,
+            "last_close": 10.0,
+            "market_cap": 2e9,
+            "avg_dollar_volume_20d": 50e6,
+            "passed_filters": True,
+        }
+
+    monkeypatch.setattr(weekly_universe, "_screen_one", fake_screen_one)
+    screen_store = _FakeScreenStore(existing=["AAA"])
+
+    snapshot_id = weekly_universe.refresh_universe(
+        batch_size=2,
+        max_workers=1,
+        commit_interval=2,
+        screen_store=screen_store,
+    )
+
+    assert screened == ["BBB", "CCC"]
+    assert screen_store.upserted_symbols == ["BBB", "CCC"]
+    assert store.load_universe_symbols(snapshot_id) == ["AAA", "BBB", "CCC"]
+
+
+class _FakeScreenStore:
+    def __init__(self, existing: list[str] | None = None) -> None:
+        self.run_id = "run-1"
+        self.snapshot_id = "snap-1"
+        self.results = {
+            symbol: {
+                "symbol": symbol,
+                "last_close": 10.0,
+                "market_cap": 2e9,
+                "avg_dollar_volume_20d": 50e6,
+                "passed_filters": True,
+            }
+            for symbol in (existing or [])
+        }
+        self.upserted_symbols: list[str] = []
+        self.commit_progress_counts: list[int] = []
+        self.finalized: tuple[str, int, int] | None = None
+
+    def start_or_resume_run(self, **_kwargs) -> ScreenRun:
+        return ScreenRun(
+            run_id=self.run_id,
+            snapshot_id=self.snapshot_id,
+            processed_count=len(self.results),
+            passed_count=sum(1 for result in self.results.values() if result["passed_filters"]),
+        )
+
+    def completed_symbols(self, _run_id: str) -> set[str]:
+        return set(self.results)
+
+    def upsert_result(self, _run_id: str, result: dict) -> None:
+        self.upserted_symbols.append(result["symbol"])
+        self.results[result["symbol"]] = result
+
+    def upsert_error(self, _run_id: str, _symbol: str, _error: str) -> None:
+        return None
+
+    def update_progress(
+        self,
+        _run_id: str,
+        *,
+        processed_count: int,
+        passed_count: int,
+        rss_mb: float,
+        commit: bool,
+    ) -> None:
+        if commit:
+            self.commit_progress_counts.append(processed_count)
+
+    def mark_interrupted(self, _run_id: str, *, processed_count: int, passed_count: int) -> None:
+        return None
+
+    def finalize_run(self, run_id: str, *, processed_count: int, passed_count: int) -> None:
+        self.finalized = (run_id, processed_count, passed_count)
+
+    def load_results(self, _run_id: str) -> list[dict]:
+        return list(self.results.values())
+
+    def close(self) -> None:
+        return None
 
 
 def test_merge_ohlcv_dedupes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

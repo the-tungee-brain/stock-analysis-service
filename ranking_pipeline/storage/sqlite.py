@@ -76,30 +76,87 @@ class RankingStore:
         snapshot_id: str,
         members: list[dict[str, Any]],
     ) -> None:
-        passed = [m for m in members if m.get("passed_filters")]
+        with self._connect() as conn:
+            self._replace_universe_snapshot(conn, snapshot_id, members)
+            conn.commit()
+        self.set_active_universe_snapshot(snapshot_id)
+
+    def _replace_universe_snapshot(
+        self,
+        conn: sqlite3.Connection,
+        snapshot_id: str,
+        members: list[dict[str, Any]],
+    ) -> None:
+        passed = sum(1 for m in members if m.get("passed_filters"))
+        conn.execute(
+            "INSERT OR REPLACE INTO universe_snapshots (snapshot_id, created_at, symbol_count) "
+            "VALUES (?, ?, ?)",
+            (snapshot_id, _utc_now(), passed),
+        )
+        conn.execute("DELETE FROM universe_members WHERE snapshot_id = ?", (snapshot_id,))
+        self._insert_universe_members(conn, snapshot_id, members)
+
+    def _insert_universe_members(
+        self,
+        conn: sqlite3.Connection,
+        snapshot_id: str,
+        members: list[dict[str, Any]],
+    ) -> None:
+        conn.executemany(
+            "INSERT OR REPLACE INTO universe_members "
+            "(snapshot_id, symbol, last_close, market_cap, avg_dollar_volume_20d, passed_filters) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    snapshot_id,
+                    m["symbol"],
+                    m.get("last_close"),
+                    m.get("market_cap"),
+                    m.get("avg_dollar_volume_20d"),
+                    1 if m.get("passed_filters") else 0,
+                )
+                for m in members
+            ],
+        )
+
+    def start_universe_snapshot(self, snapshot_id: str) -> None:
         with self._connect() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO universe_snapshots (snapshot_id, created_at, symbol_count) "
                 "VALUES (?, ?, ?)",
-                (snapshot_id, _utc_now(), len(passed)),
+                (snapshot_id, _utc_now(), 0),
             )
-            conn.executemany(
-                "INSERT OR REPLACE INTO universe_members "
-                "(snapshot_id, symbol, last_close, market_cap, avg_dollar_volume_20d, passed_filters) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                [
-                    (
-                        snapshot_id,
-                        m["symbol"],
-                        m.get("last_close"),
-                        m.get("market_cap"),
-                        m.get("avg_dollar_volume_20d"),
-                        1 if m.get("passed_filters") else 0,
-                    )
-                    for m in members
-                ],
+            conn.execute("DELETE FROM universe_members WHERE snapshot_id = ?", (snapshot_id,))
+            conn.commit()
+
+    def append_universe_members(
+        self,
+        snapshot_id: str,
+        members: list[dict[str, Any]],
+    ) -> None:
+        if not members:
+            return
+        with self._connect() as conn:
+            self._insert_universe_members(conn, snapshot_id, members)
+            conn.commit()
+
+    def finalize_universe_snapshot(self, snapshot_id: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM universe_members "
+                "WHERE snapshot_id = ? AND passed_filters = 1",
+                (snapshot_id,),
+            ).fetchone()
+            passed = int(row["n"] if row else 0)
+            conn.execute(
+                "UPDATE universe_snapshots SET symbol_count = ? WHERE snapshot_id = ?",
+                (passed, snapshot_id),
             )
             conn.commit()
+        self.set_active_universe_snapshot(snapshot_id)
+        return passed
+
+    def set_active_universe_snapshot(self, snapshot_id: str) -> None:
         pointer = {"snapshot_id": snapshot_id, "updated_at": _utc_now()}
         path = active_universe_pointer_path()
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -39,7 +39,7 @@ def run_daily_pipeline(
         )
 
     if ensure_spy and not raw_exists(config.benchmark_symbol):
-        download_and_store_symbol(config.benchmark_symbol, years=15)
+        download_and_store_symbol(config.benchmark_symbol, years=15, retry=False)
 
     regime_rows = update_spy_regime(store, config)
     logger.info("Updated SPY regime (%d rows)", regime_rows)

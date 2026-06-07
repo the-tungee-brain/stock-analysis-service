@@ -28,7 +28,7 @@ run_bootstrap() {
   exec_in python scripts/run_ranking_universe_weekly.py
   echo "Pausing 90s before benchmark fetch (Yahoo rate limit after universe screen)..."
   sleep 90
-  exec_in python scripts/download_symbols.py --symbols SPY ^VIX
+  exec_in python scripts/download_symbols.py --symbols SPY ^VIX --no-retry
   exec_in python scripts/run_ranking_daily.py
   exec_in python scripts/run_portfolio_with_risk.py
   touch "$MARKER"
@@ -39,7 +39,7 @@ run_bootstrap() {
 run_bootstrap_resume() {
   echo "=== ranking bootstrap resume (SPY/^VIX + daily + portfolio) ==="
   sleep 30
-  exec_in python scripts/download_symbols.py --symbols SPY ^VIX
+  exec_in python scripts/download_symbols.py --symbols SPY ^VIX --no-retry
   exec_in python scripts/run_ranking_daily.py
   exec_in python scripts/run_portfolio_with_risk.py
   touch "$MARKER"
