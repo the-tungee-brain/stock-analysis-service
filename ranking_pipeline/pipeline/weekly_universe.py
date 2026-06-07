@@ -271,10 +271,40 @@ def refresh_universe(
                 )
                 raise SystemExit(130)
 
+        result_counts = oracle_store.result_counts(screen_run.run_id)
+        if result_counts.total_count < total:
+            oracle_store.mark_failed(
+                screen_run.run_id,
+                processed_count=result_counts.total_count,
+                passed_count=result_counts.passed_count,
+            )
+            raise RuntimeError(
+                "Universe screen did not persist results for every candidate "
+                f"(run_id={screen_run.run_id}, results={result_counts.total_count}, "
+                f"expected={total})"
+            )
+        if result_counts.passed_count <= 0:
+            oracle_store.mark_failed(
+                screen_run.run_id,
+                processed_count=result_counts.total_count,
+                passed_count=result_counts.passed_count,
+            )
+            raise RuntimeError(
+                "Universe screen produced zero passed symbols in SCREEN_RESULTS "
+                f"(run_id={screen_run.run_id}, total_results={result_counts.total_count}). "
+                "Check market-cap metadata/yfinance fallback before rerunning."
+            )
+        if result_counts.passed_count != passed_so_far:
+            logger.warning(
+                "Universe screen passed-count mismatch for run %s: in-memory=%d oracle_results=%d; using Oracle result count",
+                screen_run.run_id,
+                passed_so_far,
+                result_counts.passed_count,
+            )
         oracle_store.finalize_run(
             screen_run.run_id,
-            processed_count=done,
-            passed_count=passed_so_far,
+            processed_count=result_counts.total_count,
+            passed_count=result_counts.passed_count,
         )
         store.start_universe_snapshot(snapshot_id)
         passed = 0
@@ -283,6 +313,10 @@ def refresh_universe(
             passed += sum(1 for member in page if member.get("passed_filters"))
             del page
         store.finalize_universe_snapshot(snapshot_id)
+        if passed <= 0:
+            raise RuntimeError(
+                f"Universe snapshot {snapshot_id} has zero passed SQLite members after Oracle projection"
+            )
         logger.info("Universe snapshot %s: %d / %d passed", snapshot_id, passed, total)
         return snapshot_id
     except KeyboardInterrupt:

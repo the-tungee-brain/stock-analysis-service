@@ -13,7 +13,7 @@ from ranking_pipeline.config import RankingPipelineConfig
 from ranking_pipeline.features.ranking_features import compute_ranking_features
 from ranking_pipeline.providers.symbol_metadata import SymbolMetadata
 from ranking_pipeline.scoring.composite import score_universe_slice
-from ranking_pipeline.storage.oracle_screening import ScreenRun
+from ranking_pipeline.storage.oracle_screening import ScreenResultCounts, ScreenRun
 from ranking_pipeline.storage.sqlite import RankingStore
 from ranking_pipeline.universe.filters import compute_adv_dollars, screen_symbol_ohlcv
 
@@ -297,6 +297,46 @@ def test_refresh_universe_resumes_completed_oracle_symbols(
     assert store.load_universe_symbols(snapshot_id) == ["AAA", "BBB", "CCC"]
 
 
+def test_refresh_universe_refuses_zero_pass_oracle_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from data import paths
+    from ranking_pipeline.pipeline import weekly_universe
+
+    monkeypatch.setattr(paths, "RANKING_DIR", tmp_path / "ranking")
+    store = RankingStore(tmp_path / "rank.db")
+    monkeypatch.setattr(weekly_universe, "open_store", lambda _cfg: store)
+    monkeypatch.setattr(weekly_universe, "fetch_all_us_equity_symbols", lambda: ["AAA"])
+    monkeypatch.setattr(weekly_universe, "_rss_mb", lambda: 123.0)
+    monkeypatch.setattr(
+        weekly_universe,
+        "_screen_one",
+        lambda *_args, **_kwargs: {
+            "symbol": "AAA",
+            "last_close": 10.0,
+            "market_cap": None,
+            "avg_dollar_volume_20d": 50e6,
+            "passed_filters": False,
+        },
+    )
+    screen_store = _FakeScreenStore()
+    metadata_resolver = _FakeMetadataResolver({})
+
+    with pytest.raises(RuntimeError, match="zero passed symbols"):
+        weekly_universe.refresh_universe(
+            batch_size=1,
+            max_workers=1,
+            resume=False,
+            screen_store=screen_store,
+            metadata_resolver=metadata_resolver,
+        )
+
+    assert screen_store.failed == ("run-1", 1, 0)
+    assert screen_store.finalized is None
+    assert store.active_snapshot_id() is None
+
+
 def test_daily_restores_active_universe_from_completed_oracle_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -382,6 +422,7 @@ class _FakeScreenStore:
         self.upserted_symbols: list[str] = []
         self.commit_progress_counts: list[int] = []
         self.finalized: tuple[str, int, int] | None = None
+        self.failed: tuple[str, int, int] | None = None
         self.completed_queries: list[list[str]] = []
         self.iter_result_page_sizes: list[int] = []
         self.full_completed_load_called = False
@@ -436,8 +477,17 @@ class _FakeScreenStore:
     def mark_interrupted(self, _run_id: str, *, processed_count: int, passed_count: int) -> None:
         return None
 
+    def mark_failed(self, run_id: str, *, processed_count: int, passed_count: int) -> None:
+        self.failed = (run_id, processed_count, passed_count)
+
     def finalize_run(self, run_id: str, *, processed_count: int, passed_count: int) -> None:
         self.finalized = (run_id, processed_count, passed_count)
+
+    def result_counts(self, _run_id: str) -> ScreenResultCounts:
+        return ScreenResultCounts(
+            total_count=len(self.results),
+            passed_count=sum(1 for result in self.results.values() if result["passed_filters"]),
+        )
 
     def load_results(self, _run_id: str) -> list[dict]:
         self.full_results_load_called = True

@@ -30,6 +30,12 @@ class ScreenRun:
     passed_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class ScreenResultCounts:
+    total_count: int
+    passed_count: int
+
+
 class OracleScreeningStore:
     def __init__(self, pool: oracledb.ConnectionPool) -> None:
         self._pool = pool
@@ -128,12 +134,20 @@ class OracleScreeningStore:
         if resume:
             row = cur.execute(
                 f"""
-                SELECT run_id, snapshot_id, processed_count, passed_count
-                FROM {SCREEN_RUNS_TABLE}
-                WHERE status IN ('running', 'interrupted')
-                ORDER BY updated_at DESC
+                SELECT r.run_id,
+                       r.snapshot_id,
+                       COUNT(sr.symbol) AS actual_processed_count,
+                       COUNT(CASE WHEN sr.passed_filters = 1 THEN 1 END) AS actual_passed_count
+                FROM {SCREEN_RUNS_TABLE} r
+                LEFT JOIN {SCREEN_RESULTS_TABLE} sr
+                  ON sr.run_id = r.run_id
+                WHERE r.status IN ('running', 'interrupted')
+                  AND r.snapshot_id = :snapshot_id
+                GROUP BY r.run_id, r.snapshot_id, r.updated_at
+                ORDER BY r.updated_at DESC
                 FETCH FIRST 1 ROWS ONLY
-                """
+                """,
+                {"snapshot_id": snapshot_id},
             ).fetchone()
             if row:
                 run_id = str(row[0])
@@ -370,6 +384,25 @@ class OracleScreeningStore:
         )
         conn.commit()
 
+    def mark_failed(self, run_id: str, *, processed_count: int, passed_count: int) -> None:
+        conn = self._write_conn()
+        conn.cursor().execute(
+            f"""
+                UPDATE {SCREEN_RUNS_TABLE}
+                SET status = 'failed',
+                    processed_count = :processed_count,
+                    passed_count = :passed_count,
+                    updated_at = SYSTIMESTAMP
+                WHERE run_id = :run_id
+            """,
+            {
+                "run_id": run_id,
+                "processed_count": processed_count,
+                "passed_count": passed_count,
+            },
+        )
+        conn.commit()
+
     def finalize_run(self, run_id: str, *, processed_count: int, passed_count: int) -> None:
         conn = self._write_conn()
         conn.cursor().execute(
@@ -389,6 +422,24 @@ class OracleScreeningStore:
             },
         )
         conn.commit()
+
+    def result_counts(self, run_id: str) -> ScreenResultCounts:
+        with self._pool.acquire() as conn:
+            row = conn.cursor().execute(
+                f"""
+                SELECT COUNT(*) AS total_count,
+                       COUNT(CASE WHEN passed_filters = 1 THEN 1 END) AS passed_count
+                FROM {SCREEN_RESULTS_TABLE}
+                WHERE run_id = :run_id
+                """,
+                {"run_id": run_id},
+            ).fetchone()
+        if not row:
+            return ScreenResultCounts(total_count=0, passed_count=0)
+        return ScreenResultCounts(
+            total_count=int(row[0] or 0),
+            passed_count=int(row[1] or 0),
+        )
 
     def latest_completed_run(self) -> ScreenRun | None:
         with self._pool.acquire() as conn:
