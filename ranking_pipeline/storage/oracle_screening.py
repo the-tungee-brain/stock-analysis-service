@@ -390,6 +390,27 @@ class OracleScreeningStore:
         )
         conn.commit()
 
+    def latest_completed_run(self) -> ScreenRun | None:
+        with self._pool.acquire() as conn:
+            row = conn.cursor().execute(
+                f"""
+                SELECT run_id, snapshot_id, processed_count, passed_count
+                FROM {SCREEN_RUNS_TABLE}
+                WHERE status = 'completed'
+                  AND passed_count > 0
+                ORDER BY completed_at DESC NULLS LAST, updated_at DESC
+                FETCH FIRST 1 ROWS ONLY
+                """
+            ).fetchone()
+        if not row:
+            return None
+        return ScreenRun(
+            run_id=str(row[0]),
+            snapshot_id=str(row[1]),
+            processed_count=int(row[2] or 0),
+            passed_count=int(row[3] or 0),
+        )
+
     def iter_results(
         self,
         run_id: str,

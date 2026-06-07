@@ -16,9 +16,38 @@ from ranking_pipeline.pipeline.ohlcv_batch import batch_update_ohlcv
 from ranking_pipeline.backtest.evaluate import evaluate_ranking_run
 from ranking_pipeline.pipeline.rank import run_ranking
 from ranking_pipeline.pipeline.regime_batch import update_spy_regime
+from ranking_pipeline.storage.oracle_screening import open_oracle_screening_store
 from ranking_pipeline.storage.sqlite import open_store
 
 logger = logging.getLogger(__name__)
+
+
+def _restore_active_universe_from_oracle(store, *, page_size: int) -> list[str]:
+    """Rebuild the local active universe from the latest completed Oracle screen run."""
+    oracle_store = open_oracle_screening_store()
+    try:
+        screen_run = oracle_store.latest_completed_run()
+        if screen_run is None:
+            return []
+
+        logger.info(
+            "Restoring active universe snapshot %s from Oracle screen run %s",
+            screen_run.snapshot_id,
+            screen_run.run_id,
+        )
+        store.start_universe_snapshot(screen_run.snapshot_id)
+        for page in oracle_store.iter_results(screen_run.run_id, page_size=page_size):
+            store.append_universe_members(screen_run.snapshot_id, page)
+            del page
+        passed = store.finalize_universe_snapshot(screen_run.snapshot_id)
+        logger.info(
+            "Restored active universe snapshot %s from Oracle (%d passed symbols)",
+            screen_run.snapshot_id,
+            passed,
+        )
+        return store.load_universe_symbols(screen_run.snapshot_id)
+    finally:
+        oracle_store.close()
 
 
 def run_daily_pipeline(
@@ -34,8 +63,17 @@ def run_daily_pipeline(
 
     universe = symbols or store.load_universe_symbols()
     if not universe:
+        try:
+            universe = _restore_active_universe_from_oracle(
+                store,
+                page_size=config.universe_batch_size,
+            )
+        except RuntimeError as exc:
+            logger.warning("Could not restore active universe from Oracle: %s", exc)
+    if not universe:
         raise RuntimeError(
-            "No active universe. Run scripts/run_ranking_universe_weekly.py first."
+            "No active universe. Run scripts/run_ranking_universe_weekly.py first "
+            "and wait for it to print a snapshot_id / complete successfully."
         )
 
     if ensure_spy and not raw_exists(config.benchmark_symbol):

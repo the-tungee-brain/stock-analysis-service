@@ -297,6 +297,26 @@ def test_refresh_universe_resumes_completed_oracle_symbols(
     assert store.load_universe_symbols(snapshot_id) == ["AAA", "BBB", "CCC"]
 
 
+def test_daily_restores_active_universe_from_completed_oracle_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from data import paths
+    from ranking_pipeline.pipeline import daily
+
+    monkeypatch.setattr(paths, "RANKING_DIR", tmp_path / "ranking")
+    store = RankingStore(tmp_path / "rank.db")
+    screen_store = _FakeScreenStore(existing=["AAA", "BBB", "CCC"])
+    monkeypatch.setattr(daily, "open_oracle_screening_store", lambda: screen_store)
+
+    symbols = daily._restore_active_universe_from_oracle(store, page_size=2)
+
+    assert symbols == ["AAA", "BBB", "CCC"]
+    assert store.active_snapshot_id() == "snap-1"
+    assert store.load_universe_symbols("snap-1") == ["AAA", "BBB", "CCC"]
+    assert screen_store.iter_result_page_sizes == [2]
+
+
 def test_oracle_screening_merges_expose_all_bind_placeholders():
     from ranking_pipeline.storage.oracle_screening import OracleScreeningStore
 
@@ -345,10 +365,21 @@ class _FakeScreenStore:
         self.commit_progress_counts: list[int] = []
         self.finalized: tuple[str, int, int] | None = None
         self.completed_queries: list[list[str]] = []
+        self.iter_result_page_sizes: list[int] = []
         self.full_completed_load_called = False
         self.full_results_load_called = False
 
     def start_or_resume_run(self, **_kwargs) -> ScreenRun:
+        return ScreenRun(
+            run_id=self.run_id,
+            snapshot_id=self.snapshot_id,
+            processed_count=len(self.results),
+            passed_count=sum(1 for result in self.results.values() if result["passed_filters"]),
+        )
+
+    def latest_completed_run(self) -> ScreenRun | None:
+        if not self.results:
+            return None
         return ScreenRun(
             run_id=self.run_id,
             snapshot_id=self.snapshot_id,
@@ -394,6 +425,7 @@ class _FakeScreenStore:
         raise AssertionError("full result load should not be used")
 
     def iter_results(self, _run_id: str, *, page_size: int):
+        self.iter_result_page_sizes.append(page_size)
         values = sorted(self.results.values(), key=lambda row: row["symbol"])
         for idx in range(0, len(values), page_size):
             yield values[idx : idx + page_size]
