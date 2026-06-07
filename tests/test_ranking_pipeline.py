@@ -317,6 +317,24 @@ def test_daily_restores_active_universe_from_completed_oracle_run(
     assert screen_store.iter_result_page_sizes == [2]
 
 
+def test_daily_ignores_completed_oracle_run_without_passed_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from data import paths
+    from ranking_pipeline.pipeline import daily
+
+    monkeypatch.setattr(paths, "RANKING_DIR", tmp_path / "ranking")
+    store = RankingStore(tmp_path / "rank.db")
+    screen_store = _FakeScreenStore(existing=["AAA"])
+    screen_store.results["AAA"]["passed_filters"] = False
+    monkeypatch.setattr(daily, "open_oracle_screening_store", lambda: screen_store)
+
+    assert daily._restore_active_universe_from_oracle(store, page_size=2) == []
+    assert store.active_snapshot_id() is None
+    assert screen_store.iter_result_page_sizes == []
+
+
 def test_oracle_screening_merges_expose_all_bind_placeholders():
     from ranking_pipeline.storage.oracle_screening import OracleScreeningStore
 
@@ -378,13 +396,14 @@ class _FakeScreenStore:
         )
 
     def latest_completed_run(self) -> ScreenRun | None:
-        if not self.results:
+        passed = sum(1 for result in self.results.values() if result["passed_filters"])
+        if passed <= 0:
             return None
         return ScreenRun(
             run_id=self.run_id,
             snapshot_id=self.snapshot_id,
             processed_count=len(self.results),
-            passed_count=sum(1 for result in self.results.values() if result["passed_filters"]),
+            passed_count=passed,
         )
 
     def completed_symbols(self, _run_id: str) -> set[str]:
@@ -424,9 +443,11 @@ class _FakeScreenStore:
         self.full_results_load_called = True
         raise AssertionError("full result load should not be used")
 
-    def iter_results(self, _run_id: str, *, page_size: int):
+    def iter_results(self, _run_id: str, *, page_size: int, passed_only: bool = False):
         self.iter_result_page_sizes.append(page_size)
         values = sorted(self.results.values(), key=lambda row: row["symbol"])
+        if passed_only:
+            values = [row for row in values if row["passed_filters"]]
         for idx in range(0, len(values), page_size):
             yield values[idx : idx + page_size]
 

@@ -23,12 +23,36 @@ imports_ok() {
   return 0
 }
 
+daily_restore_fallback_ok() {
+  local err
+  err="$(exec_in python - <<'PY'
+from pathlib import Path
+import ranking_pipeline.pipeline.daily as daily
+
+source = Path(daily.__file__).read_text(encoding="utf-8")
+if "_restore_active_universe_from_oracle" not in source:
+    raise SystemExit(
+        f"STALE ranking_pipeline/pipeline/daily.py loaded from {daily.__file__}; "
+        "missing Oracle universe restore fallback"
+    )
+print(f"daily.py ok: {daily.__file__}")
+PY
+  2>&1)" || {
+    echo "$err" >&2
+    echo "Fix: copy the patched ranking_pipeline/pipeline/daily.py into $CONTAINER:/app/ranking_pipeline/pipeline/daily.py, then rerun." >&2
+    return 1
+  }
+  echo "$err"
+  return 0
+}
+
 run_bootstrap() {
   echo "=== ranking bootstrap (universe + SPY/^VIX + daily + portfolio) ==="
   exec_in python scripts/run_ranking_universe_weekly.py
   echo "Pausing 90s before benchmark fetch (Yahoo rate limit after universe screen)..."
   sleep 90
   exec_in python scripts/download_symbols.py --symbols SPY ^VIX --no-retry
+  daily_restore_fallback_ok
   exec_in python scripts/run_ranking_daily.py
   exec_in python scripts/run_portfolio_with_risk.py
   touch "$MARKER"
@@ -40,6 +64,7 @@ run_bootstrap_resume() {
   echo "=== ranking bootstrap resume (SPY/^VIX + daily + portfolio) ==="
   sleep 30
   exec_in python scripts/download_symbols.py --symbols SPY ^VIX --no-retry
+  daily_restore_fallback_ok
   exec_in python scripts/run_ranking_daily.py
   exec_in python scripts/run_portfolio_with_risk.py
   touch "$MARKER"
@@ -48,6 +73,7 @@ run_bootstrap_resume() {
 
 run_daily() {
   echo "=== ranking daily (incl. emerging leaders validation) + portfolio ==="
+  daily_restore_fallback_ok
   exec_in python scripts/run_ranking_daily.py
   exec_in python scripts/run_portfolio_with_risk.py
   echo "=== daily complete ==="

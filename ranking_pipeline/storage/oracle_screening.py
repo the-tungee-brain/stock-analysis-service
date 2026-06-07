@@ -394,11 +394,18 @@ class OracleScreeningStore:
         with self._pool.acquire() as conn:
             row = conn.cursor().execute(
                 f"""
-                SELECT run_id, snapshot_id, processed_count, passed_count
-                FROM {SCREEN_RUNS_TABLE}
-                WHERE status = 'completed'
-                  AND passed_count > 0
-                ORDER BY completed_at DESC NULLS LAST, updated_at DESC
+                SELECT r.run_id,
+                       r.snapshot_id,
+                       r.processed_count,
+                       COUNT(CASE WHEN sr.passed_filters = 1 THEN 1 END) AS actual_passed_count
+                FROM {SCREEN_RUNS_TABLE} r
+                JOIN {SCREEN_RESULTS_TABLE} sr
+                  ON sr.run_id = r.run_id
+                WHERE r.status = 'completed'
+                GROUP BY r.run_id, r.snapshot_id, r.processed_count,
+                         r.completed_at, r.updated_at
+                HAVING COUNT(CASE WHEN sr.passed_filters = 1 THEN 1 END) > 0
+                ORDER BY r.completed_at DESC NULLS LAST, r.updated_at DESC
                 FETCH FIRST 1 ROWS ONLY
                 """
             ).fetchone()
@@ -416,8 +423,10 @@ class OracleScreeningStore:
         run_id: str,
         *,
         page_size: int = 500,
+        passed_only: bool = False,
     ) -> Iterator[list[dict[str, Any]]]:
         last_symbol = ""
+        passed_clause = "AND passed_filters = 1" if passed_only else ""
         while True:
             with self._pool.acquire() as conn:
                 rows = conn.cursor().execute(
@@ -427,6 +436,7 @@ class OracleScreeningStore:
                     FROM {SCREEN_RESULTS_TABLE}
                     WHERE run_id = :run_id
                       AND symbol > :last_symbol
+                      {passed_clause}
                     ORDER BY symbol
                     FETCH FIRST :page_size ROWS ONLY
                     """,

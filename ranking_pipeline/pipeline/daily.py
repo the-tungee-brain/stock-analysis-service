@@ -36,10 +36,18 @@ def _restore_active_universe_from_oracle(store, *, page_size: int) -> list[str]:
             screen_run.run_id,
         )
         store.start_universe_snapshot(screen_run.snapshot_id)
-        for page in oracle_store.iter_results(screen_run.run_id, page_size=page_size):
+        for page in oracle_store.iter_results(
+            screen_run.run_id,
+            page_size=page_size,
+            passed_only=True,
+        ):
             store.append_universe_members(screen_run.snapshot_id, page)
             del page
         passed = store.finalize_universe_snapshot(screen_run.snapshot_id)
+        if passed <= 0:
+            raise RuntimeError(
+                f"Oracle screen run {screen_run.run_id} has no passed SCREEN_RESULTS rows"
+            )
         logger.info(
             "Restored active universe snapshot %s from Oracle (%d passed symbols)",
             screen_run.snapshot_id,
