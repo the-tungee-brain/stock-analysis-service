@@ -405,11 +405,15 @@ class _FakeScreenStore:
 class _RecordingCursor:
     def __init__(self) -> None:
         self.executions: list[tuple[str, dict]] = []
+        self.input_sizes: set[str] = set()
 
-    def setinputsizes(self, **_kwargs) -> None:
-        return None
+    def setinputsizes(self, **kwargs) -> None:
+        self.input_sizes = set(kwargs)
 
     def execute(self, sql: str, params: dict | None = None):
+        missing_input_sizes = [key for key in self.input_sizes if f":{key}" not in sql]
+        assert missing_input_sizes == []
+        self.input_sizes = set()
         if params is not None:
             self.executions.append((sql, params))
         return self

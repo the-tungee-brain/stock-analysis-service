@@ -300,7 +300,6 @@ class OracleScreeningStore:
         )
         conn = self._write_conn()
         cur = conn.cursor()
-        cur.setinputsizes(checkpoint_json=oracledb.DB_TYPE_CLOB)
         cur.execute(
             f"""
                 UPDATE {SCREEN_RUNS_TABLE}
@@ -315,6 +314,7 @@ class OracleScreeningStore:
                 "passed_count": passed_count,
             },
         )
+        cur.setinputsizes(checkpoint_json=oracledb.DB_TYPE_CLOB)
         cur.execute(
             f"""
                 MERGE INTO {SCREEN_CHECKPOINTS_TABLE} t
