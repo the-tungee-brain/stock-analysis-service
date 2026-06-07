@@ -9,7 +9,10 @@ import oracledb
 
 from app.core.latency_observability import observe_dependency
 from app.http.json_sanitizer import sanitize_json_value
-from app.models.provider_symbol_profile_models import ProviderSymbolProfile
+from app.models.provider_symbol_profile_models import (
+    ProviderSymbolProfile,
+    ProviderSymbolProfileMetadata,
+)
 
 
 class ProviderSymbolProfileAdapter:
@@ -94,6 +97,55 @@ class ProviderSymbolProfileAdapter:
                     fetched_at=row[2],
                     raw_json=payload,
                 )
+            finally:
+                self.client.release(con)
+
+    def list_metadata(
+        self,
+        symbols: list[str],
+    ) -> list[ProviderSymbolProfileMetadata]:
+        symbol_keys = sorted(
+            {
+                self._normalize_symbol(symbol)
+                for symbol in symbols
+                if self._normalize_symbol(symbol)
+            }
+        )
+        if not symbol_keys:
+            return []
+
+        placeholders = ", ".join(
+            f":symbol_{index}" for index, _ in enumerate(symbol_keys)
+        )
+        sql = f"""
+            SELECT provider, symbol, status, fetched_at,
+                   sector, industry, asset_type, quote_type
+            FROM {self.table_name}
+            WHERE symbol IN ({placeholders})
+        """
+        params = {
+            f"symbol_{index}": symbol
+            for index, symbol in enumerate(symbol_keys)
+        }
+
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                cur.execute(sql, params)
+                return [
+                    ProviderSymbolProfileMetadata(
+                        provider=str(row[0]),
+                        symbol=str(row[1]),
+                        status=str(row[2]),
+                        fetched_at=row[3],
+                        sector=self._optional_str(row[4]),
+                        industry=self._optional_str(row[5]),
+                        asset_type=self._optional_str(row[6]),
+                        quote_type=self._optional_str(row[7]),
+                    )
+                    for row in cur.fetchall()
+                ]
             finally:
                 self.client.release(con)
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.broker.option_utils import instrument_asset_type_by_symbol
-from app.broker.sector_labels import ETF_SECTOR_LABEL, MISC_SECTOR_LABEL
+from app.broker.sector_labels import ETF_SECTOR_LABEL
 from app.models.intelligence_models import SectorWeight
 from app.models.portfolio_memory_models import PortfolioSnapshotRecord
 from app.models.portfolio_optimization_models import (
@@ -15,25 +15,13 @@ from app.models.portfolio_optimization_models import (
     PortfolioStockWeight,
 )
 from app.models.schwab_models import Position, SchwabAccounts
+from app.services.portfolio_optimization_metadata_service import (
+    PortfolioOptimizationMetadata,
+)
 
-_BROAD_ETF_SYMBOLS = frozenset(
-    {
-        "SPY",
-        "VOO",
-        "VTI",
-        "IVV",
-        "QQQ",
-        "QQQM",
-        "DIA",
-        "IWM",
-        "SCHD",
-        "VYM",
-        "BND",
-        "AGG",
-        "VXUS",
-        "VEA",
-        "VWO",
-    }
+UNKNOWN_SECTOR_LABEL = "Unknown"
+_FUND_ASSET_TYPES = frozenset(
+    {"ETF", "FUND", "MUTUALFUND", "MUTUAL_FUND", "COLLECTIVE_INVESTMENT"}
 )
 
 
@@ -57,6 +45,7 @@ class PortfolioOptimizationService:
         self,
         *,
         snapshot: PortfolioSnapshotRecord | None,
+        metadata: PortfolioOptimizationMetadata | None = None,
     ) -> PortfolioOptimizationResponse:
         if snapshot is None:
             return self._empty_response(
@@ -83,6 +72,7 @@ class PortfolioOptimizationService:
             rows=list(rows.values()),
             liquidation_value=snapshot.liquidation_value,
             cash_after_csp=snapshot.cash_balance or 0.0,
+            metadata=metadata,
         )
 
     def build_portfolio_optimization(
@@ -90,12 +80,14 @@ class PortfolioOptimizationService:
         *,
         positions: list[Position],
         account: SchwabAccounts,
+        metadata: PortfolioOptimizationMetadata | None = None,
     ) -> PortfolioOptimizationResponse:
         balances = account.securitiesAccount.currentBalances
         return self._build_from_rows(
             rows=self._position_rows(positions),
             liquidation_value=balances.liquidationValue,
             cash_after_csp=balances.cashBalance,
+            metadata=metadata,
         )
 
     def _build_from_rows(
@@ -104,6 +96,7 @@ class PortfolioOptimizationService:
         rows: list[_OptimizationHoldingRow],
         liquidation_value: float,
         cash_after_csp: float,
+        metadata: PortfolioOptimizationMetadata | None = None,
     ) -> PortfolioOptimizationResponse:
         if not rows or liquidation_value <= 0:
             return self._empty_response(data_gaps=["No current holdings are available."])
@@ -118,7 +111,9 @@ class PortfolioOptimizationService:
         sector_weights = self._local_sector_weights(
             rows=rows,
             liquidation_value=liquidation_value,
+            metadata=metadata,
         )
+        data_gaps = self._metadata_data_gaps(metadata)
 
         top_sector = sector_weights[0] if sector_weights else None
         etf_weight = next(
@@ -215,6 +210,7 @@ class PortfolioOptimizationService:
                 top_sector=top_sector,
                 etf_weight=etf_weight,
             )[:5],
+            data_gaps=data_gaps,
         )
 
     @staticmethod
@@ -382,6 +378,7 @@ class PortfolioOptimizationService:
         *,
         rows: list[_OptimizationHoldingRow],
         liquidation_value: float,
+        metadata: PortfolioOptimizationMetadata | None = None,
     ) -> list[SectorWeight]:
         if liquidation_value <= 0:
             return []
@@ -389,10 +386,9 @@ class PortfolioOptimizationService:
         stock_by_symbol = {row.symbol: row for row in rows}
         by_sector: dict[str, tuple[float, list[str]]] = {}
         for symbol, row in stock_by_symbol.items():
-            sector = (
-                ETF_SECTOR_LABEL
-                if row.asset_type == "ETF" or symbol in _BROAD_ETF_SYMBOLS
-                else MISC_SECTOR_LABEL
+            sector = PortfolioOptimizationService._sector_for_row(
+                row,
+                metadata=metadata,
             )
             total, symbols = by_sector.get(sector, (0.0, []))
             by_sector[sector] = (total + row.market_value, symbols + [symbol])
@@ -407,6 +403,61 @@ class PortfolioOptimizationService:
         ]
         weights.sort(key=lambda item: item.weight_pct, reverse=True)
         return weights
+
+    @staticmethod
+    def _sector_for_row(
+        row: _OptimizationHoldingRow,
+        *,
+        metadata: PortfolioOptimizationMetadata | None,
+    ) -> str:
+        symbol = row.symbol.upper()
+        metadata_asset_type = (metadata.asset_type_by_symbol.get(symbol) if metadata else None)
+        metadata_quote_type = (metadata.quote_type_by_symbol.get(symbol) if metadata else None)
+
+        if PortfolioOptimizationService._is_fund_type(metadata_asset_type):
+            return ETF_SECTOR_LABEL
+        if PortfolioOptimizationService._is_fund_type(metadata_quote_type):
+            return ETF_SECTOR_LABEL
+        if metadata and symbol in metadata.sector_by_symbol:
+            return metadata.sector_by_symbol[symbol]
+        if PortfolioOptimizationService._is_fund_type(row.asset_type):
+            return ETF_SECTOR_LABEL
+        return UNKNOWN_SECTOR_LABEL
+
+    @staticmethod
+    def _is_fund_type(value: str | None) -> bool:
+        if not value:
+            return False
+        normalized = value.strip().upper().replace(" ", "_")
+        return normalized in _FUND_ASSET_TYPES or normalized.endswith("_ETF")
+
+    @staticmethod
+    def _metadata_data_gaps(
+        metadata: PortfolioOptimizationMetadata | None,
+    ) -> list[str]:
+        if metadata is None:
+            return ["Sector metadata unavailable; showing limited fallback."]
+
+        gaps: list[str] = []
+        if metadata.missing_profile_symbols:
+            gaps.append(
+                "Missing profile metadata for "
+                + ", ".join(metadata.missing_profile_symbols)
+                + "."
+            )
+        if metadata.missing_sector_symbols:
+            gaps.append(
+                "Missing sector metadata for "
+                + ", ".join(metadata.missing_sector_symbols)
+                + "."
+            )
+        if metadata.missing_asset_type_symbols:
+            gaps.append(
+                "Missing asset type metadata for "
+                + ", ".join(metadata.missing_asset_type_symbols)
+                + "."
+            )
+        return gaps
 
     @staticmethod
     def _drivers(

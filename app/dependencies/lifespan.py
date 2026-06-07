@@ -102,6 +102,9 @@ from app.services.intelligence.portfolio_intelligence_service import (
 from app.services.morning_brief_delivery_service import MorningBriefDeliveryService
 from app.services.portfolio_memory_service import PortfolioMemoryService
 from app.services.portfolio_news_service import PortfolioNewsService
+from app.services.portfolio_optimization_metadata_service import (
+    PortfolioOptimizationMetadataService,
+)
 from app.services.asset_type_service import AssetTypeService
 from app.services.research_overview_service import ResearchOverviewService
 from app.services.research_symbol_data_service import ResearchSymbolDataService
@@ -480,6 +483,9 @@ async def lifespan(app: FastAPI):
         portfolio_snapshot_adapter=portfolio_snapshot_adapter,
         alert_history_adapter=alert_history_adapter,
     )
+    portfolio_optimization_metadata_service = PortfolioOptimizationMetadataService(
+        profile_adapter=provider_symbol_profile_adapter,
+    )
     portfolio_news_service = PortfolioNewsService(yfinance_adapter=yfinance_adapter)
     morning_brief_delivery_service = MorningBriefDeliveryService(
         app_user_adapter=app_user_adapter,
@@ -594,6 +600,9 @@ async def lifespan(app: FastAPI):
     app.state.recent_orders_cache = recent_orders_cache
     app.state.pattern_analysis_service = pattern_analysis_service
     app.state.portfolio_memory_service = portfolio_memory_service
+    app.state.portfolio_optimization_metadata_service = (
+        portfolio_optimization_metadata_service
+    )
     app.state.portfolio_news_service = portfolio_news_service
     app.state.morning_brief_delivery_service = morning_brief_delivery_service
     app.state.strategy_journey_service = strategy_journey_service
