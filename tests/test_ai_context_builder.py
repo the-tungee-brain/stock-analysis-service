@@ -128,6 +128,79 @@ def test_portfolio_question_includes_summary_and_top_risk_positions():
     )
 
 
+def test_missing_aapl_position_gets_absence_rule():
+    result = _builder().build(
+        user_id="user-1",
+        message="What should I do with my AAPL position?",
+        account=_make_account(),
+        positions=[_make_position(symbol="MSFT", market_value=12_000)],
+        now=NOW,
+    )
+
+    ownership = result.context["strategy_policy"]["position_ownership"]
+    hints = result.context["strategy_policy"]["response_hints"]
+    assert ownership["requested_position_symbols"] == ["AAPL"]
+    assert ownership["absent_position_symbols"] == ["AAPL"]
+    assert any(
+        "I don't see an AAPL position in your portfolio." in hint
+        for hint in hints
+    )
+    assert any("Do not provide hold/sell/trim/roll guidance" in hint for hint in hints)
+
+
+def test_missing_tsla_shares_gets_absence_rule():
+    result = _builder().build(
+        user_id="user-1",
+        message="Should I sell my TSLA shares?",
+        account=_make_account(),
+        positions=[_make_position(symbol="NVDA", market_value=20_000)],
+        now=NOW,
+    )
+
+    ownership = result.context["strategy_policy"]["position_ownership"]
+    hints = result.context["strategy_policy"]["response_hints"]
+    assert ownership["requested_position_symbols"] == ["TSLA"]
+    assert ownership["absent_position_symbols"] == ["TSLA"]
+    assert any(
+        "I don't see a TSLA position in your portfolio." in hint
+        for hint in hints
+    )
+
+
+def test_held_nvda_question_gets_position_aware_guidance():
+    result = _builder().build(
+        user_id="user-1",
+        message="What do you think of NVDA?",
+        account=_make_account(),
+        positions=[_make_position(symbol="NVDA", market_value=20_000)],
+        now=NOW,
+    )
+
+    ownership = result.context["strategy_policy"]["position_ownership"]
+    hints = result.context["strategy_policy"]["response_hints"]
+    assert ownership["absent_position_symbols"] == []
+    assert any("held position" in hint and "NVDA" in hint for hint in hints)
+
+
+def test_non_held_symbol_never_gets_position_management_recommendation_hint():
+    result = _builder().build(
+        user_id="user-1",
+        message="Should I trim my AAPL position?",
+        account=_make_account(),
+        positions=[_make_position(symbol="MSFT", market_value=12_000)],
+        now=NOW,
+    )
+
+    hints = result.context["strategy_policy"]["response_hints"]
+    management_words = ("hold AAPL", "sell AAPL", "trim AAPL", "roll AAPL")
+    assert not any(
+        phrase in hint
+        for hint in hints
+        for phrase in management_words
+    )
+    assert any("reframe as stock analysis" in hint for hint in hints)
+
+
 def test_breakout_ideas_include_opportunities_without_every_holding_detail():
     def opportunities_provider(limit):
         return {

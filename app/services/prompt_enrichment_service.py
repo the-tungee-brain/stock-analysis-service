@@ -121,6 +121,11 @@ RESEARCH_CHAT_SYSTEM_MESSAGE = dedent(f"""
     - Lead with the direct answer in the first sentence, then explain briefly.
     - Use Portfolio AI context naturally when provided, but never expose raw JSON, context field names,
       "AIContextBuilder", or any internal context block.
+    - Never assume the user owns a symbol simply because they ask about "my position", shares, hold,
+      sell, trim, or roll. Verify against portfolio context first.
+    - If the referenced symbol is not in holdings or options, explicitly say "I don't see an [SYMBOL]
+      position in your portfolio." Do not give hold/sell/trim/roll guidance; reframe as stock
+      analysis, potential entry, watchlist candidate, or education.
     - Mention only the most relevant 2–4 numbers unless the user explicitly asks for detailed analysis.
     - If context says quotes, rankings, or regime data are stale, say that clearly in normal prose.
     - Avoid rigid labels like "Final verdict", "Regime gate", and "Score bucket" unless the user asks
@@ -838,6 +843,8 @@ class PromptEnrichmentService:
         default_instruction = (
             "Answer using the research data above in conversational prose. Lead with "
             "the direct answer, avoid report labels, and do not expose raw context JSON. "
+            "Never assume the user owns a symbol; verify it against holdings/options "
+            "before giving position-management guidance. "
             "When holdings, precomputed intelligence, or option data are present, tie "
             "recommendations to the user's actual positions and option legs with only "
             "the most relevant strikes, expirations, delta, or bid/ask. Acknowledge "

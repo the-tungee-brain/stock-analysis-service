@@ -124,6 +124,10 @@ class AIContextBuilder:
             mentioned_symbols & held_symbols
         )
         include_opportunities = intent["opportunities"]
+        requested_position_symbols = (
+            set(mentioned_symbols) if intent["position_management"] else set()
+        )
+        absent_position_symbols = sorted(requested_position_symbols - held_symbols)
 
         relevant_symbols = set(mentioned_symbols)
         if include_risk_positions:
@@ -181,6 +185,20 @@ class AIContextBuilder:
                 "risk_first": True,
                 "explain_uncertainty": True,
                 "prefer_position_aware_answers": True,
+                "position_ownership": {
+                    "verify_before_position_advice": True,
+                    "requested_position_symbols": sorted(requested_position_symbols),
+                    "held_symbols": sorted(held_symbols),
+                    "absent_position_symbols": absent_position_symbols,
+                    "missing_position_rule": (
+                        "Never assume the user owns a symbol simply because they ask "
+                        "about my position, shares, hold, sell, trim, or roll. Verify "
+                        "against portfolio.positions and options first. For absent "
+                        "symbols, explicitly state the position is not visible and "
+                        "reframe as stock analysis, potential entry, watchlist, or "
+                        "education. Do not give hold/sell/trim/roll guidance."
+                    ),
+                },
                 "visible_answer_style": {
                     "lead_with_direct_answer": True,
                     "natural_language_only": True,
@@ -198,6 +216,7 @@ class AIContextBuilder:
                 "response_hints": self._build_response_hints(
                     mentioned_symbols=mentioned_symbols,
                     held_symbols=held_symbols,
+                    absent_position_symbols=absent_position_symbols,
                     include_opportunities=include_opportunities,
                     portfolio=portfolio,
                     market_context=market_context,
@@ -291,6 +310,8 @@ class AIContextBuilder:
             "trim",
             "reduce",
             "roll",
+            "shares",
+            "position",
             "assignment",
             "position management",
             "what should i do",
@@ -720,6 +741,7 @@ class AIContextBuilder:
         *,
         mentioned_symbols: set[str],
         held_symbols: set[str],
+        absent_position_symbols: list[str],
         include_opportunities: bool,
         portfolio: dict[str, Any],
         market_context: dict[str, Any],
@@ -731,6 +753,14 @@ class AIContextBuilder:
                 "AIContextBuilder or JSON context."
             ),
         ]
+        for symbol in absent_position_symbols[:3]:
+            article = AIContextBuilder._article_for_symbol(symbol)
+            hints.append(
+                f"I don't see {article} {symbol} position in your portfolio. "
+                "Do not provide hold/sell/trim/roll guidance for this symbol; "
+                "reframe as stock analysis, potential entry, watchlist candidate, "
+                "or educational discussion."
+            )
         held_mentions = sorted(mentioned_symbols & held_symbols)
         if held_mentions:
             hints.append(
@@ -755,6 +785,13 @@ class AIContextBuilder:
                 + (f" for market context as of {as_of}." if as_of else ".")
             )
         return hints
+
+    @staticmethod
+    def _article_for_symbol(symbol: str) -> str:
+        if not symbol:
+            return "a"
+        an_letters = {"A", "E", "F", "H", "I", "L", "M", "N", "O", "R", "S", "X"}
+        return "an" if symbol[0].upper() in an_letters else "a"
 
     def _load_symbol_intelligence(
         self,
