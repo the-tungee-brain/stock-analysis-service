@@ -103,6 +103,13 @@ class FinnhubBuilder:
             if not raw_quote:
                 return None
             return Quote.model_validate(raw_quote)
+        except (
+            FinnhubUnavailableError,
+            FinnhubAPIException,
+            requests.exceptions.RequestException,
+        ) as exc:
+            logger.warning("Finnhub quote unavailable for %s: %s", symbol, exc)
+            return None
         except Exception:
             logger.warning("Finnhub quote unavailable for %s", symbol, exc_info=True)
             return None

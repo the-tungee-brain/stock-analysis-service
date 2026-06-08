@@ -25,5 +25,9 @@ def test_etf_large_raw_yield_requires_explicit_decimal_ratio_convention():
     )
 
 
+def test_etf_percent_point_yield_stays_percent_points():
+    assert dividend_yield_pct_or_none(3.25, asset_type="ETF") == 3.25
+
+
 def test_aapl_regression_never_normalizes_to_35_pct():
     assert dividend_yield_pct_or_none(0.35, asset_type="STOCK") != 35.0
