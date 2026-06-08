@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import logging
+
 from peewee import IntegrityError
 
 from app.adapters.market.yfinance_bootstrap import (
@@ -30,6 +32,19 @@ def test_format_yahoo_no_fundamentals_as_expected_unavailable():
         "Yahoo Finance fundamentals unavailable"
     )
     assert is_yahoo_permanent_unavailable(exc) is True
+
+
+def test_configure_yfinance_suppresses_expected_no_fundamentals_logs(caplog):
+    configure_yfinance()
+    logger = logging.getLogger("yfinance.scrapers.quote")
+
+    with caplog.at_level("ERROR", logger="yfinance.scrapers.quote"):
+        logger.error(
+            "HTTP Error 404: {\"quoteSummary\":{\"result\":null,"
+            "\"error\":{\"description\":\"No fundamentals data found for symbol: SCHD\"}}}"
+        )
+
+    assert "No fundamentals data found" not in caplog.text
 
 
 def test_configure_yfinance_tolerates_cookie_cache_integrity_error():

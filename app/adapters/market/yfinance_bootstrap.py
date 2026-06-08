@@ -6,6 +6,7 @@ import os
 import re
 import threading
 import time
+import logging
 from pathlib import Path
 from types import TracebackType
 
@@ -17,6 +18,7 @@ _YAHOO_NO_FUNDAMENTALS_RE = re.compile(
 
 _configured = False
 _config_lock = threading.Lock()
+_yfinance_log_filter_installed = False
 
 # Serialize Yahoo cookie/cache writes within a process (yfinance peewee race).
 _yfinance_fetch_lock = threading.Lock()
@@ -110,6 +112,7 @@ def configure_yfinance() -> None:
         set_cache_location(str(cache_dir))
 
         _patch_cookie_cache_store()
+        _install_yfinance_log_filter()
         _configured = True
 
 
@@ -127,3 +130,27 @@ def _patch_cookie_cache_store() -> None:
             pass
 
     _CookieCache.store = store_tolerant  # type: ignore[method-assign]
+
+
+def _install_yfinance_log_filter() -> None:
+    global _yfinance_log_filter_installed
+    if _yfinance_log_filter_installed:
+        return
+
+    class _ExpectedYahooNoiseFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            message = record.getMessage()
+            if _YAHOO_NO_FUNDAMENTALS_RE.search(message):
+                return False
+            return True
+
+    noise_filter = _ExpectedYahooNoiseFilter()
+    for logger_name in (
+        "yfinance",
+        "yfinance.base",
+        "yfinance.data",
+        "yfinance.scrapers.quote",
+        "yfinance.ticker",
+    ):
+        logging.getLogger(logger_name).addFilter(noise_filter)
+    _yfinance_log_filter_installed = True

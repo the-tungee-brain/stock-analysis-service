@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 
+from fastapi import HTTPException
+
 from app.models.company_research_models import ResearchContext, SecFilingHeadline
 from app.models.intelligence_models import EventTimelineEntry
 from app.services.earnings_service import EarningsService
@@ -43,6 +45,12 @@ class ResearchEventsService:
     def _load_sec_filings(self, symbol: str) -> list[SecFilingHeadline]:
         try:
             filings_response = self.sec_research_service.filings(symbol=symbol, limit=8)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                logger.info("SEC events unavailable for %s: %s", symbol, exc.detail)
+                return []
+            logger.warning("SEC events unavailable for %s: %s", symbol, exc.detail)
+            return []
         except Exception:
             logger.warning("SEC events unavailable for %s", symbol, exc_info=True)
             return []

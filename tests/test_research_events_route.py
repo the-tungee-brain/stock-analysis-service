@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.auth.dependencies import get_current_user
@@ -75,6 +76,27 @@ def test_research_events_service_soft_fails_to_empty_events():
     )
 
     assert service.get_events("NVDA") == []
+
+
+def test_research_events_service_treats_missing_sec_cik_as_expected(caplog):
+    sec_research_service = MagicMock()
+    sec_research_service.filings.side_effect = HTTPException(
+        status_code=404,
+        detail="No SEC CIK found for symbol 'SCHD'",
+    )
+    earnings_service = MagicMock()
+    earnings_service.build_research_context.return_value = None
+    service = ResearchEventsService(
+        sec_research_service=sec_research_service,
+        earnings_service=earnings_service,
+    )
+
+    with caplog.at_level("INFO", logger="app.services.research_events_service"):
+        events = service.get_events("SCHD")
+
+    assert events == []
+    assert "No SEC CIK found for symbol 'SCHD'" in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
 
 
 def test_research_events_service_builds_public_earnings_event():

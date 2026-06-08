@@ -147,6 +147,18 @@ def test_finnhub_adapter_does_not_open_circuit_on_502():
     assert adapter.finnhub_client.quote.call_count == 7
 
 
+def test_finnhub_adapter_quote_failure_is_left_for_builder_logging(caplog):
+    adapter = FinnhubAdapter(api_key="test-key")
+    adapter.finnhub_client = MagicMock()
+    adapter.finnhub_client.quote.side_effect = _finnhub_api_error(502)
+
+    with caplog.at_level("WARNING", logger="app.adapters.finnhub.finnhub_adapter"):
+        with pytest.raises(FinnhubAPIException):
+            adapter.get_quote("MSFT")
+
+    assert "Finnhub quote unavailable" not in caplog.text
+
+
 def test_finnhub_non_rate_limit_api_error_does_not_circuit_break_user_retry():
     adapter = FinnhubAdapter(
         api_key="test-key",

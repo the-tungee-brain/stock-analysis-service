@@ -225,6 +225,7 @@ class FinnhubAdapter:
             cache_key,
             "quote",
             lambda: self.finnhub_client.quote(symbol=symbol),
+            log_failure=False,
         )
 
     def get_company_earnings(self, symbol: str, limit: int | None = None):
