@@ -14,14 +14,16 @@ def _normalized_sql() -> str:
     return MIGRATION_SQL.read_text(encoding="utf-8").lower()
 
 
-def test_provider_symbol_profile_migration_is_idempotent_create_only():
+def test_provider_symbol_profile_migration_is_idempotent_and_additive():
     sql = _normalized_sql()
 
     assert "user_tables" in sql
+    assert "user_tab_columns" in sql
     assert "provider_symbol_profile" in sql
     assert "table_count = 0" in sql
     assert "execute immediate" in sql
     assert "create table provider_symbol_profile" in sql
+    assert "alter table provider_symbol_profile add" in sql
     assert "constraint provider_symbol_profile_pk primary key (provider, symbol)" in sql
 
 
@@ -34,6 +36,9 @@ def test_provider_symbol_profile_migration_stores_public_provider_metadata_only(
         "status",
         "fetched_at",
         "updated_at",
+        "dividend_yield_pct",
+        "raw_dividend_yield",
+        "raw_dividend_yield_source",
         "raw_json",
     ]
     for column in expected_columns:

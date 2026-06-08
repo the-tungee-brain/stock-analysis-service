@@ -36,6 +36,39 @@ def test_normalized_fields_drop_non_finite_numbers():
     assert fields["forward_pe"] is None
     assert fields["price_to_book"] is None
     assert fields["dividend_yield"] is None
+    assert fields["dividend_yield_pct"] is None
+    assert fields["raw_dividend_yield"] is None
+    assert fields["raw_dividend_yield_source"] is None
     assert fields["dividend_rate"] is None
     assert fields["expense_ratio"] is None
     assert fields["beta"] is None
+
+
+def test_normalized_fields_store_raw_and_percent_point_dividend_yield():
+    adapter = ProviderSymbolProfileAdapter.__new__(ProviderSymbolProfileAdapter)
+
+    fields = adapter._normalized_fields(
+        {
+            "quoteType": "EQUITY",
+            "dividendYield": 0.35,
+        }
+    )
+
+    assert fields["dividend_yield"] == 0.35
+    assert fields["raw_dividend_yield"] == 0.35
+    assert fields["raw_dividend_yield_source"] == "yfinance.info.dividendYield"
+    assert fields["dividend_yield_pct"] == 0.35
+
+
+def test_normalized_fields_convert_etf_decimal_ratio_dividend_yield():
+    adapter = ProviderSymbolProfileAdapter.__new__(ProviderSymbolProfileAdapter)
+
+    fields = adapter._normalized_fields(
+        {
+            "quoteType": "ETF",
+            "dividendYield": 0.0035,
+        }
+    )
+
+    assert fields["dividend_yield"] == 0.0035
+    assert fields["dividend_yield_pct"] == 0.35

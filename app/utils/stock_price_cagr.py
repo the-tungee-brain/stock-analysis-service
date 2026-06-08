@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.utils.dividend_yield import dividend_yield_pct_or_none
+
 
 def fetch_price_cagr_pct(symbol: str, *, lookback_years: int = 5) -> float | None:
     try:
@@ -75,10 +77,11 @@ def fetch_dividend_yield_pct(symbol: str) -> float | None:
     try:
         info = yf.Ticker(symbol.strip().upper()).info
         raw = info.get("dividendYield")
-        if raw is None or not isinstance(raw, (int, float)):
-            return None
-        value = float(raw)
-        pct = value * 100.0 if abs(value) < 1 else value
-        return round(pct, 2)
+        return dividend_yield_pct_or_none(
+            raw,
+            asset_type=str(info.get("quoteType") or "STOCK"),
+            source="yfinance.info.dividendYield",
+            symbol=symbol,
+        )
     except Exception:
         return None

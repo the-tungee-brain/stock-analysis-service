@@ -864,11 +864,15 @@ class AIContextBuilder:
                 "resistance_zones": pattern.get("resistanceZones")
                 or pattern.get("resistance_zones"),
             }
+        dividend_yield_pct = dumped.get("dividendYieldPct")
+        if dividend_yield_pct is None:
+            dividend_yield_pct = dumped.get("dividend_yield_pct")
         return {
             "symbol": dumped.get("symbol"),
             "as_of": dumped.get("asOf") or dumped.get("as_of") or now.isoformat(),
             "stale": bool(dumped.get("stale", False)),
             "partial": bool(dumped.get("partial", False)),
+            "dividend_yield_pct": dividend_yield_pct,
             "signals": top_signals,
             "data_gaps": dumped.get("dataGaps") or dumped.get("data_gaps") or [],
             "support_resistance": support_resistance or None,

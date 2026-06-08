@@ -54,6 +54,38 @@ def test_get_snapshot_uses_yfinance_before_finnhub():
     finnhub_builder.get_quote.assert_not_called()
 
 
+def test_get_snapshot_keeps_equity_percent_point_dividend_yield():
+    finnhub_builder = MagicMock()
+    yfinance_adapter = MagicMock()
+    yfinance_adapter.get_ticker_info.return_value = {
+        "longName": "Apple Inc.",
+        "quoteType": "EQUITY",
+        "sector": "Technology",
+        "country": "United States",
+        "marketCap": 3_000_000_000_000,
+        "website": "https://www.apple.com",
+        "dividendYield": 0.35,
+    }
+    yfinance_adapter.get_history.return_value = _mock_history([195.0, 200.0])
+
+    service = CompanyProfileService(
+        finnhub_builder=finnhub_builder,
+        yfinance_adapter=yfinance_adapter,
+    )
+
+    with patch.object(
+        service,
+        "get_52w_range_yf",
+        return_value=(170.0, 220.0),
+    ):
+        snapshot = service.get_snapshot("AAPL")
+
+    assert snapshot.dividendYieldPct == 0.35
+    assert snapshot.dividendYieldPct != 35.0
+    assert snapshot.rawDividendYield == 0.35
+    assert snapshot.rawDividendYieldSource == "yfinance.info.dividendYield"
+
+
 def test_get_snapshot_falls_back_to_finnhub_when_yfinance_unavailable():
     finnhub_builder = MagicMock()
     finnhub_builder.get_company_profile.return_value = CompanyProfile(

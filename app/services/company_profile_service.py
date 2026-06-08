@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.builders.finnhub_builder import FinnhubBuilder
 from app.models.company_research_models import ResearchSnapshot
+from app.utils.dividend_yield import dividend_yield_pct_or_none
 
 if TYPE_CHECKING:
     from app.builders.ticker_symbol_builder import TickerSymbolBuilder
@@ -195,9 +196,21 @@ class CompanyProfileService:
 
     @staticmethod
     def _key_stats_from_yfinance(info: dict, *, is_etf: bool) -> dict:
+        asset_type = "ETF" if is_etf else "STOCK"
         return {
-            "dividendYieldPct": CompanyProfileService._normalize_dividend_yield_pct(
+            "dividendYieldPct": dividend_yield_pct_or_none(
+                info.get("dividendYield"),
+                asset_type=asset_type,
+                source="yfinance.info.dividendYield",
+                symbol=str(info.get("symbol") or ""),
+            ),
+            "rawDividendYield": CompanyProfileService._optional_float(
                 info.get("dividendYield")
+            ),
+            "rawDividendYieldSource": (
+                "yfinance.info.dividendYield"
+                if info.get("dividendYield") is not None
+                else None
             ),
             "peRatio": CompanyProfileService._optional_float(info.get("trailingPE")),
             "volume": CompanyProfileService._optional_int(
@@ -237,20 +250,6 @@ class CompanyProfileService:
         if parsed < 0:
             return None
         return parsed
-
-    @staticmethod
-    def _normalize_dividend_yield_pct(value) -> float | None:
-        if value is None:
-            return None
-        try:
-            parsed = float(value)
-        except (TypeError, ValueError):
-            return None
-        if parsed != parsed or parsed <= 0:
-            return None
-        if abs(parsed) < 1:
-            return round(parsed * 100, 2)
-        return round(parsed, 2)
 
     @staticmethod
     def _normalize_expense_ratio_pct(info: dict) -> float | None:

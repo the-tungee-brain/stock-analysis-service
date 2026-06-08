@@ -30,6 +30,8 @@ class ResearchSnapshot(BaseModel):
     weburl: HttpUrl
     logo: HttpUrl | None = None
     dividendYieldPct: float | None = None
+    rawDividendYield: float | None = None
+    rawDividendYieldSource: str | None = None
     peRatio: float | None = None
     volume: int | None = None
     avgVolume: int | None = None

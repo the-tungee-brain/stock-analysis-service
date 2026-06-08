@@ -13,6 +13,7 @@ from app.models.provider_symbol_profile_models import (
     ProviderSymbolProfile,
     ProviderSymbolProfileMetadata,
 )
+from app.utils.dividend_yield import normalize_dividend_yield_pct
 
 
 class ProviderSymbolProfileAdapter:
@@ -194,6 +195,9 @@ class ProviderSymbolProfileAdapter:
                     :forward_pe     AS forward_pe,
                     :price_to_book  AS price_to_book,
                     :dividend_yield AS dividend_yield,
+                    :dividend_yield_pct AS dividend_yield_pct,
+                    :raw_dividend_yield AS raw_dividend_yield,
+                    :raw_dividend_yield_source AS raw_dividend_yield_source,
                     :dividend_rate  AS dividend_rate,
                     :expense_ratio  AS expense_ratio,
                     :beta           AS beta,
@@ -225,6 +229,9 @@ class ProviderSymbolProfileAdapter:
                     t.forward_pe     = s.forward_pe,
                     t.price_to_book  = s.price_to_book,
                     t.dividend_yield = s.dividend_yield,
+                    t.dividend_yield_pct = s.dividend_yield_pct,
+                    t.raw_dividend_yield = s.raw_dividend_yield,
+                    t.raw_dividend_yield_source = s.raw_dividend_yield_source,
                     t.dividend_rate  = s.dividend_rate,
                     t.expense_ratio  = s.expense_ratio,
                     t.beta           = s.beta,
@@ -255,6 +262,9 @@ class ProviderSymbolProfileAdapter:
                     forward_pe,
                     price_to_book,
                     dividend_yield,
+                    dividend_yield_pct,
+                    raw_dividend_yield,
+                    raw_dividend_yield_source,
                     dividend_rate,
                     expense_ratio,
                     beta,
@@ -285,6 +295,9 @@ class ProviderSymbolProfileAdapter:
                     s.forward_pe,
                     s.price_to_book,
                     s.dividend_yield,
+                    s.dividend_yield_pct,
+                    s.raw_dividend_yield,
+                    s.raw_dividend_yield_source,
                     s.dividend_rate,
                     s.expense_ratio,
                     s.beta,
@@ -368,6 +381,9 @@ class ProviderSymbolProfileAdapter:
                     :forward_pe     AS forward_pe,
                     :price_to_book  AS price_to_book,
                     :dividend_yield AS dividend_yield,
+                    :dividend_yield_pct AS dividend_yield_pct,
+                    :raw_dividend_yield AS raw_dividend_yield,
+                    :raw_dividend_yield_source AS raw_dividend_yield_source,
                     :dividend_rate  AS dividend_rate,
                     :expense_ratio  AS expense_ratio,
                     :beta           AS beta,
@@ -399,6 +415,9 @@ class ProviderSymbolProfileAdapter:
                     t.forward_pe     = s.forward_pe,
                     t.price_to_book  = s.price_to_book,
                     t.dividend_yield = s.dividend_yield,
+                    t.dividend_yield_pct = s.dividend_yield_pct,
+                    t.raw_dividend_yield = s.raw_dividend_yield,
+                    t.raw_dividend_yield_source = s.raw_dividend_yield_source,
                     t.dividend_rate  = s.dividend_rate,
                     t.expense_ratio  = s.expense_ratio,
                     t.beta           = s.beta,
@@ -409,7 +428,8 @@ class ProviderSymbolProfileAdapter:
                     exchange_name, quote_type, asset_type, sector, industry, country,
                     website, current_price, previous_close, market_cap, total_assets,
                     volume, avg_volume, trailing_pe, forward_pe, price_to_book,
-                    dividend_yield, dividend_rate, expense_ratio, beta, raw_json
+                    dividend_yield, dividend_yield_pct, raw_dividend_yield,
+                    raw_dividend_yield_source, dividend_rate, expense_ratio, beta, raw_json
                 )
                 VALUES (
                     s.provider, s.symbol, s.status, s.fetched_at, systimestamp,
@@ -417,8 +437,9 @@ class ProviderSymbolProfileAdapter:
                     s.sector, s.industry, s.country, s.website, s.current_price,
                     s.previous_close, s.market_cap, s.total_assets, s.volume,
                     s.avg_volume, s.trailing_pe, s.forward_pe, s.price_to_book,
-                    s.dividend_yield, s.dividend_rate, s.expense_ratio, s.beta,
-                    s.raw_json
+                    s.dividend_yield, s.dividend_yield_pct, s.raw_dividend_yield,
+                    s.raw_dividend_yield_source, s.dividend_rate, s.expense_ratio,
+                    s.beta, s.raw_json
                 )
         """
 
@@ -434,6 +455,13 @@ class ProviderSymbolProfileAdapter:
         return len(params)
 
     def _normalized_fields(self, info: dict[str, Any]) -> dict[str, Any]:
+        raw_dividend_yield = self._optional_float(info.get("dividendYield"))
+        asset_type = self._optional_str(info.get("typeDisp") or info.get("quoteType"))
+        normalized_dividend_yield = normalize_dividend_yield_pct(
+            raw_dividend_yield,
+            asset_type=asset_type,
+            source="yfinance.info.dividendYield",
+        )
         return {
             "name": self._optional_str(info.get("longName") or info.get("shortName")),
             "currency": self._optional_str(info.get("currency")),
@@ -441,9 +469,7 @@ class ProviderSymbolProfileAdapter:
                 info.get("exchange") or info.get("fullExchangeName")
             ),
             "quote_type": self._optional_str(info.get("quoteType")),
-            "asset_type": self._optional_str(
-                info.get("typeDisp") or info.get("quoteType")
-            ),
+            "asset_type": asset_type,
             "sector": self._optional_str(info.get("sector")),
             "industry": self._optional_str(info.get("industry")),
             "country": self._optional_str(info.get("country")),
@@ -465,7 +491,18 @@ class ProviderSymbolProfileAdapter:
             "trailing_pe": self._optional_float(info.get("trailingPE")),
             "forward_pe": self._optional_float(info.get("forwardPE")),
             "price_to_book": self._optional_float(info.get("priceToBook")),
-            "dividend_yield": self._optional_float(info.get("dividendYield")),
+            "dividend_yield": raw_dividend_yield,
+            "dividend_yield_pct": (
+                normalized_dividend_yield.dividend_yield_pct
+                if normalized_dividend_yield is not None
+                else None
+            ),
+            "raw_dividend_yield": raw_dividend_yield,
+            "raw_dividend_yield_source": (
+                "yfinance.info.dividendYield"
+                if raw_dividend_yield is not None
+                else None
+            ),
             "dividend_rate": self._optional_float(
                 info.get("dividendRate") or info.get("trailingAnnualDividendRate")
             ),

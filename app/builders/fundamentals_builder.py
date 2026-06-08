@@ -1,5 +1,6 @@
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.models.company_research_models import FundamentalMetric
+from app.utils.dividend_yield import dividend_yield_pct_or_none
 
 
 class FundamentalsBuilder:
@@ -12,6 +13,7 @@ class FundamentalsBuilder:
             return []
 
         metrics: list[FundamentalMetric] = []
+        asset_type = self._asset_type(info)
 
         def add(label: str, value: str | None, note: str) -> None:
             if value is not None:
@@ -84,7 +86,7 @@ class FundamentalsBuilder:
         )
         add(
             "Dividend yield",
-            self._fmt_dividend_yield(info.get("dividendYield")),
+            self._fmt_dividend_yield(info.get("dividendYield"), asset_type=asset_type),
             "Annual dividend as a share of the stock price. Relevant for income-focused investors.",
         )
         add(
@@ -120,7 +122,10 @@ class FundamentalsBuilder:
         if not info:
             return {"dividend_yield": None, "expense_ratio": None}
         return {
-            "dividend_yield": self._fmt_dividend_yield(info.get("dividendYield")),
+            "dividend_yield": self._fmt_dividend_yield(
+                info.get("dividendYield"),
+                asset_type="ETF",
+            ),
             "expense_ratio": self._fmt_expense_ratio(info),
         }
 
@@ -149,12 +154,29 @@ class FundamentalsBuilder:
         return f"{pct:.1f}%"
 
     @staticmethod
-    def _fmt_dividend_yield(value: float | None) -> str | None:
-        if value is None or not isinstance(value, (int, float)):
+    def _fmt_dividend_yield(
+        value: float | None,
+        *,
+        asset_type: str | None = None,
+    ) -> str | None:
+        pct = dividend_yield_pct_or_none(
+            value,
+            asset_type=asset_type,
+            source="yfinance.info.dividendYield",
+        )
+        if pct is None:
             return None
-        if abs(value) < 1:
-            return f"{value * 100:.2f}%"
-        return f"{value:.2f}%"
+        return f"{pct:.2f}%"
+
+    @staticmethod
+    def _asset_type(info: dict) -> str:
+        quote_type = str(info.get("quoteType") or "").upper()
+        if quote_type == "ETF":
+            return "ETF"
+        legal_type = str(info.get("legalType") or "").lower()
+        if "exchange traded fund" in legal_type:
+            return "ETF"
+        return "STOCK"
 
     @staticmethod
     def _fmt_expense_ratio(info: dict) -> str | None:
