@@ -7,6 +7,14 @@ OverallSentiment = Literal[
     "strongly_bullish", "bullish", "neutral", "bearish", "strongly_bearish"
 ]
 MarketImpactHorizon = Literal["immediate", "medium_term", "long_term"]
+DirectRelevance = Literal[
+    "direct_company_news",
+    "important_industry_read_through",
+    "weak_mention",
+    "irrelevant",
+]
+ThesisImpact = Literal["high", "medium", "low"]
+ThesisHorizon = Literal["near_term", "medium_term", "long_term"]
 
 
 class EnrichedNewsItem(BaseModel):
@@ -19,6 +27,9 @@ class EnrichedNewsItem(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     summary: str
     topics: List[str]
+    direct_relevance: DirectRelevance = "weak_mention"
+    thesis_impact: ThesisImpact = "low"
+    thesis_horizon: ThesisHorizon = "medium_term"
     url: Optional[HttpUrl] = None
     image: Optional[HttpUrl] = None
 
@@ -31,6 +42,9 @@ class NewsLLMItem(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     summary: str
     topics: List[str] = Field(default_factory=list)
+    direct_relevance: DirectRelevance = "weak_mention"
+    thesis_impact: ThesisImpact = "low"
+    thesis_horizon: ThesisHorizon = "medium_term"
 
 
 class CombinedNewsLLMOutput(BaseModel):

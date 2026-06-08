@@ -1579,7 +1579,10 @@ class PromptEnrichmentService:
         system_msg = dedent(
             """
             # Role
-            You are an equity research assistant helping retail investors understand recent news.
+            You are an equity research assistant producing an investor briefing for one company.
+
+            Your objective is not to summarize all articles.
+            Your objective is to identify what materially changed the investment thesis.
 
             # Sentiment (per headline)
             - "bullish" — likely to push the stock UP.
@@ -1588,7 +1591,18 @@ class PromptEnrichmentService:
 
             # Rules
             - Use only the provided headlines and summaries.
-            - Teach WHY each item matters; do not invent facts.
+            - For every article classify direct relevance, thesis impact, and time horizon.
+            - Only treat articles as briefing inputs when direct relevance is "direct_company_news"
+              or "important_industry_read_through".
+            - Do not surface weak mentions or irrelevant articles as material developments.
+            - Do not classify an article as high impact unless it could reasonably influence revenue,
+              earnings, margins, market share, capital allocation, strategy, regulation, management,
+              or competitive position.
+            - Synthesize Opportunities, Risks, and What Changed across relevant articles; never copy
+              article summaries verbatim.
+            - Never reference unrelated companies unless the read-through to this stock is explicit
+              and important.
+            - Teach WHY each relevant item matters; do not invent facts.
             - This is research, not trading advice.
             - Return ONLY valid JSON matching the schema — no markdown.
             """
@@ -1606,21 +1620,24 @@ class PromptEnrichmentService:
             - id (number, exact match)
             - sentiment ("bullish" | "bearish" | "neutral")
             - confidence (0.0–1.0)
-            - summary (1–2 sentences, investor-focused)
+            - direct_relevance ("direct_company_news" | "important_industry_read_through" | "weak_mention" | "irrelevant")
+            - thesis_impact ("high" | "medium" | "low")
+            - thesis_horizon ("near_term" | "medium_term" | "long_term")
+            - summary (1–2 sentences explaining thesis relevance; for weak/irrelevant items, say why it is low relevance)
             - topics (string array from: earnings, guidance, product, macro, regulation,
               management, competition, crypto, trading_activity, valuation, flows, buybacks)
 
             **overall_sentiment** — "strongly_bullish" | "bullish" | "neutral" | "bearish" | "strongly_bearish"
 
-            **summary** — 4–6 sentences on the news landscape for {symbol}.
+            **summary** — 3–5 sentences on what materially changed for {symbol}, excluding weak mentions.
 
-            **deepAnalysis** — 4–6 sentences of deeper context (no buy/sell).
+            **deepAnalysis** — 4–6 sentences only if there is genuinely complex thesis-relevant information; otherwise concise.
 
-            **investorTakeaway** — 2–3 sentences, the main lesson from this news flow.
+            **investorTakeaway** — 1–3 sentences, the main thesis implication from relevant articles.
 
-            **insights** — 4–6 one-sentence strings.
+            **insights** — 3–5 synthesized one-sentence strings about what changed; do not copy article summaries.
 
-            **risks** — 2–5 one-sentence strings (empty array if none).
+            **risks** — 0–4 synthesized one-sentence strings (empty array if none).
 
             **dominant_driver** — single most important theme.
 

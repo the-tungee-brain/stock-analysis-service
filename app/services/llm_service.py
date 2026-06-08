@@ -162,6 +162,9 @@ class LLMService:
             confidence=0.35,
             summary=summary,
             topics=[],
+            direct_relevance="weak_mention",
+            thesis_impact="low",
+            thesis_horizon="medium_term",
             url=src.url,
             image=src.image,
         )
@@ -220,6 +223,9 @@ class LLMService:
                     confidence=float(obj.confidence),
                     summary=obj.summary,
                     topics=list(obj.topics),
+                    direct_relevance=obj.direct_relevance,
+                    thesis_impact=obj.thesis_impact,
+                    thesis_horizon=obj.thesis_horizon,
                     url=src.url,
                     image=src.image,
                 )

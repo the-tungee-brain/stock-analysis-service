@@ -40,7 +40,15 @@ class PromptBuilder:
             - Do not invent news, events, or price targets not in the input.
             - Write in plain English. Explain jargon when you use it.
             - When news items conflict, explain the tension and what it means for investors.
-            - Be thorough and educational — help the reader understand the full picture, not just headlines.
+            - Your objective is not to summarize every article. Identify what materially changed the
+              investment thesis.
+            - Classify weak mentions and unrelated articles as noise; do not use them as material developments.
+            - Only emphasize direct company news or important industry read-throughs.
+            - Do not treat an item as material unless it could reasonably influence revenue, earnings,
+              margins, market share, capital allocation, strategy, regulation, management, or competitive
+              position.
+            - For opportunities, risks, and key changes, synthesize across relevant articles instead of
+              copying article summaries.
             - This is research, not trading advice. Do not tell the user to buy or sell.
             """
         ).strip()
@@ -53,26 +61,26 @@ class PromptBuilder:
             {items_block}
 
             # Your task
-            Synthesize the items above into a comprehensive stock-level news analysis.
+            Synthesize the items above into an investor briefing about what changed for {symbol}
+            and whether it matters to the investment thesis.
             Return strict JSON with these fields:
 
             1. **overall_sentiment** — "strongly_bullish" | "bullish" | "neutral" | "bearish" | "strongly_bearish"
                Weight recent and high-confidence items more heavily.
 
-            2. **summary** — 5–8 sentences. A thorough overview of the current news landscape for {symbol}:
-               what is driving attention, how items connect, and what the overall tone suggests.
+            2. **summary** — 3–5 sentences. Focus only on thesis-relevant developments for {symbol}.
 
-            3. **deepAnalysis** — 6–10 sentences. Go deeper: explain the business context behind the news,
+            3. **deepAnalysis** — 4–6 sentences when needed. Go deeper: explain the business context behind the news,
                how these developments fit into the company's longer-term story, what the market may be
                pricing in, and what an informed investor should understand about the situation.
 
             4. **investorTakeaway** — 2–4 sentences. The single most important lesson or conclusion
                a retail investor should walk away with from this news flow.
 
-            5. **insights** — 5–10 one-sentence insights (plain strings). Each should teach something
-               specific — a fact, trend, or implication the reader can use.
+            5. **insights** — 3–5 synthesized one-sentence insights (plain strings). Each should explain
+               a thesis-relevant change or implication.
 
-            6. **risks** — 3–7 one-sentence risks or red flags (plain strings).
+            6. **risks** — 0–4 one-sentence risks or red flags (plain strings).
                Return an empty array if none are meaningful.
 
             7. **dominant_driver** — the single most important theme in the current news flow.
