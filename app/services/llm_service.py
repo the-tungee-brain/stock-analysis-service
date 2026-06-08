@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import AsyncGenerator, List, Dict, Any, Type, TypeVar, Optional
 
 from pydantic import BaseModel
@@ -169,6 +170,66 @@ class LLMService:
             image=src.image,
         )
 
+    @staticmethod
+    def _is_weak_thesis_mention(symbol: str, src: NewsItem) -> bool:
+        text = " ".join(
+            part
+            for part in [
+                src.headline or "",
+                src.summary or "",
+                src.source or "",
+                src.related or "",
+            ]
+            if part
+        ).lower()
+        if symbol.upper() != "AMZN" and not re.search(
+            r"\bamazon\b|amazon\.com|alexa|zoox|aws",
+            text,
+        ):
+            return False
+        weak_patterns = [
+            r"amazon veteran",
+            r"former amazon",
+            r"ex-amazon",
+            r"amazon alum",
+            r"available on amazon",
+            r"sold on amazon",
+            r"sells on amazon",
+            r"amazon marketplace",
+            r"amazon sales channel",
+            r"compares? (itself )?(to|with|against) amazon",
+            r"comparison to amazon",
+        ]
+        if any(re.search(pattern, text) for pattern in weak_patterns):
+            return True
+        if re.search(r"alexa\+?|grubhub|wonder", text) and not re.search(
+            r"amazon (launches|rolls out|expands|prices|monetizes|announces)|"
+            r"revenue|margin|subscription|platform strategy|devices strategy",
+            text,
+        ):
+            return True
+        if re.search(r"zoox", text) and not re.search(
+            r"amazon.*(revenue|margin|strategy|investment|capital|commercial rollout|autonomous vehicle strategy)",
+            text,
+        ):
+            return True
+        if re.search(r"gs1|certification pilot|sales channel", text) and re.search(
+            r"\bamazon\b|amazon marketplace",
+            text,
+        ):
+            return True
+        if re.search(
+            r"prnewswire|accesswire|globenewswire|business wire|ein presswire|newsfile|otc markets|investorwire",
+            text,
+        ) and re.search(r"\bamazon\b|amazon marketplace|alexa|zoox", text):
+            return not re.search(
+                r"revenue|earnings|margin|aws|cloud strategy|retail strategy|capital allocation|"
+                r"acquisition|divestiture|regulation|litigation|management|platform strategy|"
+                r"competitive position|market share",
+                text,
+            )
+        return False
+
     async def analyze_news(
         self,
         symbol: str,
@@ -212,6 +273,15 @@ class LLMService:
             if obj is None:
                 enriched_items.append(self._passthrough_enriched_item(src))
                 continue
+            direct_relevance = obj.direct_relevance
+            thesis_impact = obj.thesis_impact
+            sentiment = obj.sentiment
+            confidence = float(obj.confidence)
+            if self._is_weak_thesis_mention(symbol, src):
+                direct_relevance = "weak_mention"
+                thesis_impact = "low"
+                sentiment = "neutral"
+                confidence = min(confidence, 0.55)
             enriched_items.append(
                 EnrichedNewsItem(
                     id=src.id,
@@ -219,12 +289,12 @@ class LLMService:
                     headline=src.headline,
                     source=src.source,
                     original_summary=src.summary or "",
-                    sentiment=obj.sentiment,
-                    confidence=float(obj.confidence),
+                    sentiment=sentiment,
+                    confidence=confidence,
                     summary=obj.summary,
                     topics=list(obj.topics),
-                    direct_relevance=obj.direct_relevance,
-                    thesis_impact=obj.thesis_impact,
+                    direct_relevance=direct_relevance,
+                    thesis_impact=thesis_impact,
                     thesis_horizon=obj.thesis_horizon,
                     url=src.url,
                     image=src.image,

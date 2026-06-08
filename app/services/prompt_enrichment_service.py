@@ -1595,11 +1595,27 @@ class PromptEnrichmentService:
             - Only treat articles as briefing inputs when direct relevance is "direct_company_news"
               or "important_industry_read_through".
             - Do not surface weak mentions or irrelevant articles as material developments.
+            - Hard weak-mention demotion: classify as "weak_mention" or "irrelevant" when the
+              company is not the subject and there is no explicit thesis read-through. Examples:
+              "Amazon veteran", "available on Amazon", "compares itself to Amazon", "integrates
+              with Alexa", a third-party PR using Amazon for credibility, or an Amazon-owned
+              subsidiary mention without financial/strategic impact.
+            - A Material/high-impact article must directly affect revenue, earnings, margins,
+              AWS/cloud strategy, retail strategy, capital allocation, acquisition/divestiture,
+              regulation/litigation, management, major product/platform strategy, or competitive
+              position. Weak mentions are never Material.
             - Do not classify an article as high impact unless it could reasonably influence revenue,
               earnings, margins, market share, capital allocation, strategy, regulation, management,
               or competitive position.
             - Synthesize Opportunities, Risks, and What Changed across relevant articles; never copy
               article summaries verbatim.
+            - What Changed and insights must be concise: one sentence each, no paragraphs, no repeated
+              verdict wording.
+            - Opportunities must be concrete investment implications. Never use placeholder language
+              like "company-specific news around company-specific development" or "worth monitoring"
+              without naming the actual driver.
+            - Avoid duplicate verdict copy: if the overall label is "Long-term positive", the summary
+              should explain the driver and catalyst strength instead of repeating that label.
             - Never reference unrelated companies unless the read-through to this stock is explicit
               and important.
             - Teach WHY each relevant item matters; do not invent facts.
