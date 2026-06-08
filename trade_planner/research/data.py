@@ -72,6 +72,51 @@ def align_benchmark_to_stock(
     return tuple(aligned)
 
 
+def align_stock_and_benchmark(
+    stock_bars: Sequence[OHLCVBar],
+    benchmark_bars: Sequence[OHLCVBar],
+) -> tuple[tuple[OHLCVBar, ...], tuple[OHLCVBar, ...]]:
+    """Return stock and benchmark bars aligned 1:1 by stock trading date.
+
+    Benchmark bars are forward-filled to stock dates. Stock bars before the
+    first available benchmark bar are dropped, avoiding look-ahead benchmark
+    backfills and ensuring StockData receives equal-length sequences.
+    """
+    by_date = {bar.trading_date: bar for bar in benchmark_bars}
+    if not by_date:
+        return (), ()
+    dates_sorted = sorted(by_date)
+    first_benchmark_date = dates_sorted[0]
+
+    aligned_stock: list[OHLCVBar] = []
+    aligned_benchmark: list[OHLCVBar] = []
+    last: OHLCVBar | None = None
+    for stock_bar in stock_bars:
+        if stock_bar.trading_date < first_benchmark_date:
+            continue
+        if stock_bar.trading_date in by_date:
+            last = by_date[stock_bar.trading_date]
+        elif last is None:
+            prior_dates = [d for d in dates_sorted if d <= stock_bar.trading_date]
+            if not prior_dates:
+                continue
+            last = by_date[prior_dates[-1]]
+
+        aligned_stock.append(stock_bar)
+        aligned_benchmark.append(
+            OHLCVBar(
+                trading_date=stock_bar.trading_date,
+                open=last.open,
+                high=last.high,
+                low=last.low,
+                close=last.close,
+                volume=last.volume,
+            )
+        )
+
+    return tuple(aligned_stock), tuple(aligned_benchmark)
+
+
 def ohlcv_bars_from_dataframe(df: pd.DataFrame) -> tuple[OHLCVBar, ...]:
     """Convert a normalized OHLCV DataFrame (DatetimeIndex) to bars."""
     if df.empty:

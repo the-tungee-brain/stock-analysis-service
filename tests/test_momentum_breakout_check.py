@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
@@ -13,10 +15,8 @@ from app.services.strategy.momentum_breakout_check_service import (
     MomentumBreakoutCheckService,
 )
 from data.benchmarks import BENCHMARK_SYMBOL
-from tests.test_momentum_breakout_setup import (
-    _aligned_trend_series,
-    _test_config,
-)
+from trade_planner.types import OHLCVBar
+from tests.test_momentum_breakout_setup import _aligned_trend_series, _test_config
 from trade_planner.setups.momentum_breakout import MomentumBreakoutSetup
 
 
@@ -100,6 +100,47 @@ def test_check_no_breakout_setup(
     assert result.status == "NO_BREAKOUT_SETUP"
     assert len(result.failed_setup_rules) > 0
     assert result.can_track_breakout_plan is False
+
+
+def test_check_trims_stock_history_to_benchmark_start(
+    check_service: MomentumBreakoutCheckService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stock, bench = _aligned_trend_series(120)
+    early_stock = tuple(
+        OHLCVBar(
+            trading_date=stock[0].trading_date - timedelta(days=offset),
+            open=stock[0].open * 0.97,
+            high=stock[0].high * 0.97,
+            low=stock[0].low * 0.97,
+            close=stock[0].close * 0.97,
+            volume=stock[0].volume,
+        )
+        for offset in (3, 2, 1)
+    )
+    stock_df = _bars_to_df((*early_stock, *stock))
+    bench_df = _bars_to_df(bench)
+
+    def _fake_load(symbol: str) -> pd.DataFrame:
+        sym = symbol.upper()
+        if sym == BENCHMARK_SYMBOL:
+            return bench_df
+        if sym == "NVDA":
+            return stock_df
+        raise FileNotFoundError(sym)
+
+    monkeypatch.setattr(
+        "app.services.strategy.momentum_breakout_check_service.load_symbol",
+        _fake_load,
+    )
+
+    result = check_service.check("NVDA")
+    assert result.status in {
+        "TRADABLE_BREAKOUT",
+        "REJECTED_BREAKOUT",
+        "NO_BREAKOUT_SETUP",
+    }
+    assert result.status != "DATA_UNAVAILABLE"
 
 
 def test_check_api(

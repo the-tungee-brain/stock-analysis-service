@@ -20,7 +20,7 @@ from trade_planner.alerts.risk_gate import AlertRiskGate
 from trade_planner.alerts.risk_models import AlertRiskContext, AlertRiskSettings
 from trade_planner.backtest.engine import BacktestEngine
 from trade_planner.config import TradePlannerConfig
-from trade_planner.research.data import align_benchmark_to_stock, ohlcv_bars_from_dataframe
+from trade_planner.research.data import align_stock_and_benchmark, ohlcv_bars_from_dataframe
 from trade_planner.research.features import capture_momentum_feature_snapshot
 from trade_planner.setups.momentum_breakout import MomentumBreakoutSetup
 from trade_planner.types import OHLCVBar, StockData
@@ -161,10 +161,12 @@ class MomentumBreakoutScannerService:
         except FileNotFoundError:
             return None
 
-        stock_bars = ohlcv_bars_from_dataframe(stock_df)
-        bench_bars = align_benchmark_to_stock(
-            stock_bars, self._benchmark_bars_cached()
+        stock_bars, bench_bars = align_stock_and_benchmark(
+            ohlcv_bars_from_dataframe(stock_df),
+            self._benchmark_bars_cached(),
         )
+        if not stock_bars or len(stock_bars) != len(bench_bars):
+            return None
         data = StockData.from_bars(sym, stock_bars, benchmark_bars=bench_bars)
 
         if not self._setup.is_valid(data):

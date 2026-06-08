@@ -10,7 +10,7 @@ from data.benchmarks import BENCHMARK_SYMBOL, ensure_benchmark_ohlcv
 from data.loader import load_symbol
 from trade_planner.persistence.historical_trade import HistoricalTrade
 from trade_planner.research.dashboard import build_research_dashboard
-from trade_planner.research.data import align_benchmark_to_stock, ohlcv_bars_from_dataframe
+from trade_planner.research.data import align_stock_and_benchmark, ohlcv_bars_from_dataframe
 from trade_planner.research.export import ResearchCsvExporter
 from trade_planner.research.models import (
     FeatureConditionInsight,
@@ -166,11 +166,15 @@ class MomentumBreakoutResearchService:
                 for bar in bench_all
                 if start_date <= bar.trading_date <= end_date
             )
-            aligned_bench = align_benchmark_to_stock(stock_bars, bench_slice)
+            aligned_stock, aligned_bench = align_stock_and_benchmark(
+                stock_bars, bench_slice
+            )
+            if not aligned_stock or len(aligned_stock) != len(aligned_bench):
+                continue
             universe.append(
                 SymbolBarSet(
                     symbol=symbol,
-                    stock_bars=stock_bars,
+                    stock_bars=aligned_stock,
                     benchmark_bars=aligned_bench,
                 )
             )

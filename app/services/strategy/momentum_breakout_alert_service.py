@@ -13,7 +13,7 @@ from trade_planner.alerts.risk_models import (
     OpenTradeSnapshot,
 )
 from trade_planner.config import TradePlannerConfig
-from trade_planner.research.data import align_benchmark_to_stock, ohlcv_bars_from_dataframe
+from trade_planner.research.data import align_stock_and_benchmark, ohlcv_bars_from_dataframe
 from trade_planner.research.features import capture_momentum_feature_snapshot
 from trade_planner.research.models import MarketRegime
 from trade_planner.research.regime import classify_market_regime
@@ -77,10 +77,14 @@ class MomentumBreakoutAlertService:
         symbol = request.symbol.strip().upper()
         stock_df = load_symbol(symbol)
         bench_df = load_symbol(BENCHMARK_SYMBOL)
-        stock_bars = ohlcv_bars_from_dataframe(stock_df)
-        bench_bars = align_benchmark_to_stock(
-            stock_bars, ohlcv_bars_from_dataframe(bench_df)
+        stock_bars, bench_bars = align_stock_and_benchmark(
+            ohlcv_bars_from_dataframe(stock_df),
+            ohlcv_bars_from_dataframe(bench_df),
         )
+        if not stock_bars or len(stock_bars) != len(bench_bars):
+            raise ValueError(
+                f"Could not align {symbol} daily price history with benchmark"
+            )
         data = StockData.from_bars(symbol, stock_bars, benchmark_bars=bench_bars)
 
         plan = self._setup.build_plan(data)
