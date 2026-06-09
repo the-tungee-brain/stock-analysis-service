@@ -32,6 +32,7 @@ from app.api.get_intraday_trading_bias_route import (
     router as get_intraday_trading_bias_route,
 )
 from app.api.get_trader_playbook_route import router as get_trader_playbook_route
+from app.api.trade_replay_route import router as trade_replay_router
 from app.api.get_emerging_leaders_route import router as get_emerging_leaders_route
 from app.api.get_emerging_leaders_validation_route import (
     router as get_emerging_leaders_validation_router,
@@ -195,6 +196,7 @@ protected_api.include_router(get_trade_decision_route)
 protected_api.include_router(get_trading_bias_route)
 protected_api.include_router(get_intraday_trading_bias_route)
 protected_api.include_router(get_trader_playbook_route)
+protected_api.include_router(trade_replay_router)
 protected_api.include_router(get_position_guidance_router)
 protected_api.include_router(get_emerging_leaders_route)
 protected_api.include_router(get_emerging_leaders_validation_router)

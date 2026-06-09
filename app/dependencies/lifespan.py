@@ -124,6 +124,7 @@ from app.adapters.strategy.momentum_breakout_alert_store_factory import (
 from app.adapters.strategy.paper_trade_performance_store_factory import (
     build_paper_trade_performance_store,
 )
+from app.adapters.trade_replay_oracle_store import OracleTradeReplayStore
 from app.core.momentum_breakout_feature_flags import mb_alerts_enabled
 from app.jobs.momentum_breakout_alert_scheduler import (
     is_scheduler_enabled,
@@ -173,6 +174,7 @@ from app.services.strategy.momentum_breakout_snapshot_serving_service import (
 from app.services.strategy.custom_trade_plan_service import CustomTradePlanService
 from app.services.strategy.wheel_backtest_service import WheelBacktestService
 from app.services.pattern_analysis_service import PatternAnalysisService
+from app.services.trade_replay_service import TradeReplayService
 
 
 def get_redis_client() -> redis.Redis:
@@ -568,6 +570,15 @@ async def lifespan(app: FastAPI):
         app.state.pattern_model_error = str(exc)
 
     portfolio_analysis_service.attach_pattern_model(app.state.pattern_loaded_model)
+    trade_replay_store = OracleTradeReplayStore(powerpocketdb_client)
+    trade_replay_store.ensure_schema()
+    trade_replay_service = TradeReplayService(
+        store=trade_replay_store,
+        yfinance_adapter=yfinance_adapter,
+        loaded_model=app.state.pattern_loaded_model,
+        pattern_analysis_service=pattern_analysis_service,
+        research_events_service=research_events_service,
+    )
 
     app.state.http_session = session
     app.state.redis_client = redis_client
@@ -639,6 +650,7 @@ async def lifespan(app: FastAPI):
     app.state.momentum_breakout_admin_metrics_service = (
         momentum_breakout_admin_metrics_service
     )
+    app.state.trade_replay_service = trade_replay_service
 
     scheduler_task = None
     if is_scheduler_enabled() and mb_alerts_enabled():

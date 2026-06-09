@@ -65,6 +65,7 @@ from app.services.research_symbol_data_service import ResearchSymbolDataService
 from app.services.research_events_service import ResearchEventsService
 from app.services.watchlist_service import WatchlistService
 from app.services.pattern_analysis_service import PatternAnalysisService
+from app.services.trade_replay_service import TradeReplayService
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -255,6 +256,10 @@ def get_momentum_breakout_alert_refresh_service(
     request: Request,
 ) -> MomentumBreakoutAlertRefreshService:
     return request.app.state.momentum_breakout_alert_refresh_service
+
+
+def get_trade_replay_service(request: Request) -> TradeReplayService:
+    return request.app.state.trade_replay_service
 
 
 def get_momentum_breakout_notification_service(
