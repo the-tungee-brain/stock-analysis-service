@@ -23,6 +23,7 @@ from app.services.trader_playbook_service import build_trader_playbook
 from models.prediction_service import LoadedModel
 
 SOURCE_FRESHNESS_DELAYED = "Educational / delayed — not for live execution."
+TARGET_2_OFFSET_MICROSECONDS = 1
 
 
 @dataclass(frozen=True)
@@ -176,6 +177,7 @@ class TradeReplayService:
             workflow=workflow,
             event_date=event_date,
         )
+        events = _sort_story_events(events)
         return TradeReplayResponse(
             symbol=symbol_upper,
             date=event_date,
@@ -406,10 +408,16 @@ def _generate_day_trade_events(
     short_active = False
     long_target_1_hit = False
     short_target_1_hit = False
-    was_above_vwap: bool | None = None
+    long_done = False
+    short_done = False
 
     for bar in sorted(bars, key=lambda item: item.timestamp):
-        if long_entry is not None and not long_active and bar.high >= long_entry:
+        if (
+            long_entry is not None
+            and not long_done
+            and not long_active
+            and bar.high >= long_entry
+        ):
             long_active = True
             events.append(
                 _event(
@@ -418,13 +426,21 @@ def _generate_day_trade_events(
                     bar=bar,
                     level_price=long_entry,
                     observed_price=max(bar.close, long_entry),
-                    message=f"{plan.symbol} broke above the opening range trigger near ${long_entry:.2f}.",
+                    message=_with_session_context(
+                        bar,
+                        f"{plan.symbol} broke above the opening range trigger near ${long_entry:.2f}.",
+                    ),
                     severity="important",
                     actionability="active",
                     dedupe_key=f"long-trigger:{long_entry:.2f}",
                 )
             )
-        if short_entry is not None and not short_active and bar.low <= short_entry:
+        if (
+            short_entry is not None
+            and not short_done
+            and not short_active
+            and bar.low <= short_entry
+        ):
             short_active = True
             events.append(
                 _event(
@@ -433,7 +449,10 @@ def _generate_day_trade_events(
                     bar=bar,
                     level_price=short_entry,
                     observed_price=min(bar.close, short_entry),
-                    message=f"{plan.symbol} broke below the opening range trigger near ${short_entry:.2f}.",
+                    message=_with_session_context(
+                        bar,
+                        f"{plan.symbol} broke below the opening range trigger near ${short_entry:.2f}.",
+                    ),
                     severity="important",
                     actionability="active",
                     dedupe_key=f"short-trigger:{short_entry:.2f}",
@@ -456,6 +475,7 @@ def _generate_day_trade_events(
                     )
                 )
                 long_active = False
+                long_done = True
                 continue
             long_target_1_hit = True
             events.append(
@@ -465,7 +485,10 @@ def _generate_day_trade_events(
                     bar=bar,
                     level_price=long_target,
                     observed_price=max(bar.close, long_target),
-                    message=f"Long target 1 was reached near ${long_target:.2f}. Planned expansion delivered.",
+                    message=_with_session_context(
+                        bar,
+                        f"Long target 1 was reached near ${long_target:.2f}. Planned expansion delivered.",
+                    ),
                     severity="important",
                     actionability="missed",
                     dedupe_key=f"long-target-1:{long_target:.2f}",
@@ -473,6 +496,7 @@ def _generate_day_trade_events(
             )
             if long_target_2 is None:
                 long_active = False
+                long_done = True
         if (
             short_active
             and not short_target_1_hit
@@ -490,6 +514,7 @@ def _generate_day_trade_events(
                     )
                 )
                 short_active = False
+                short_done = True
                 continue
             short_target_1_hit = True
             events.append(
@@ -499,7 +524,10 @@ def _generate_day_trade_events(
                     bar=bar,
                     level_price=short_target,
                     observed_price=min(bar.close, short_target),
-                    message=f"Short target 1 was reached near ${short_target:.2f}. Planned expansion delivered.",
+                    message=_with_session_context(
+                        bar,
+                        f"Short target 1 was reached near ${short_target:.2f}. Planned expansion delivered.",
+                    ),
                     severity="important",
                     actionability="missed",
                     dedupe_key=f"short-target-1:{short_target:.2f}",
@@ -507,7 +535,13 @@ def _generate_day_trade_events(
             )
             if short_target_2 is None:
                 short_active = False
-        if long_active and long_target_2 is not None and bar.high >= long_target_2:
+                short_done = True
+        if (
+            long_active
+            and long_target_1_hit
+            and long_target_2 is not None
+            and bar.high >= long_target_2
+        ):
             events.append(
                 _event(
                     plan,
@@ -515,14 +549,24 @@ def _generate_day_trade_events(
                     bar=bar,
                     level_price=long_target_2,
                     observed_price=max(bar.close, long_target_2),
-                    message=f"Long target 2 was reached near ${long_target_2:.2f}. Extended plan objective was reached.",
+                    message=_with_session_context(
+                        bar,
+                        f"Long target 2 was reached near ${long_target_2:.2f}. Extended plan objective was reached.",
+                    ),
                     severity="important",
                     actionability="missed",
                     dedupe_key=f"long-target-2:{long_target_2:.2f}",
+                    time_offset_microseconds=TARGET_2_OFFSET_MICROSECONDS,
                 )
             )
             long_active = False
-        if short_active and short_target_2 is not None and bar.low <= short_target_2:
+            long_done = True
+        if (
+            short_active
+            and short_target_1_hit
+            and short_target_2 is not None
+            and bar.low <= short_target_2
+        ):
             events.append(
                 _event(
                     plan,
@@ -530,13 +574,18 @@ def _generate_day_trade_events(
                     bar=bar,
                     level_price=short_target_2,
                     observed_price=min(bar.close, short_target_2),
-                    message=f"Short target 2 was reached near ${short_target_2:.2f}. Extended plan objective was reached.",
+                    message=_with_session_context(
+                        bar,
+                        f"Short target 2 was reached near ${short_target_2:.2f}. Extended plan objective was reached.",
+                    ),
                     severity="important",
                     actionability="missed",
                     dedupe_key=f"short-target-2:{short_target_2:.2f}",
+                    time_offset_microseconds=TARGET_2_OFFSET_MICROSECONDS,
                 )
             )
             short_active = False
+            short_done = True
         if long_active and long_stop is not None and bar.low <= long_stop:
             events.append(
                 _event(
@@ -545,13 +594,17 @@ def _generate_day_trade_events(
                     bar=bar,
                     level_price=long_stop,
                     observed_price=min(bar.close, long_stop),
-                    message=f"Long plan control level was lost near ${long_stop:.2f}.",
+                    message=_with_session_context(
+                        bar,
+                        f"Long plan control level was lost near ${long_stop:.2f}.",
+                    ),
                     severity="warning",
                     actionability="invalidated",
                     dedupe_key=f"long-stop:{long_stop:.2f}",
                 )
             )
             long_active = False
+            long_done = True
         if short_active and short_stop is not None and bar.high >= short_stop:
             events.append(
                 _event(
@@ -560,34 +613,17 @@ def _generate_day_trade_events(
                     bar=bar,
                     level_price=short_stop,
                     observed_price=max(bar.close, short_stop),
-                    message=f"Short plan control level was reclaimed near ${short_stop:.2f}.",
+                    message=_with_session_context(
+                        bar,
+                        f"Short plan control level was reclaimed near ${short_stop:.2f}.",
+                    ),
                     severity="warning",
                     actionability="invalidated",
                     dedupe_key=f"short-stop:{short_stop:.2f}",
                 )
             )
             short_active = False
-        if vwap is not None:
-            above = bar.close >= vwap
-            if was_above_vwap is not None and above != was_above_vwap:
-                event_type = "vwap_reclaimed" if above else "vwap_lost"
-                events.append(
-                    _event(
-                        plan,
-                        event_type=event_type,
-                        bar=bar,
-                        level_price=vwap,
-                        observed_price=bar.close,
-                        message=(
-                            f"Price {'reclaimed' if above else 'lost'} VWAP near ${vwap:.2f}, "
-                            "the intraday control line."
-                        ),
-                        severity="info",
-                        actionability="active" if above else "invalidated",
-                        dedupe_key=f"{event_type}:{bar.timestamp.isoformat()}",
-                    )
-                )
-            was_above_vwap = above
+            short_done = True
         if long_active and long_target is not None and long_stop is not None:
             if (long_target - bar.close) <= max(bar.close - long_stop, 0):
                 events.append(
@@ -597,7 +633,10 @@ def _generate_day_trade_events(
                         bar=bar,
                         level_price=long_target,
                         observed_price=bar.close,
-                        message="Long setup became extended as remaining reward compressed versus current risk.",
+                        message=_with_session_context(
+                            bar,
+                            "Long setup became extended as remaining reward compressed versus current risk.",
+                        ),
                         severity="warning",
                         actionability="missed",
                         dedupe_key=(
@@ -608,6 +647,7 @@ def _generate_day_trade_events(
                     )
                 )
                 long_active = False
+                long_done = True
         if short_active and short_target is not None and short_stop is not None:
             if (bar.close - short_target) <= max(short_stop - bar.close, 0):
                 events.append(
@@ -617,7 +657,10 @@ def _generate_day_trade_events(
                         bar=bar,
                         level_price=short_target,
                         observed_price=bar.close,
-                        message="Short setup became extended as remaining reward compressed versus current risk.",
+                        message=_with_session_context(
+                            bar,
+                            "Short setup became extended as remaining reward compressed versus current risk.",
+                        ),
                         severity="warning",
                         actionability="missed",
                         dedupe_key=(
@@ -628,6 +671,7 @@ def _generate_day_trade_events(
                     )
                 )
                 short_active = False
+                short_done = True
         if long_active and or_high is not None and bar.close < or_high:
             events.append(
                 _event(
@@ -636,13 +680,17 @@ def _generate_day_trade_events(
                     bar=bar,
                     level_price=or_high,
                     observed_price=bar.close,
-                    message="Long breakout failed by closing back inside the opening range.",
+                    message=_with_session_context(
+                        bar,
+                        "Long breakout failed by closing back inside the opening range.",
+                    ),
                     severity="warning",
                     actionability="invalidated",
                     dedupe_key=f"long-invalidated:{or_high:.2f}",
                 )
             )
             long_active = False
+            long_done = True
         if short_active and or_low is not None and bar.close > or_low:
             events.append(
                 _event(
@@ -651,15 +699,19 @@ def _generate_day_trade_events(
                     bar=bar,
                     level_price=or_low,
                     observed_price=bar.close,
-                    message="Short breakdown failed by closing back inside the opening range.",
+                    message=_with_session_context(
+                        bar,
+                        "Short breakdown failed by closing back inside the opening range.",
+                    ),
                     severity="warning",
                     actionability="invalidated",
                     dedupe_key=f"short-invalidated:{or_low:.2f}",
                 )
             )
             short_active = False
+            short_done = True
 
-    return _dedupe_events(events)
+    return _story_events(events)
 
 
 def _generate_swing_trade_events(
@@ -687,7 +739,10 @@ def _generate_swing_trade_events(
                     bar=bar,
                     level_price=entry,
                     observed_price=entry,
-                    message=f"{side} swing entry triggered near ${entry:.2f}.",
+                    message=_with_session_context(
+                        bar,
+                        f"{side} swing entry triggered near ${entry:.2f}.",
+                    ),
                     severity="important",
                     actionability="active",
                     dedupe_key=f"entry:{side.lower()}:{entry:.2f}",
@@ -733,7 +788,10 @@ def _generate_swing_trade_events(
                     bar=bar,
                     level_price=target,
                     observed_price=target,
-                    message=f"Swing target was reached near ${target:.2f}.",
+                    message=_with_session_context(
+                        bar,
+                        f"Swing target was reached near ${target:.2f}.",
+                    ),
                     severity="important",
                     actionability="missed",
                     dedupe_key=f"target:{side.lower()}:{target:.2f}",
@@ -751,7 +809,10 @@ def _generate_swing_trade_events(
                     bar=bar,
                     level_price=stop,
                     observed_price=stop,
-                    message=f"Swing setup invalidated at the stop level near ${stop:.2f}.",
+                    message=_with_session_context(
+                        bar,
+                        f"Swing setup invalidated at the stop level near ${stop:.2f}.",
+                    ),
                     severity="warning",
                     actionability="invalidated",
                     dedupe_key=f"stop:{side.lower()}:{stop:.2f}",
@@ -769,14 +830,17 @@ def _generate_swing_trade_events(
                         bar=bar,
                         level_price=target,
                         observed_price=bar.close,
-                        message="Current swing R/R degraded below 1R as price moved away from the original trigger.",
+                        message=_with_session_context(
+                            bar,
+                            "Current swing R/R degraded below 1R as price moved away from the original trigger.",
+                        ),
                         severity="warning",
                         actionability="missed",
                         dedupe_key=f"rr-degraded:{side.lower()}:{entry:.2f}",
                     )
                 )
                 active = False
-    return _dedupe_events(events)
+    return _story_events(events)
 
 
 def _plan_record(
@@ -844,7 +908,13 @@ def _event(
     severity: str,
     actionability: str,
     dedupe_key: str,
+    time_offset_microseconds: int = 0,
 ) -> TradeReplayEvent:
+    event_time = bar.timestamp
+    if time_offset_microseconds:
+        event_time = event_time + pd.Timedelta(
+            microseconds=time_offset_microseconds
+        ).to_pytimedelta()
     return TradeReplayEvent(
         id=f"evt-{uuid.uuid4().hex}",
         plan_id=plan.plan_id,
@@ -852,7 +922,7 @@ def _event(
         event_date=plan.plan_date,
         workflow=plan.workflow,
         event_type=event_type,
-        event_time=bar.timestamp,
+        event_time=event_time,
         level_price=_round_price(level_price),
         observed_price=_round_price(observed_price),
         message=message,
@@ -931,6 +1001,69 @@ def _dedupe_events(events: list[TradeReplayEvent]) -> list[TradeReplayEvent]:
         seen.add(key)
         result.append(event)
     return sorted(result, key=lambda event: event.event_time)
+
+
+_STORY_EVENT_TYPES = {
+    "entry_triggered",
+    "long_trigger_activated",
+    "short_trigger_activated",
+    "target_1_hit",
+    "target_2_hit",
+    "target_hit",
+    "setup_extended",
+    "setup_invalidated",
+    "stop_hit",
+    "rr_degraded",
+    "pullback_opportunity",
+    "entry_missed",
+}
+
+_EVENT_PRIORITY = {
+    "entry_triggered": 10,
+    "long_trigger_activated": 10,
+    "short_trigger_activated": 10,
+    "target_1_hit": 20,
+    "target_hit": 20,
+    "target_2_hit": 21,
+    "setup_extended": 30,
+    "rr_degraded": 30,
+    "entry_missed": 30,
+    "pullback_opportunity": 30,
+    "setup_invalidated": 40,
+    "stop_hit": 40,
+}
+
+
+def _story_events(events: list[TradeReplayEvent]) -> list[TradeReplayEvent]:
+    deduped = _dedupe_events(
+        [event for event in events if event.event_type in _STORY_EVENT_TYPES]
+    )
+    return _sort_story_events(deduped)
+
+
+def _sort_story_events(events: list[TradeReplayEvent]) -> list[TradeReplayEvent]:
+    return sorted(
+        events,
+        key=lambda event: (
+            event.event_time,
+            _EVENT_PRIORITY.get(event.event_type, 100),
+        ),
+    )
+
+
+def _with_session_context(bar: ReplayBar, message: str) -> str:
+    return f"{_session_label(bar.timestamp)} ET: {message}"
+
+
+def _session_label(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    local_time = value.astimezone(EASTERN).time()
+    if local_time < time(9, 30):
+        return "Pre-market"
+    if local_time < time(16, 0):
+        return "Regular session"
+    return "After-hours"
 
 
 def _float(value: Any) -> float | None:

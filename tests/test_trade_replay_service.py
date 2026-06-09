@@ -14,6 +14,7 @@ from app.models.intraday_trading_bias_models import (
     IntradayTradingBiasLevels,
     IntradayTradingBiasResponse,
 )
+from app.models.trade_replay_models import TradeReplayEvent
 from app.services import trade_replay_service as replay_module
 from app.services.trade_replay_service import (
     InMemoryTradeReplayStore,
@@ -209,6 +210,64 @@ def test_get_returns_chronological_events(monkeypatch) -> None:
     assert replay.events == sorted(replay.events, key=lambda event: event.event_time)
 
 
+def test_get_replay_sorts_same_timestamp_target_1_before_target_2() -> None:
+    store = InMemoryTradeReplayStore()
+    timestamp = datetime(2026, 6, 5, 15, 0, tzinfo=timezone.utc)
+    store.append_events(
+        [
+            TradeReplayEvent(
+                id="evt-target-2",
+                plan_id="plan-1",
+                symbol="NVDA",
+                event_date=SESSION_DATE,
+                workflow="day_trade",
+                event_type="target_2_hit",
+                event_time=timestamp,
+                level_price=108.0,
+                observed_price=108.0,
+                message="Target 2",
+                severity="important",
+                actionability="missed",
+                source="delayed",
+                source_freshness_label=replay_module.SOURCE_FRESHNESS_DELAYED,
+                dedupe_key="target-2",
+            ),
+            TradeReplayEvent(
+                id="evt-target-1",
+                plan_id="plan-1",
+                symbol="NVDA",
+                event_date=SESSION_DATE,
+                workflow="day_trade",
+                event_type="target_1_hit",
+                event_time=timestamp,
+                level_price=104.0,
+                observed_price=104.0,
+                message="Target 1",
+                severity="important",
+                actionability="missed",
+                source="delayed",
+                source_freshness_label=replay_module.SOURCE_FRESHNESS_DELAYED,
+                dedupe_key="target-1",
+            ),
+        ]
+    )
+    service = TradeReplayService(
+        store=store,
+        yfinance_adapter=_FakeYFinanceAdapter(pd.DataFrame()),  # type: ignore[arg-type]
+    )
+
+    replay = service.get_replay(
+        symbol="NVDA",
+        workflow="day_trade",
+        event_date=SESSION_DATE,
+    )
+
+    assert [event.event_type for event in replay.events] == [
+        "target_1_hit",
+        "target_2_hit",
+    ]
+
+
 def test_trade_replay_routes_match_frontend_contract(monkeypatch) -> None:
     service, _store = _service(
         monkeypatch,
@@ -348,6 +407,59 @@ def test_day_trade_target_2_event_is_generated_when_level_exists() -> None:
         "target_1_hit",
         "target_2_hit",
     ]
+    assert events[1].event_time < events[2].event_time
+
+
+def test_vwap_flips_are_not_emitted_as_timeline_events() -> None:
+    levels = {
+        "long_entry": 100.0,
+        "long_stop": 98.0,
+        "long_target_1": 106.0,
+        "open_range_high": 99.99,
+        "open_range_low": 96.0,
+        "vwap": 101.0,
+    }
+    payload = {"workflow": "day_trade", "levels": levels}
+    plan = TradePlanRecord(
+        plan_id="plan-day-vwap-1",
+        symbol="NVDA",
+        workflow="day_trade",
+        plan_date=SESSION_DATE,
+        generated_at=datetime(2026, 6, 5, 14, 0, tzinfo=timezone.utc),
+        source="delayed",
+        source_freshness_label=replay_module.SOURCE_FRESHNESS_DELAYED,
+        signature=plan_signature(levels, payload),
+        levels=levels,
+        payload=payload,
+    )
+    bars = [
+        ReplayBar(
+            timestamp=datetime(2026, 6, 5, 14, 30, tzinfo=timezone.utc),
+            open=99.0,
+            high=100.5,
+            low=98.5,
+            close=102.0,
+        ),
+        ReplayBar(
+            timestamp=datetime(2026, 6, 5, 15, 0, tzinfo=timezone.utc),
+            open=102.0,
+            high=102.5,
+            low=100.0,
+            close=100.5,
+        ),
+        ReplayBar(
+            timestamp=datetime(2026, 6, 5, 15, 30, tzinfo=timezone.utc),
+            open=100.5,
+            high=103.0,
+            low=100.0,
+            close=102.5,
+        ),
+    ]
+
+    events = generate_replay_events(plan, bars)
+
+    assert "vwap_lost" not in [event.event_type for event in events]
+    assert "vwap_reclaimed" not in [event.event_type for event in events]
 
 
 def test_day_trade_short_target_uses_low_after_short_trigger() -> None:
@@ -458,6 +570,58 @@ def test_same_bar_stop_and_target_is_marked_ambiguous() -> None:
     ]
     assert "ambiguous" in events[-1].message
     assert events[-1].actionability == "invalidated"
+
+
+def test_duplicate_invalidations_are_collapsed_to_one_story_event() -> None:
+    levels = {
+        "long_entry": 100.0,
+        "long_stop": 98.0,
+        "long_target_1": 106.0,
+        "open_range_high": 99.99,
+        "open_range_low": 96.0,
+        "vwap": 98.0,
+    }
+    payload = {"workflow": "day_trade", "levels": levels}
+    plan = TradePlanRecord(
+        plan_id="plan-day-invalid-1",
+        symbol="NVDA",
+        workflow="day_trade",
+        plan_date=SESSION_DATE,
+        generated_at=datetime(2026, 6, 5, 14, 0, tzinfo=timezone.utc),
+        source="delayed",
+        source_freshness_label=replay_module.SOURCE_FRESHNESS_DELAYED,
+        signature=plan_signature(levels, payload),
+        levels=levels,
+        payload=payload,
+    )
+    bars = [
+        ReplayBar(
+            timestamp=datetime(2026, 6, 5, 14, 30, tzinfo=timezone.utc),
+            open=100.0,
+            high=101.0,
+            low=99.0,
+            close=100.5,
+        ),
+        ReplayBar(
+            timestamp=datetime(2026, 6, 5, 15, 0, tzinfo=timezone.utc),
+            open=100.5,
+            high=101.0,
+            low=97.5,
+            close=97.8,
+        ),
+        ReplayBar(
+            timestamp=datetime(2026, 6, 5, 15, 30, tzinfo=timezone.utc),
+            open=97.8,
+            high=98.5,
+            low=96.0,
+            close=97.0,
+        ),
+    ]
+
+    events = generate_replay_events(plan, bars)
+
+    assert [event.event_type for event in events].count("stop_hit") == 1
+    assert [event.event_type for event in events].count("setup_invalidated") == 0
 
 
 def test_market_date_uses_eastern_session_date(monkeypatch) -> None:
