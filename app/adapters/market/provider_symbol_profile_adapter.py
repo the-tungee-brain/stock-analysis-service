@@ -20,6 +20,113 @@ class ProviderSymbolProfileAdapter:
     def __init__(self, client: oracledb.ConnectionPool):
         self.client = client
         self.table_name = "PROVIDER_SYMBOL_PROFILE"
+        self.ensure_schema()
+
+    def ensure_schema(self) -> None:
+        with observe_dependency("oracle"):
+            con = self.client.acquire()
+            try:
+                cur = con.cursor()
+                self._ensure_table(cur)
+                for column_name, column_type in self._required_additive_columns():
+                    self._ensure_column(cur, column_name, column_type)
+                con.commit()
+            finally:
+                self.client.release(con)
+
+    def _ensure_table(self, cur: oracledb.Cursor) -> None:
+        cur.execute(
+            """
+            SELECT 1
+            FROM user_tables
+            WHERE table_name = :table_name
+            """,
+            {"table_name": self.table_name},
+        )
+        if cur.fetchone() is not None:
+            return
+        try:
+            cur.execute(
+                f"""
+                CREATE TABLE {self.table_name} (
+                    provider        VARCHAR2(32) NOT NULL,
+                    symbol          VARCHAR2(32) NOT NULL,
+                    status          VARCHAR2(24) DEFAULT 'available' NOT NULL,
+                    fetched_at      TIMESTAMP WITH TIME ZONE NOT NULL,
+                    updated_at      TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+                    name            VARCHAR2(512),
+                    currency        VARCHAR2(16),
+                    exchange_name   VARCHAR2(128),
+                    quote_type      VARCHAR2(64),
+                    asset_type      VARCHAR2(64),
+                    sector          VARCHAR2(256),
+                    industry        VARCHAR2(256),
+                    country         VARCHAR2(128),
+                    website         VARCHAR2(1024),
+                    current_price   NUMBER,
+                    previous_close  NUMBER,
+                    market_cap      NUMBER,
+                    total_assets    NUMBER,
+                    volume          NUMBER,
+                    avg_volume      NUMBER,
+                    trailing_pe     NUMBER,
+                    forward_pe      NUMBER,
+                    price_to_book   NUMBER,
+                    dividend_yield  NUMBER,
+                    dividend_yield_pct NUMBER,
+                    raw_dividend_yield NUMBER,
+                    raw_dividend_yield_source VARCHAR2(128),
+                    dividend_rate   NUMBER,
+                    expense_ratio   NUMBER,
+                    beta            NUMBER,
+                    raw_json        CLOB,
+                    CONSTRAINT provider_symbol_profile_pk PRIMARY KEY (provider, symbol)
+                )
+                """
+            )
+        except oracledb.DatabaseError as exc:
+            if not self._is_ddl_already_applied(exc):
+                raise
+
+    def _ensure_column(
+        self,
+        cur: oracledb.Cursor,
+        column_name: str,
+        column_type: str,
+    ) -> None:
+        cur.execute(
+            """
+            SELECT 1
+            FROM user_tab_columns
+            WHERE table_name = :table_name
+              AND column_name = :column_name
+            """,
+            {"table_name": self.table_name, "column_name": column_name},
+        )
+        if cur.fetchone() is not None:
+            return
+        try:
+            cur.execute(
+                f"ALTER TABLE {self.table_name} ADD ({column_name.lower()} {column_type})"
+            )
+        except oracledb.DatabaseError as exc:
+            if not self._is_ddl_already_applied(exc):
+                raise
+
+    @staticmethod
+    def _required_additive_columns() -> tuple[tuple[str, str], ...]:
+        return (
+            ("DIVIDEND_YIELD_PCT", "NUMBER"),
+            ("RAW_DIVIDEND_YIELD", "NUMBER"),
+            ("RAW_DIVIDEND_YIELD_SOURCE", "VARCHAR2(128)"),
+        )
+
+    @staticmethod
+    def _is_ddl_already_applied(exc: oracledb.DatabaseError) -> bool:
+        error = exc.args[0] if exc.args else None
+        code = getattr(error, "code", None)
+        message = str(exc)
+        return code in {955, 1430} or "ORA-00955" in message or "ORA-01430" in message
 
     @staticmethod
     def _read_lob(value: Any) -> Any:
