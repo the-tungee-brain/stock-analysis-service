@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,6 +18,9 @@ from app.utils.dividend_yield import normalize_dividend_yield_pct
 
 
 class ProviderSymbolProfileAdapter:
+    _DDL_CONCURRENCY_RETRIES = 3
+    _DDL_CONCURRENCY_RETRY_SECONDS = 0.25
+
     def __init__(self, client: oracledb.ConnectionPool):
         self.client = client
         self.table_name = "PROVIDER_SYMBOL_PROFILE"
@@ -35,15 +39,7 @@ class ProviderSymbolProfileAdapter:
                 self.client.release(con)
 
     def _ensure_table(self, cur: oracledb.Cursor) -> None:
-        cur.execute(
-            """
-            SELECT 1
-            FROM user_tables
-            WHERE table_name = :table_name
-            """,
-            {"table_name": self.table_name},
-        )
-        if cur.fetchone() is not None:
+        if self._table_exists(cur):
             return
         try:
             cur.execute(
@@ -85,8 +81,22 @@ class ProviderSymbolProfileAdapter:
                 """
             )
         except oracledb.DatabaseError as exc:
-            if not self._is_ddl_already_applied(exc):
-                raise
+            if self._is_ddl_already_applied(exc):
+                return
+            if self._is_ddl_concurrency_error(exc) and self._wait_for_table(cur):
+                return
+            raise
+
+    def _table_exists(self, cur: oracledb.Cursor) -> bool:
+        cur.execute(
+            """
+            SELECT 1
+            FROM user_tables
+            WHERE table_name = :table_name
+            """,
+            {"table_name": self.table_name},
+        )
+        return cur.fetchone() is not None
 
     def _ensure_column(
         self,
@@ -94,6 +104,23 @@ class ProviderSymbolProfileAdapter:
         column_name: str,
         column_type: str,
     ) -> None:
+        if self._column_exists(cur, column_name):
+            return
+        try:
+            cur.execute(
+                f"ALTER TABLE {self.table_name} ADD ({column_name.lower()} {column_type})"
+            )
+        except oracledb.DatabaseError as exc:
+            if self._is_ddl_already_applied(exc):
+                return
+            if self._is_ddl_concurrency_error(exc) and self._wait_for_column(
+                cur,
+                column_name,
+            ):
+                return
+            raise
+
+    def _column_exists(self, cur: oracledb.Cursor, column_name: str) -> bool:
         cur.execute(
             """
             SELECT 1
@@ -103,15 +130,21 @@ class ProviderSymbolProfileAdapter:
             """,
             {"table_name": self.table_name, "column_name": column_name},
         )
-        if cur.fetchone() is not None:
-            return
-        try:
-            cur.execute(
-                f"ALTER TABLE {self.table_name} ADD ({column_name.lower()} {column_type})"
-            )
-        except oracledb.DatabaseError as exc:
-            if not self._is_ddl_already_applied(exc):
-                raise
+        return cur.fetchone() is not None
+
+    def _wait_for_table(self, cur: oracledb.Cursor) -> bool:
+        for _ in range(self._DDL_CONCURRENCY_RETRIES):
+            time.sleep(self._DDL_CONCURRENCY_RETRY_SECONDS)
+            if self._table_exists(cur):
+                return True
+        return False
+
+    def _wait_for_column(self, cur: oracledb.Cursor, column_name: str) -> bool:
+        for _ in range(self._DDL_CONCURRENCY_RETRIES):
+            time.sleep(self._DDL_CONCURRENCY_RETRY_SECONDS)
+            if self._column_exists(cur, column_name):
+                return True
+        return False
 
     @staticmethod
     def _required_additive_columns() -> tuple[tuple[str, str], ...]:
@@ -127,6 +160,13 @@ class ProviderSymbolProfileAdapter:
         code = getattr(error, "code", None)
         message = str(exc)
         return code in {955, 1430} or "ORA-00955" in message or "ORA-01430" in message
+
+    @staticmethod
+    def _is_ddl_concurrency_error(exc: oracledb.DatabaseError) -> bool:
+        error = exc.args[0] if exc.args else None
+        code = getattr(error, "code", None)
+        message = str(exc)
+        return code == 14411 or "ORA-14411" in message
 
     @staticmethod
     def _read_lob(value: Any) -> Any:

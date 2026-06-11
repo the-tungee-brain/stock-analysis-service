@@ -1,5 +1,7 @@
 import math
 
+import oracledb
+
 from app.adapters.market.provider_symbol_profile_adapter import (
     ProviderSymbolProfileAdapter,
 )
@@ -129,6 +131,63 @@ def test_provider_symbol_profile_adapter_treats_existing_ddl_errors_as_applied()
     exc = Exception(_Error())
 
     assert ProviderSymbolProfileAdapter._is_ddl_already_applied(exc) is True  # type: ignore[arg-type]
+
+
+def test_provider_symbol_profile_adapter_recognizes_ddl_concurrency_errors():
+    class _Error:
+        code = 14411
+
+    exc = Exception(_Error())
+
+    assert ProviderSymbolProfileAdapter._is_ddl_concurrency_error(exc) is True  # type: ignore[arg-type]
+
+
+def test_provider_symbol_profile_adapter_waits_when_column_ddl_is_concurrent(monkeypatch):
+    class _ConcurrentAlterCursor(_FakeCursor):
+        def __init__(self) -> None:
+            super().__init__(
+                table_exists=True,
+                existing_columns={
+                    "RAW_DIVIDEND_YIELD",
+                    "RAW_DIVIDEND_YIELD_SOURCE",
+                },
+            )
+            self.alter_attempts = 0
+            self.column_checks_after_contention = 0
+
+        def execute(self, sql: str, params=None):
+            normalized = sql.lower()
+            params = params or {}
+            if "from user_tab_columns" in normalized:
+                if self.alter_attempts:
+                    self.column_checks_after_contention += 1
+                if (
+                    self.alter_attempts
+                    and self.column_checks_after_contention == 1
+                    and str(params.get("column_name", "")).upper()
+                    == "DIVIDEND_YIELD_PCT"
+                ):
+                    self.existing_columns.add("DIVIDEND_YIELD_PCT")
+                return super().execute(sql, params)
+            if normalized.strip().startswith("alter table"):
+                self.statements.append(" ".join(sql.split()))
+                self.alter_attempts += 1
+                raise oracledb.DatabaseError(
+                    "ORA-14411: The DDL cannot be run concurrently with other DDLs"
+                )
+            return super().execute(sql, params)
+
+    monkeypatch.setattr(
+        ProviderSymbolProfileAdapter,
+        "_DDL_CONCURRENCY_RETRY_SECONDS",
+        0,
+    )
+    cursor = _ConcurrentAlterCursor()
+
+    ProviderSymbolProfileAdapter(_FakePool(cursor))  # type: ignore[arg-type]
+
+    assert cursor.alter_attempts == 1
+    assert "DIVIDEND_YIELD_PCT" in cursor.existing_columns
 
 
 def test_normalized_fields_drop_non_finite_numbers():
