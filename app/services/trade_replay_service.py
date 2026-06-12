@@ -4,7 +4,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Protocol
 
 import pandas as pd
@@ -12,6 +12,11 @@ import pandas as pd
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.builders.intraday_trading_bias_engine import EASTERN
 from app.models.trade_replay_models import (
+    MissedMoveOutcome,
+    MissedMoveSummaryRow,
+    MissedMovesRange,
+    MissedMovesSort,
+    MissedMovesSummaryResponse,
     TradeReplayEvent,
     TradeReplayRefreshResponse,
     TradeReplayResponse,
@@ -24,6 +29,16 @@ from models.prediction_service import LoadedModel
 
 SOURCE_FRESHNESS_DELAYED = "Educational / delayed — not for live execution."
 TARGET_2_OFFSET_MICROSECONDS = 1
+COMPLETED_MISSED_MOVE_OUTCOMES = {
+    "target_1_hit",
+    "target_2_hit",
+    "target_hit",
+    "setup_extended",
+    "setup_invalidated",
+    "stop_hit",
+    "rr_degraded",
+    "entry_missed",
+}
 
 
 @dataclass(frozen=True)
@@ -57,6 +72,25 @@ class PlanSaveResult:
     created: bool
 
 
+@dataclass(frozen=True)
+class MissedMoveRecord:
+    missed_move_id: str
+    symbol: str
+    workflow: TradeReplayWorkflow
+    event_date: date
+    setup_type: str
+    trigger_price: float | None
+    outcome: MissedMoveOutcome
+    max_move_after_trigger_pct: float | None
+    setup_quality_score: float | None
+    source: TradeReplaySource
+    source_freshness_label: str | None
+    trigger_event_id: str
+    terminal_event_id: str
+    replay_events: list[TradeReplayEvent]
+    created_at: datetime | None = None
+
+
 class TradeReplayStore(Protocol):
     def save_plan_if_changed(self, plan: TradePlanRecord) -> PlanSaveResult: ...
 
@@ -78,6 +112,19 @@ class TradeReplayStore(Protocol):
         event_date: date,
     ) -> list[TradeReplayEvent]: ...
 
+    def save_missed_moves(self, missed_moves: list[MissedMoveRecord]) -> int: ...
+
+    def list_missed_moves(
+        self,
+        *,
+        symbol: str,
+        workflow: TradeReplayWorkflow,
+        start_date: date,
+        end_date: date,
+    ) -> list[MissedMoveRecord]: ...
+
+    def get_missed_move(self, missed_move_id: str) -> MissedMoveRecord | None: ...
+
 
 class InMemoryTradeReplayStore:
     """Small test/local store with the same idempotency semantics as Oracle."""
@@ -85,7 +132,9 @@ class InMemoryTradeReplayStore:
     def __init__(self) -> None:
         self.plans: list[TradePlanRecord] = []
         self.events: list[TradeReplayEvent] = []
+        self.missed_moves: list[MissedMoveRecord] = []
         self._event_keys: set[tuple[str, date, str, str, str]] = set()
+        self._missed_move_ids: set[str] = set()
 
     def save_plan_if_changed(self, plan: TradePlanRecord) -> PlanSaveResult:
         existing = self.latest_plan(
@@ -149,6 +198,43 @@ class InMemoryTradeReplayStore:
             key=lambda event: event.event_time,
         )
 
+    def save_missed_moves(self, missed_moves: list[MissedMoveRecord]) -> int:
+        created = 0
+        for missed_move in missed_moves:
+            if missed_move.missed_move_id in self._missed_move_ids:
+                continue
+            self._missed_move_ids.add(missed_move.missed_move_id)
+            self.missed_moves.append(missed_move)
+            created += 1
+        return created
+
+    def list_missed_moves(
+        self,
+        *,
+        symbol: str,
+        workflow: TradeReplayWorkflow,
+        start_date: date,
+        end_date: date,
+    ) -> list[MissedMoveRecord]:
+        symbol_upper = symbol.upper()
+        return [
+            missed_move
+            for missed_move in self.missed_moves
+            if missed_move.symbol == symbol_upper
+            and missed_move.workflow == workflow
+            and start_date <= missed_move.event_date <= end_date
+        ]
+
+    def get_missed_move(self, missed_move_id: str) -> MissedMoveRecord | None:
+        return next(
+            (
+                missed_move
+                for missed_move in self.missed_moves
+                if missed_move.missed_move_id == missed_move_id
+            ),
+            None,
+        )
+
 
 @dataclass
 class TradeReplayService:
@@ -165,7 +251,28 @@ class TradeReplayService:
         symbol: str,
         workflow: TradeReplayWorkflow,
         event_date: date,
+        missed_move_id: str | None = None,
     ) -> TradeReplayResponse:
+        if missed_move_id:
+            missed_move = self.store.get_missed_move(missed_move_id)
+            if missed_move is not None:
+                return TradeReplayResponse(
+                    symbol=missed_move.symbol,
+                    date=missed_move.event_date,
+                    workflow=missed_move.workflow,
+                    source=missed_move.source,
+                    source_freshness_label=missed_move.source_freshness_label,
+                    events=_sort_story_events(missed_move.replay_events),
+                )
+            return TradeReplayResponse(
+                symbol=symbol.strip().upper(),
+                date=event_date,
+                workflow=workflow,
+                source="historical",
+                source_freshness_label=SOURCE_FRESHNESS_DELAYED,
+                events=[],
+            )
+
         symbol_upper = symbol.strip().upper()
         plan = self.store.latest_plan(
             symbol=symbol_upper,
@@ -209,6 +316,9 @@ class TradeReplayService:
         )
         events = generate_replay_events(saved.plan, bars)
         created = self.store.append_events(events)
+        self.store.save_missed_moves(
+            build_completed_missed_moves(saved.plan, events, bars)
+        )
         return TradeReplayRefreshResponse(
             success=True,
             symbol=symbol_upper,
@@ -219,6 +329,38 @@ class TradeReplayService:
             events_created=created,
             source=saved.plan.source,
             source_freshness_label=saved.plan.source_freshness_label,
+        )
+
+    def list_missed_moves(
+        self,
+        *,
+        symbol: str,
+        workflow: TradeReplayWorkflow,
+        range_: MissedMovesRange,
+        sort: MissedMovesSort,
+    ) -> MissedMovesSummaryResponse:
+        symbol_upper = symbol.strip().upper()
+        end_date = _current_trading_date(self.now or datetime.now(timezone.utc))
+        trading_dates = _trading_day_window(end_date, 1 if range_ == "today" else 5)
+        start_date = min(trading_dates)
+        rows = self.store.list_missed_moves(
+            symbol=symbol_upper,
+            workflow=workflow,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        rows = [
+            row
+            for row in rows
+            if row.event_date in trading_dates and _is_trading_day(row.event_date)
+        ]
+        rows = _sort_missed_moves(rows, sort)
+        return MissedMovesSummaryResponse(
+            range=range_,
+            sort=sort,
+            source="historical",
+            source_freshness_label=SOURCE_FRESHNESS_DELAYED,
+            rows=[_summary_row(record) for record in rows],
         )
 
     def _build_plan(
@@ -370,6 +512,50 @@ def generate_replay_events(
     if plan.workflow == "day_trade":
         return _generate_day_trade_events(plan, bars)
     return _generate_swing_trade_events(plan, bars)
+
+
+def build_completed_missed_moves(
+    plan: TradePlanRecord,
+    events: list[TradeReplayEvent],
+    bars: list[ReplayBar],
+) -> list[MissedMoveRecord]:
+    completed: list[MissedMoveRecord] = []
+    active_trigger: TradeReplayEvent | None = None
+    story_events: list[TradeReplayEvent] = []
+
+    for event in _sort_story_events(events):
+        if _is_trigger_event(event):
+            active_trigger = event
+            story_events = [event]
+            continue
+
+        if active_trigger is None:
+            continue
+
+        story_events.append(event)
+        if event.event_type not in COMPLETED_MISSED_MOVE_OUTCOMES:
+            continue
+
+        outcome = _missed_move_outcome(event)
+        if outcome is None:
+            active_trigger = None
+            story_events = []
+            continue
+
+        completed.append(
+            _missed_move_record(
+                plan=plan,
+                trigger=active_trigger,
+                terminal=event,
+                replay_events=list(story_events),
+                bars=bars,
+                outcome=outcome,
+            )
+        )
+        active_trigger = None
+        story_events = []
+
+    return completed
 
 
 def plan_signature(
@@ -1049,6 +1235,297 @@ def _sort_story_events(events: list[TradeReplayEvent]) -> list[TradeReplayEvent]
             _EVENT_PRIORITY.get(event.event_type, 100),
         ),
     )
+
+
+def _is_trigger_event(event: TradeReplayEvent) -> bool:
+    return event.event_type in {
+        "entry_triggered",
+        "long_trigger_activated",
+        "short_trigger_activated",
+    }
+
+
+def _missed_move_outcome(event: TradeReplayEvent) -> MissedMoveOutcome | None:
+    if event.event_type in {"target_1_hit", "target_2_hit", "target_hit"}:
+        return "target_hit"
+    if event.event_type in {"setup_extended", "rr_degraded", "entry_missed"}:
+        return "extended"
+    if event.event_type == "stop_hit":
+        return "stopped"
+    if event.event_type == "setup_invalidated":
+        return "invalidated"
+    return None
+
+
+def _missed_move_record(
+    *,
+    plan: TradePlanRecord,
+    trigger: TradeReplayEvent,
+    terminal: TradeReplayEvent,
+    replay_events: list[TradeReplayEvent],
+    bars: list[ReplayBar],
+    outcome: MissedMoveOutcome,
+) -> MissedMoveRecord:
+    return MissedMoveRecord(
+        missed_move_id=_missed_move_id(plan, trigger, terminal),
+        symbol=plan.symbol,
+        workflow=plan.workflow,
+        event_date=trigger.event_date,
+        setup_type=_setup_type(plan, trigger),
+        trigger_price=trigger.level_price,
+        outcome=outcome,
+        max_move_after_trigger_pct=_max_move_after_trigger_pct(trigger, bars),
+        setup_quality_score=_setup_quality_score(plan),
+        source=plan.source,
+        source_freshness_label=plan.source_freshness_label,
+        trigger_event_id=trigger.id,
+        terminal_event_id=terminal.id,
+        replay_events=_sort_story_events(replay_events),
+        created_at=datetime.now(timezone.utc),
+    )
+
+
+def _missed_move_id(
+    plan: TradePlanRecord,
+    trigger: TradeReplayEvent,
+    terminal: TradeReplayEvent,
+) -> str:
+    seed = "|".join(
+        [
+            plan.symbol,
+            plan.workflow,
+            plan.plan_date.isoformat(),
+            plan.signature,
+            trigger.event_type,
+            trigger.dedupe_key,
+            terminal.event_type,
+            terminal.dedupe_key,
+        ]
+    )
+    return f"mm-{hashlib.sha256(seed.encode('utf-8')).hexdigest()[:32]}"
+
+
+def _setup_type(plan: TradePlanRecord, trigger: TradeReplayEvent) -> str:
+    setup = plan.levels.get("setup_type") or plan.payload.get("best_setup")
+    if isinstance(setup, str) and setup.strip():
+        return setup.strip()
+    if trigger.event_type == "long_trigger_activated":
+        return "Long opening range breakout"
+    if trigger.event_type == "short_trigger_activated":
+        return "Short opening range breakdown"
+    return "Swing entry"
+
+
+def _setup_quality_score(plan: TradePlanRecord) -> float | None:
+    for key in ("confidence", "setup_quality_score", "quality_score"):
+        score = _score_value(plan.payload.get(key))
+        if score is not None:
+            return score
+    return None
+
+
+def _score_value(value: Any) -> float | None:
+    if isinstance(value, str):
+        labels = {"low": 1.0, "medium": 2.0, "high": 3.0}
+        return labels.get(value.strip().lower())
+    number = _float(value)
+    if number is None:
+        return None
+    return number
+
+
+def _max_move_after_trigger_pct(
+    trigger: TradeReplayEvent,
+    bars: list[ReplayBar],
+) -> float | None:
+    if trigger.level_price is None or trigger.level_price <= 0:
+        return None
+    side = _trigger_side(trigger)
+    if side is None:
+        return None
+
+    after_trigger = [
+        bar
+        for bar in bars
+        if bar.timestamp >= trigger.event_time
+        and _market_date(bar.timestamp) == trigger.event_date
+    ]
+    if not after_trigger:
+        return None
+
+    if side == "long":
+        best_price = max(bar.high for bar in after_trigger)
+        return round((best_price - trigger.level_price) / trigger.level_price, 4)
+
+    best_price = min(bar.low for bar in after_trigger)
+    return round((trigger.level_price - best_price) / trigger.level_price, 4)
+
+
+def _trigger_side(event: TradeReplayEvent) -> str | None:
+    text = f"{event.event_type} {event.dedupe_key} {event.message}".lower()
+    if "short" in text:
+        return "short"
+    if "long" in text:
+        return "long"
+    return None
+
+
+def _sort_missed_moves(
+    records: list[MissedMoveRecord],
+    sort: MissedMovesSort,
+) -> list[MissedMoveRecord]:
+    if sort == "biggest_move":
+        return sorted(
+            records,
+            key=lambda item: (
+                -(item.max_move_after_trigger_pct or 0),
+                -_date_ordinal(item.event_date),
+                item.symbol,
+            ),
+        )
+    if sort == "highest_setup_quality":
+        return sorted(
+            records,
+            key=lambda item: (
+                -(item.setup_quality_score or 0),
+                -_date_ordinal(item.event_date),
+                item.symbol,
+            ),
+        )
+    return sorted(
+        records,
+        key=lambda item: (
+            -_date_ordinal(item.event_date),
+            -max((event.event_time for event in item.replay_events), default=datetime.min.replace(tzinfo=timezone.utc)).timestamp(),
+            item.symbol,
+        ),
+    )
+
+
+def _date_ordinal(value: date) -> int:
+    return value.toordinal()
+
+
+def _summary_row(record: MissedMoveRecord) -> MissedMoveSummaryRow:
+    return MissedMoveSummaryRow(
+        id=record.missed_move_id,
+        date=record.event_date,
+        symbol=record.symbol,
+        workflow=record.workflow,
+        setup_type=record.setup_type,
+        trigger_price=record.trigger_price,
+        outcome=record.outcome,
+        max_move_after_trigger_pct=record.max_move_after_trigger_pct,
+        setup_quality_score=record.setup_quality_score,
+        source=record.source,
+        source_freshness_label=record.source_freshness_label,
+    )
+
+
+def _current_trading_date(value: datetime) -> date:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    local_day = value.astimezone(EASTERN).date()
+    while not _is_trading_day(local_day):
+        local_day -= timedelta(days=1)
+    return local_day
+
+
+def _subtract_trading_days(value: date, count: int) -> date:
+    cursor = value
+    remaining = count
+    while remaining > 0:
+        cursor -= timedelta(days=1)
+        if _is_trading_day(cursor):
+            remaining -= 1
+    return cursor
+
+
+def _trading_day_window(end_date: date, count: int) -> set[date]:
+    if count <= 0:
+        return set()
+    dates = {end_date}
+    cursor = end_date
+    while len(dates) < count:
+        cursor = _subtract_trading_days(cursor, 1)
+        dates.add(cursor)
+    return dates
+
+
+def _is_trading_day(value: date) -> bool:
+    return value.weekday() < 5 and value not in _market_holidays_for_date(value)
+
+
+def _market_holidays_for_date(value: date) -> set[date]:
+    return (
+        _market_holidays(value.year - 1)
+        | _market_holidays(value.year)
+        | _market_holidays(value.year + 1)
+    )
+
+
+def _market_holidays(year: int) -> set[date]:
+    new_year = _observed_holiday(date(year, 1, 1))
+    juneteenth = _observed_holiday(date(year, 6, 19))
+    independence = _observed_holiday(date(year, 7, 4))
+    christmas = _observed_holiday(date(year, 12, 25))
+    return {
+        holiday
+        for holiday in {
+            new_year,
+            _nth_weekday(year, 1, 0, 3),
+            _nth_weekday(year, 2, 0, 3),
+            _good_friday(year),
+            _last_weekday(year, 5, 0),
+            juneteenth if year >= 2022 else None,
+            independence,
+            _nth_weekday(year, 9, 0, 1),
+            _nth_weekday(year, 11, 3, 4),
+            christmas,
+        }
+        if holiday is not None and holiday.year == year
+    }
+
+
+def _observed_holiday(value: date) -> date:
+    if value.weekday() == 5:
+        return value - timedelta(days=1)
+    if value.weekday() == 6:
+        return value + timedelta(days=1)
+    return value
+
+
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    cursor = date(year, month, 1)
+    while cursor.weekday() != weekday:
+        cursor += timedelta(days=1)
+    return cursor + timedelta(days=7 * (n - 1))
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    cursor = date(year, month + 1, 1) - timedelta(days=1) if month < 12 else date(year, 12, 31)
+    while cursor.weekday() != weekday:
+        cursor -= timedelta(days=1)
+    return cursor
+
+
+def _good_friday(year: int) -> date:
+    # Anonymous Gregorian algorithm for Easter Sunday, then subtract two days.
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return date(year, month, day) - timedelta(days=2)
 
 
 def _with_session_context(bar: ReplayBar, message: str) -> str:

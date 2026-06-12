@@ -18,6 +18,7 @@ from app.models.trade_replay_models import TradeReplayEvent
 from app.services import trade_replay_service as replay_module
 from app.services.trade_replay_service import (
     InMemoryTradeReplayStore,
+    MissedMoveRecord,
     ReplayBar,
     TradePlanRecord,
     TradeReplayService,
@@ -99,6 +100,85 @@ def _service(monkeypatch, bars: pd.DataFrame) -> tuple[TradeReplayService, InMem
     return service, store
 
 
+def _event(
+    *,
+    event_id: str,
+    event_date: date,
+    event_type: str,
+    event_time: datetime,
+    level_price: float | None = None,
+    observed_price: float | None = None,
+    dedupe_key: str | None = None,
+) -> TradeReplayEvent:
+    return TradeReplayEvent(
+        id=event_id,
+        plan_id="plan-1",
+        symbol="NVDA",
+        event_date=event_date,
+        workflow="day_trade",
+        event_type=event_type,
+        event_time=event_time,
+        level_price=level_price,
+        observed_price=observed_price,
+        message=f"{event_type} message",
+        severity="important" if event_type != "stop_hit" else "warning",
+        actionability="missed" if event_type != "long_trigger_activated" else "active",
+        source="delayed",
+        source_freshness_label=replay_module.SOURCE_FRESHNESS_DELAYED,
+        dedupe_key=dedupe_key or event_id,
+        created_at=datetime(2026, 6, 12, 20, 0, tzinfo=timezone.utc),
+    )
+
+
+def _missed_move(
+    *,
+    missed_move_id: str,
+    event_date: date,
+    outcome: str = "target_hit",
+    max_move: float | None = 0.04,
+    quality: float | None = 2.0,
+) -> MissedMoveRecord:
+    trigger = _event(
+        event_id=f"{missed_move_id}-trigger",
+        event_date=event_date,
+        event_type="long_trigger_activated",
+        event_time=datetime.combine(event_date, datetime.min.time(), tzinfo=ET).replace(hour=10),
+        level_price=100.0,
+        observed_price=100.0,
+    )
+    terminal_type = {
+        "target_hit": "target_1_hit",
+        "extended": "setup_extended",
+        "invalidated": "setup_invalidated",
+        "stopped": "stop_hit",
+    }[outcome]
+    terminal = _event(
+        event_id=f"{missed_move_id}-terminal",
+        event_date=event_date,
+        event_type=terminal_type,
+        event_time=datetime.combine(event_date, datetime.min.time(), tzinfo=ET).replace(hour=11),
+        level_price=104.0,
+        observed_price=104.0,
+    )
+    return MissedMoveRecord(
+        missed_move_id=missed_move_id,
+        symbol="NVDA",
+        workflow="day_trade",
+        event_date=event_date,
+        setup_type="Long opening range breakout",
+        trigger_price=100.0,
+        outcome=outcome,  # type: ignore[arg-type]
+        max_move_after_trigger_pct=max_move,
+        setup_quality_score=quality,
+        source="delayed",
+        source_freshness_label=replay_module.SOURCE_FRESHNESS_DELAYED,
+        trigger_event_id=trigger.id,
+        terminal_event_id=terminal.id,
+        replay_events=[trigger, terminal],
+        created_at=datetime.combine(event_date, datetime.min.time(), tzinfo=timezone.utc),
+    )
+
+
 def test_plan_snapshot_not_duplicated_on_repeated_refresh(monkeypatch) -> None:
     service, store = _service(
         monkeypatch,
@@ -143,6 +223,174 @@ def test_trigger_and_target_events_are_emitted_once(monkeypatch) -> None:
 
     assert [event.event_type for event in replay.events].count("long_trigger_activated") == 1
     assert [event.event_type for event in replay.events].count("target_1_hit") == 1
+
+
+def test_completed_missed_move_is_persisted(monkeypatch) -> None:
+    service, store = _service(
+        monkeypatch,
+        _frame(
+            [
+                (datetime(2026, 6, 5, 10, 5, tzinfo=ET), 210.0, 210.5, 209.8, 210.4),
+                (datetime(2026, 6, 5, 10, 10, tzinfo=ET), 210.5, 214.7, 210.4, 214.6),
+            ]
+        ),
+    )
+    service.now = datetime(2026, 6, 5, 16, 5, tzinfo=ET)
+
+    service.refresh(symbol="NVDA", workflow="day_trade", event_date=SESSION_DATE)
+
+    assert len(store.missed_moves) == 1
+    missed_move = store.missed_moves[0]
+    assert missed_move.symbol == "NVDA"
+    assert missed_move.outcome == "target_hit"
+    assert missed_move.trigger_price == 210.4
+    assert missed_move.max_move_after_trigger_pct is not None
+    assert [event.event_type for event in missed_move.replay_events] == [
+        "long_trigger_activated",
+        "target_1_hit",
+    ]
+
+
+def test_missed_moves_today_range_uses_eastern_trading_date() -> None:
+    store = InMemoryTradeReplayStore()
+    store.save_missed_moves(
+        [
+            _missed_move(missed_move_id="today", event_date=date(2026, 6, 5)),
+            _missed_move(missed_move_id="yesterday", event_date=date(2026, 6, 4)),
+        ]
+    )
+    service = TradeReplayService(
+        store=store,
+        yfinance_adapter=_FakeYFinanceAdapter(pd.DataFrame()),  # type: ignore[arg-type]
+        now=datetime(2026, 6, 6, 0, 30, tzinfo=timezone.utc),
+    )
+
+    summary = service.list_missed_moves(
+        symbol="NVDA",
+        workflow="day_trade",
+        range_="today",
+        sort="most_recent",
+    )
+
+    assert [row.id for row in summary.rows] == ["today"]
+
+
+def test_missed_moves_last_5_trading_days_excludes_weekends_and_holidays() -> None:
+    store = InMemoryTradeReplayStore()
+    store.save_missed_moves(
+        [
+            _missed_move(missed_move_id="jun29", event_date=date(2026, 6, 29)),
+            _missed_move(missed_move_id="jun26", event_date=date(2026, 6, 26)),
+            _missed_move(missed_move_id="jun30", event_date=date(2026, 6, 30)),
+            _missed_move(missed_move_id="jul01", event_date=date(2026, 7, 1)),
+            _missed_move(missed_move_id="jul02", event_date=date(2026, 7, 2)),
+            _missed_move(missed_move_id="jul03-holiday", event_date=date(2026, 7, 3)),
+            _missed_move(missed_move_id="jul06", event_date=date(2026, 7, 6)),
+        ]
+    )
+    service = TradeReplayService(
+        store=store,
+        yfinance_adapter=_FakeYFinanceAdapter(pd.DataFrame()),  # type: ignore[arg-type]
+        now=datetime(2026, 7, 6, 16, 5, tzinfo=ET),
+    )
+
+    summary = service.list_missed_moves(
+        symbol="NVDA",
+        workflow="day_trade",
+        range_="last_5_trading_days",
+        sort="most_recent",
+    )
+
+    assert [row.id for row in summary.rows] == [
+        "jul06",
+        "jul02",
+        "jul01",
+        "jun30",
+        "jun29",
+    ]
+
+
+def test_missed_moves_sorting() -> None:
+    store = InMemoryTradeReplayStore()
+    store.save_missed_moves(
+        [
+            _missed_move(
+                missed_move_id="small-high-quality",
+                event_date=date(2026, 6, 5),
+                max_move=0.02,
+                quality=3.0,
+            ),
+            _missed_move(
+                missed_move_id="big-low-quality",
+                event_date=date(2026, 6, 4),
+                max_move=0.09,
+                quality=1.0,
+            ),
+        ]
+    )
+    service = TradeReplayService(
+        store=store,
+        yfinance_adapter=_FakeYFinanceAdapter(pd.DataFrame()),  # type: ignore[arg-type]
+        now=datetime(2026, 6, 5, 16, 5, tzinfo=ET),
+    )
+
+    biggest = service.list_missed_moves(
+        symbol="NVDA",
+        workflow="day_trade",
+        range_="last_5_trading_days",
+        sort="biggest_move",
+    )
+    highest_quality = service.list_missed_moves(
+        symbol="NVDA",
+        workflow="day_trade",
+        range_="last_5_trading_days",
+        sort="highest_setup_quality",
+    )
+
+    assert [row.id for row in biggest.rows] == [
+        "big-low-quality",
+        "small-high-quality",
+    ]
+    assert [row.id for row in highest_quality.rows] == [
+        "small-high-quality",
+        "big-low-quality",
+    ]
+
+
+def test_replay_timeline_can_be_fetched_by_missed_move_id() -> None:
+    store = InMemoryTradeReplayStore()
+    store.save_missed_moves(
+        [_missed_move(missed_move_id="selected", event_date=SESSION_DATE)]
+    )
+    service = TradeReplayService(
+        store=store,
+        yfinance_adapter=_FakeYFinanceAdapter(pd.DataFrame()),  # type: ignore[arg-type]
+    )
+
+    replay = service.get_replay(
+        symbol="NVDA",
+        workflow="day_trade",
+        event_date=SESSION_DATE,
+        missed_move_id="selected",
+    )
+
+    assert replay.symbol == "NVDA"
+    assert [event.event_type for event in replay.events] == [
+        "long_trigger_activated",
+        "target_1_hit",
+    ]
+
+
+def test_session_label_uses_eastern_market_time() -> None:
+    assert replay_module._session_label(  # noqa: SLF001
+        datetime(2026, 6, 12, 7, 10, tzinfo=timezone.utc)
+    ) == "Pre-market"
+    assert replay_module._session_label(  # noqa: SLF001
+        datetime(2026, 6, 12, 13, 30, tzinfo=timezone.utc)
+    ) == "Regular session"
+    assert replay_module._session_label(  # noqa: SLF001
+        datetime(2026, 6, 12, 20, 0, tzinfo=timezone.utc)
+    ) == "After-hours"
 
 
 def test_stop_event_is_emitted_once(monkeypatch) -> None:

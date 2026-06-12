@@ -7,10 +7,15 @@ from typing import Any
 import oracledb
 
 from app.models.trade_replay_models import TradeReplayEvent, TradeReplayWorkflow
-from app.services.trade_replay_service import PlanSaveResult, TradePlanRecord
+from app.services.trade_replay_service import (
+    MissedMoveRecord,
+    PlanSaveResult,
+    TradePlanRecord,
+)
 
 _PLAN_TABLE = "TRADE_PLANS"
 _EVENT_TABLE = "TRADE_REPLAY_EVENTS"
+_MISSED_MOVE_TABLE = "MISSED_MOVES"
 
 
 class OracleTradeReplayStore:
@@ -70,6 +75,32 @@ class OracleTradeReplayStore:
             CREATE INDEX idx_trade_replay_events_lookup
                 ON {_EVENT_TABLE} (symbol, event_date, workflow, event_time)
             """,
+            f"""
+            CREATE TABLE {_MISSED_MOVE_TABLE} (
+                missed_move_id VARCHAR2(64) PRIMARY KEY,
+                symbol VARCHAR2(16) NOT NULL,
+                workflow VARCHAR2(32) NOT NULL,
+                event_date DATE NOT NULL,
+                setup_type VARCHAR2(255) NOT NULL,
+                trigger_price NUMBER,
+                outcome VARCHAR2(32) NOT NULL,
+                max_move_after_trigger_pct NUMBER,
+                setup_quality_score NUMBER,
+                source VARCHAR2(24) NOT NULL,
+                source_freshness_label VARCHAR2(255),
+                trigger_event_id VARCHAR2(64) NOT NULL,
+                terminal_event_id VARCHAR2(64) NOT NULL,
+                replay_events_json CLOB NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+                CONSTRAINT uq_missed_move_story UNIQUE (
+                    symbol, event_date, workflow, trigger_event_id, terminal_event_id
+                )
+            )
+            """,
+            f"""
+            CREATE INDEX idx_missed_moves_lookup
+                ON {_MISSED_MOVE_TABLE} (symbol, event_date, workflow)
+            """,
         ]
         con = self._client.acquire()
         try:
@@ -92,6 +123,18 @@ class OracleTradeReplayStore:
                 table_name=_EVENT_TABLE,
                 constraint_name="UQ_TRADE_REPLAY_EVENT",
                 columns=("SYMBOL", "EVENT_DATE", "WORKFLOW", "EVENT_TYPE", "DEDUPE_KEY"),
+            )
+            self._ensure_unique_constraint(
+                cur,
+                table_name=_MISSED_MOVE_TABLE,
+                constraint_name="UQ_MISSED_MOVE_STORY",
+                columns=(
+                    "SYMBOL",
+                    "EVENT_DATE",
+                    "WORKFLOW",
+                    "TRIGGER_EVENT_ID",
+                    "TERMINAL_EVENT_ID",
+                ),
             )
             con.commit()
         finally:
@@ -284,6 +327,80 @@ class OracleTradeReplayStore:
         )
         return [_event_from_row(row) for row in rows]
 
+    def save_missed_moves(self, missed_moves: list[MissedMoveRecord]) -> int:
+        if not missed_moves:
+            return 0
+        sql = f"""
+            INSERT INTO {_MISSED_MOVE_TABLE} (
+                missed_move_id, symbol, workflow, event_date, setup_type,
+                trigger_price, outcome, max_move_after_trigger_pct,
+                setup_quality_score, source, source_freshness_label,
+                trigger_event_id, terminal_event_id, replay_events_json, created_at
+            ) VALUES (
+                :missed_move_id, :symbol, :workflow, :event_date, :setup_type,
+                :trigger_price, :outcome, :max_move_after_trigger_pct,
+                :setup_quality_score, :source, :source_freshness_label,
+                :trigger_event_id, :terminal_event_id, :replay_events_json, :created_at
+            )
+        """
+        created = 0
+        con = self._client.acquire()
+        try:
+            cur = con.cursor()
+            for missed_move in missed_moves:
+                try:
+                    cur.execute(sql, _missed_move_to_row(missed_move))
+                    created += 1
+                except oracledb.IntegrityError:
+                    continue
+            con.commit()
+        finally:
+            con.close()
+        return created
+
+    def list_missed_moves(
+        self,
+        *,
+        symbol: str,
+        workflow: TradeReplayWorkflow,
+        start_date: date,
+        end_date: date,
+    ) -> list[MissedMoveRecord]:
+        sql = f"""
+            SELECT missed_move_id, symbol, workflow, event_date, setup_type,
+                   trigger_price, outcome, max_move_after_trigger_pct,
+                   setup_quality_score, source, source_freshness_label,
+                   trigger_event_id, terminal_event_id, replay_events_json, created_at
+            FROM {_MISSED_MOVE_TABLE}
+            WHERE symbol = :symbol
+              AND workflow = :workflow
+              AND event_date BETWEEN :start_date AND :end_date
+            ORDER BY event_date DESC, created_at DESC
+        """
+        rows = self._fetchall(
+            sql,
+            {
+                "symbol": symbol.upper(),
+                "workflow": workflow,
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+        )
+        return [_missed_move_from_row(row) for row in rows]
+
+    def get_missed_move(self, missed_move_id: str) -> MissedMoveRecord | None:
+        sql = f"""
+            SELECT missed_move_id, symbol, workflow, event_date, setup_type,
+                   trigger_price, outcome, max_move_after_trigger_pct,
+                   setup_quality_score, source, source_freshness_label,
+                   trigger_event_id, terminal_event_id, replay_events_json, created_at
+            FROM {_MISSED_MOVE_TABLE}
+            WHERE missed_move_id = :missed_move_id
+            FETCH FIRST 1 ROWS ONLY
+        """
+        row = self._fetchone(sql, {"missed_move_id": missed_move_id})
+        return _missed_move_from_row(row) if row is not None else None
+
     def _find_plan_by_signature(
         self,
         *,
@@ -414,6 +531,80 @@ def _event_from_row(row: tuple[Any, ...]) -> TradeReplayEvent:
             str(source_freshness_label) if source_freshness_label else None
         ),
         dedupe_key=str(dedupe_key),
+        created_at=_aware_datetime(created_at),
+    )
+
+
+def _missed_move_to_row(missed_move: MissedMoveRecord) -> dict[str, Any]:
+    return {
+        "missed_move_id": missed_move.missed_move_id,
+        "symbol": missed_move.symbol,
+        "workflow": missed_move.workflow,
+        "event_date": missed_move.event_date,
+        "setup_type": missed_move.setup_type,
+        "trigger_price": missed_move.trigger_price,
+        "outcome": missed_move.outcome,
+        "max_move_after_trigger_pct": missed_move.max_move_after_trigger_pct,
+        "setup_quality_score": missed_move.setup_quality_score,
+        "source": missed_move.source,
+        "source_freshness_label": missed_move.source_freshness_label,
+        "trigger_event_id": missed_move.trigger_event_id,
+        "terminal_event_id": missed_move.terminal_event_id,
+        "replay_events_json": json.dumps(
+            [
+                event.model_dump(mode="json", by_alias=True)
+                for event in missed_move.replay_events
+            ],
+            sort_keys=True,
+        ),
+        "created_at": missed_move.created_at or datetime.now(timezone.utc),
+    }
+
+
+def _missed_move_from_row(row: tuple[Any, ...]) -> MissedMoveRecord:
+    (
+        missed_move_id,
+        symbol,
+        workflow,
+        event_date,
+        setup_type,
+        trigger_price,
+        outcome,
+        max_move_after_trigger_pct,
+        setup_quality_score,
+        source,
+        source_freshness_label,
+        trigger_event_id,
+        terminal_event_id,
+        replay_events_json,
+        created_at,
+    ) = row
+    events_payload = json.loads(_lob_text(replay_events_json) or "[]")
+    return MissedMoveRecord(
+        missed_move_id=str(missed_move_id),
+        symbol=str(symbol),
+        workflow=str(workflow),  # type: ignore[arg-type]
+        event_date=event_date,
+        setup_type=str(setup_type),
+        trigger_price=float(trigger_price) if trigger_price is not None else None,
+        outcome=str(outcome),  # type: ignore[arg-type]
+        max_move_after_trigger_pct=(
+            float(max_move_after_trigger_pct)
+            if max_move_after_trigger_pct is not None
+            else None
+        ),
+        setup_quality_score=(
+            float(setup_quality_score) if setup_quality_score is not None else None
+        ),
+        source=str(source),  # type: ignore[arg-type]
+        source_freshness_label=(
+            str(source_freshness_label) if source_freshness_label else None
+        ),
+        trigger_event_id=str(trigger_event_id),
+        terminal_event_id=str(terminal_event_id),
+        replay_events=[
+            TradeReplayEvent.model_validate(item) for item in events_payload
+        ],
         created_at=_aware_datetime(created_at),
     )
 

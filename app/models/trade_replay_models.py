@@ -9,6 +9,9 @@ TradeReplayWorkflow = Literal["day_trade", "swing_trade"]
 TradeReplaySeverity = Literal["info", "important", "warning"]
 TradeReplayActionability = Literal["active", "missed", "invalidated"]
 TradeReplaySource = Literal["realtime", "delayed", "historical"]
+MissedMovesRange = Literal["today", "last_5_trading_days"]
+MissedMovesSort = Literal["most_recent", "biggest_move", "highest_setup_quality"]
+MissedMoveOutcome = Literal["target_hit", "extended", "invalidated", "stopped"]
 
 _MODEL_CONFIG = ConfigDict(populate_by_name=True)
 
@@ -52,6 +55,44 @@ class TradeReplayResponse(BaseModel):
         serialization_alias="source_freshness_label",
     )
     events: list[TradeReplayEvent] = Field(default_factory=list)
+
+
+class MissedMoveSummaryRow(BaseModel):
+    model_config = _MODEL_CONFIG
+
+    id: str
+    date: date
+    symbol: str
+    workflow: TradeReplayWorkflow
+    setup_type: str = Field(serialization_alias="setup_type")
+    trigger_price: float | None = Field(default=None, serialization_alias="trigger_price")
+    outcome: MissedMoveOutcome
+    max_move_after_trigger_pct: float | None = Field(
+        default=None,
+        serialization_alias="max_move_after_trigger_pct",
+    )
+    setup_quality_score: float | None = Field(
+        default=None,
+        serialization_alias="setup_quality_score",
+    )
+    source: TradeReplaySource = "historical"
+    source_freshness_label: str | None = Field(
+        default=None,
+        serialization_alias="source_freshness_label",
+    )
+
+
+class MissedMovesSummaryResponse(BaseModel):
+    model_config = _MODEL_CONFIG
+
+    range: MissedMovesRange
+    sort: MissedMovesSort
+    source: TradeReplaySource = "historical"
+    source_freshness_label: str | None = Field(
+        default=None,
+        serialization_alias="source_freshness_label",
+    )
+    rows: list[MissedMoveSummaryRow] = Field(default_factory=list)
 
 
 class TradeReplayRefreshRequest(BaseModel):
