@@ -35,7 +35,7 @@ async def get_day_trade_backtest(
     min_or_width_pct: float | None = Query(None, ge=0),
     max_or_width_pct: float | None = Query(None, ge=0),
     no_trade_after_noon: bool = Query(False),
-    direction_mode: DayTradeDirectionMode = Query("long_and_short"),
+    direction_mode: DayTradeDirectionMode = Query("long_only"),
     yfinance_adapter: YFinanceAdapter = Depends(get_yfinance_adapter),
 ) -> DayTradeBacktestResponse:
     service = DayTradeBacktestService(yfinance_adapter)

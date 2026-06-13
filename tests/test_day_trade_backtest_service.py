@@ -231,6 +231,7 @@ def test_day_trade_backtest_short_two_consecutive_closes_back_inside_invalidates
     rows = simulate_day_trade_backtest(
         symbol="NVDA",
         risk_per_trade=100,
+        entry_filters=DayTradeEntryFilterConfig(direction_mode="short_only"),
         candles=[
             *_opening_range(day),
             _candle(day, 10, 0, 99.0, 99.2, 98.8, 98.9),
@@ -307,6 +308,7 @@ def test_day_trade_backtest_long_close_confirmed_breakout_filter() -> None:
         symbol="NVDA",
         risk_per_trade=100,
         entry_filters=DayTradeEntryFilterConfig(
+            direction_mode="short_only",
             require_close_confirmed_breakout=True,
         ),
         candles=[
@@ -380,6 +382,16 @@ def test_day_trade_backtest_direction_modes_filter_entries() -> None:
     assert [row.setup_direction for row in long_rows] == ["long", "none"]
     assert [row.setup_direction for row in short_rows] == ["none", "short"]
     assert [row.setup_direction for row in both_rows] == ["long", "short"]
+    assert all(
+        row.setup_direction in {"long", "none"}
+        for row in long_rows
+    )
+    assert all(
+        row.setup_direction in {"short", "none"}
+        for row in short_rows
+    )
+    assert any(row.setup_direction == "long" for row in both_rows)
+    assert any(row.setup_direction == "short" for row in both_rows)
     assert summarize_day_trade_backtest(long_rows).total_trades == 1
     assert summarize_day_trade_backtest(short_rows).total_trades == 1
     assert summarize_day_trade_backtest(both_rows).total_trades == 2
@@ -390,7 +402,10 @@ def test_day_trade_backtest_long_vwap_alignment_filter() -> None:
     rows = simulate_day_trade_backtest(
         symbol="NVDA",
         risk_per_trade=100,
-        entry_filters=DayTradeEntryFilterConfig(require_vwap_alignment=True),
+        entry_filters=DayTradeEntryFilterConfig(
+            direction_mode="short_only",
+            require_vwap_alignment=True,
+        ),
         candles=[
             *_opening_range(day),
             _candle(day, 10, 0, 101.0, 101.5, 100.8, 100.0),
@@ -534,6 +549,11 @@ def test_day_trade_backtest_multi_symbol_aggregation() -> None:
     )
 
     assert report.candidate_scenario == "close-confirmed breakout"
+    assert report.warning_label == (
+        "This is a short sample. Validate across multiple symbols and longer history "
+        "before trusting."
+    )
+    assert report.entry_filters.direction_mode == "long_only"
     assert report.entry_filters.require_close_confirmed_breakout is True
     assert [row.symbol for row in report.aggregate_comparison] == ["NVDA", "AAPL"]
     assert report.aggregate_comparison[0].total_trades == 1
@@ -564,6 +584,9 @@ def test_day_trade_backtest_multi_symbol_aggregation() -> None:
     assert report.direction_comparison[1].total_trades == 1
     assert report.direction_comparison[2].total_trades == 2
     assert report.direction_comparison[2].max_drawdown == -1.0
+    assert report.direction_comparison[0].best_total_r is True
+    assert report.direction_comparison[0].best_profit_factor is True
+    assert report.direction_comparison[0].best_max_drawdown is True
     assert report.failed_symbols[0].symbol == "MSFT"
     assert report.failed_symbols[0].reason == "No market data"
 
@@ -705,16 +728,28 @@ def test_day_trade_backtest_top_winners_and_losers() -> None:
                 _candle(date(2026, 6, 4), 10, 0, 101.0, 101.5, 100.0, 101.2),
             ],
         ),
+        *simulate_day_trade_backtest(
+            symbol="NVDA",
+            risk_per_trade=100,
+            candles=[
+                *_opening_range(date(2026, 6, 5)),
+                _candle(date(2026, 6, 5), 10, 0, 100.1, 100.8, 99.3, 100.0),
+                _candle(date(2026, 6, 5), 15, 55, 100.0, 100.6, 99.4, 100.2),
+            ],
+        ),
     ]
 
     top_winners = top_day_trade_winners(rows)
     top_losers = top_day_trade_losers(rows)
 
+    assert any(row.outcome == "no_trade" for row in rows)
     assert len(top_winners) == 2
+    assert all(row.outcome != "no_trade" for row in top_winners)
     assert top_winners[0].exit_reason == "target_2_hit"
     assert top_winners[0].r_multiple == 2.0
     assert top_winners[1].exit_reason == "close_exit"
     assert len(top_losers) == 2
+    assert all(row.outcome != "no_trade" for row in top_losers)
     assert top_losers[0].exit_reason == "stop_hit"
     assert top_losers[0].r_multiple == -1.0
     assert top_losers[-1].exit_reason == "invalidated"
@@ -782,6 +817,7 @@ def test_day_trade_backtest_service_loads_historical_intraday_candles() -> None:
     assert result.available_end_date == intraday_provider_availability().available_end_date
     assert "Yahoo Finance 5-minute" in result.provider_limit_reason
     assert result.invalidation_confirmation_closes == 2
+    assert result.entry_filters.direction_mode == "long_only"
     assert result.entry_filters.require_close_confirmed_breakout is False
     assert [row.scenario for row in result.comparison_table] == [
         "baseline",

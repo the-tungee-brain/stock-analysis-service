@@ -218,6 +218,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("Day Trade multi-symbol backtest summary")
     print("Candidate: close-confirmed breakout")
     print(f"Direction mode: {args.direction_mode}")
+    print(f"Warning: {report.warning_label}")
     print(f"Symbols: {', '.join(report.symbols)}")
     print(f"Period: {args.start} to {args.end}")
     print(f"Risk per trade: ${args.risk_per_trade:.2f}")
@@ -243,7 +244,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("Direction Mode")
     print("--------------")
     for row in report.direction_comparison:
-        print(row.label)
+        highlights = []
+        if row.best_total_r:
+            highlights.append("best total R")
+        if row.best_profit_factor:
+            highlights.append("best profit factor")
+        if row.best_max_drawdown:
+            highlights.append("best max drawdown")
+        highlight_label = f" [{', '.join(highlights)}]" if highlights else ""
+        print(f"{row.label}{highlight_label}")
         print(
             f"  trades={row.total_trades} win={_format_rate(row.win_rate)} "
             f"avgR={_format_number(row.average_r)} totalR={_format_number(row.total_r)} "

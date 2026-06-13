@@ -132,7 +132,7 @@ class DayTradeBacktestEntryFilters(BaseModel):
     model_config = _MODEL_CONFIG
 
     direction_mode: DayTradeDirectionMode = Field(
-        default="long_and_short",
+        default="long_only",
         serialization_alias="direction_mode",
     )
     require_close_confirmed_breakout: bool = Field(
@@ -199,6 +199,15 @@ class DayTradeBacktestDirectionComparisonRow(BaseModel):
     max_drawdown: float = Field(serialization_alias="max_drawdown")
     target_1_hit_pct: float = Field(serialization_alias="target_1_hit_pct")
     invalidation_pct: float = Field(serialization_alias="invalidation_pct")
+    best_total_r: bool = Field(default=False, serialization_alias="best_total_r")
+    best_profit_factor: bool = Field(
+        default=False,
+        serialization_alias="best_profit_factor",
+    )
+    best_max_drawdown: bool = Field(
+        default=False,
+        serialization_alias="best_max_drawdown",
+    )
 
 
 class DayTradeBacktestFailedSymbol(BaseModel):
@@ -223,6 +232,7 @@ class DayTradeBacktestPortfolioSummary(BaseModel):
 class DayTradeBacktestMultiSymbolReport(BaseModel):
     model_config = _MODEL_CONFIG
 
+    warning_label: str = Field(serialization_alias="warning_label")
     candidate_scenario: DayTradeBacktestComparisonScenario = Field(
         serialization_alias="candidate_scenario"
     )

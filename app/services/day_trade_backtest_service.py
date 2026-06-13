@@ -33,6 +33,11 @@ TRIGGER_BUFFER = 0.01
 DEFAULT_MIN_OR_WIDTH_PCT = 0.01
 DEFAULT_MAX_OR_WIDTH_PCT = 0.035
 PRIMARY_CANDIDATE_SCENARIO = "close-confirmed breakout"
+DEFAULT_DIRECTION_MODE: DayTradeDirectionMode = "long_only"
+SHORT_SAMPLE_WARNING_LABEL = (
+    "This is a short sample. Validate across multiple symbols and longer history "
+    "before trusting."
+)
 YAHOO_INTRADAY_5M_HISTORY_DAYS = 60
 YAHOO_INTRADAY_5M_LIMIT_REASON = (
     "Yahoo Finance 5-minute intraday candles are only available for "
@@ -78,7 +83,7 @@ class IntradayProviderAvailability:
 
 @dataclass(frozen=True)
 class DayTradeEntryFilterConfig:
-    direction_mode: DayTradeDirectionMode = "long_and_short"
+    direction_mode: DayTradeDirectionMode = DEFAULT_DIRECTION_MODE
     require_close_confirmed_breakout: bool = False
     require_vwap_alignment: bool = False
     min_or_width_pct: float | None = None
@@ -97,6 +102,7 @@ class DayTradeEntryFilterConfig:
 
 
 CLOSE_CONFIRMED_ENTRY_FILTERS = DayTradeEntryFilterConfig(
+    direction_mode=DEFAULT_DIRECTION_MODE,
     require_close_confirmed_breakout=True,
     require_vwap_alignment=False,
     min_or_width_pct=None,
@@ -163,7 +169,7 @@ class DayTradeBacktestService:
         min_or_width_pct: float | None = None,
         max_or_width_pct: float | None = None,
         no_trade_after_noon: bool = False,
-        direction_mode: DayTradeDirectionMode = "long_and_short",
+        direction_mode: DayTradeDirectionMode = DEFAULT_DIRECTION_MODE,
     ) -> DayTradeBacktestResponse:
         if end < start:
             raise ValueError("end must be on or after start")
@@ -319,7 +325,9 @@ def summarize_day_trade_backtest(
 def top_day_trade_winners(
     rows: list[DayTradeBacktestRow],
 ) -> list[DayTradeBacktestRow]:
-    trades = [row for row in rows if row.r_multiple > 0]
+    trades = [
+        row for row in rows if row.outcome != "no_trade" and row.r_multiple > 0
+    ]
     return sorted(
         trades,
         key=lambda row: (row.r_multiple, row.dollar_pl, row.date),
@@ -330,7 +338,9 @@ def top_day_trade_winners(
 def top_day_trade_losers(
     rows: list[DayTradeBacktestRow],
 ) -> list[DayTradeBacktestRow]:
-    trades = [row for row in rows if row.r_multiple < 0]
+    trades = [
+        row for row in rows if row.outcome != "no_trade" and row.r_multiple < 0
+    ]
     return sorted(trades, key=lambda row: (row.r_multiple, row.dollar_pl, row.date))[:10]
 
 
@@ -374,17 +384,21 @@ def build_multi_symbol_backtest_report(
         for symbol in baseline_source
     ]
     direction_source = direction_rows_by_mode or {}
+    direction_comparison = _highlight_direction_comparison(
+        [
+            _direction_comparison_row(mode, rows_by_symbol)
+            for mode, rows_by_symbol in direction_source.items()
+        ]
+    )
     return DayTradeBacktestMultiSymbolReport(
+        warning_label=SHORT_SAMPLE_WARNING_LABEL,
         candidate_scenario=PRIMARY_CANDIDATE_SCENARIO,  # type: ignore[arg-type]
         entry_filters=candidate_filters.to_model(),
         symbols=symbols,
         aggregate_comparison=aggregate,
         portfolio_summary=_portfolio_summary(candidate_rows_by_symbol, aggregate),
         baseline_comparison=baseline,
-        direction_comparison=[
-            _direction_comparison_row(mode, rows_by_symbol)
-            for mode, rows_by_symbol in direction_source.items()
-        ],
+        direction_comparison=direction_comparison,
         failed_symbols=failed_symbols or [],
     )
 
@@ -410,6 +424,35 @@ def _direction_comparison_row(
         target_1_hit_pct=summary.target_1_hit_pct,
         invalidation_pct=summary.invalidation_pct,
     )
+
+
+def _highlight_direction_comparison(
+    rows: list[DayTradeBacktestDirectionComparisonRow],
+) -> list[DayTradeBacktestDirectionComparisonRow]:
+    if not rows:
+        return rows
+    best_total_r = max(row.total_r for row in rows)
+    best_profit_factor = max(_profit_factor_score(row) for row in rows)
+    best_max_drawdown = max(row.max_drawdown for row in rows)
+    return [
+        row.model_copy(
+            update={
+                "best_total_r": row.total_r == best_total_r,
+                "best_profit_factor": _profit_factor_score(row)
+                == best_profit_factor,
+                "best_max_drawdown": row.max_drawdown == best_max_drawdown,
+            }
+        )
+        for row in rows
+    ]
+
+
+def _profit_factor_score(row: DayTradeBacktestDirectionComparisonRow) -> float:
+    if row.profit_factor is not None:
+        return row.profit_factor
+    if row.total_trades > 0 and row.total_r > 0:
+        return float("inf")
+    return float("-inf")
 
 
 def _portfolio_summary(
