@@ -13,6 +13,8 @@ from app.builders.intraday_trading_bias_engine import (
     OPENING_RANGE_END,
 )
 from app.models.day_trade_backtest_models import (
+    DayTradeBacktestComparisonRow,
+    DayTradeBacktestEntryFilters,
     DayTradeBacktestResponse,
     DayTradeBacktestRow,
     DayTradeBacktestSummary,
@@ -20,7 +22,10 @@ from app.models.day_trade_backtest_models import (
 )
 
 REGULAR_CLOSE = time(16, 0)
+NOON_ET = time(12, 0)
 TRIGGER_BUFFER = 0.01
+DEFAULT_MIN_OR_WIDTH_PCT = 0.01
+DEFAULT_MAX_OR_WIDTH_PCT = 0.035
 YAHOO_INTRADAY_5M_HISTORY_DAYS = 60
 YAHOO_INTRADAY_5M_LIMIT_REASON = (
     "Yahoo Finance 5-minute intraday candles are only available for "
@@ -62,6 +67,24 @@ class IntradayProviderAvailability:
     available_start_date: date
     available_end_date: date
     provider_limit_reason: str
+
+
+@dataclass(frozen=True)
+class DayTradeEntryFilterConfig:
+    require_close_confirmed_breakout: bool = False
+    require_vwap_alignment: bool = False
+    min_or_width_pct: float | None = None
+    max_or_width_pct: float | None = None
+    no_trade_after_noon: bool = False
+
+    def to_model(self) -> DayTradeBacktestEntryFilters:
+        return DayTradeBacktestEntryFilters(
+            require_close_confirmed_breakout=self.require_close_confirmed_breakout,
+            require_vwap_alignment=self.require_vwap_alignment,
+            min_or_width_pct=self.min_or_width_pct,
+            max_or_width_pct=self.max_or_width_pct,
+            no_trade_after_noon=self.no_trade_after_noon,
+        )
 
 
 class DayTradeBacktestDataError(ValueError):
@@ -106,6 +129,11 @@ class DayTradeBacktestService:
         end: date,
         risk_per_trade: float,
         invalidation_confirmation_closes: int = 2,
+        require_close_confirmed_breakout: bool = False,
+        require_vwap_alignment: bool = False,
+        min_or_width_pct: float | None = None,
+        max_or_width_pct: float | None = None,
+        no_trade_after_noon: bool = False,
     ) -> DayTradeBacktestResponse:
         if end < start:
             raise ValueError("end must be on or after start")
@@ -113,6 +141,14 @@ class DayTradeBacktestService:
             raise ValueError("risk_per_trade must be positive")
         if invalidation_confirmation_closes <= 0:
             raise ValueError("invalidation_confirmation_closes must be positive")
+        entry_filters = DayTradeEntryFilterConfig(
+            require_close_confirmed_breakout=require_close_confirmed_breakout,
+            require_vwap_alignment=require_vwap_alignment,
+            min_or_width_pct=min_or_width_pct,
+            max_or_width_pct=max_or_width_pct,
+            no_trade_after_noon=no_trade_after_noon,
+        )
+        _validate_entry_filters(entry_filters)
 
         symbol_upper = symbol.strip().upper()
         availability = intraday_provider_availability()
@@ -156,6 +192,13 @@ class DayTradeBacktestService:
             candles=candles,
             risk_per_trade=risk_per_trade,
             invalidation_confirmation_closes=invalidation_confirmation_closes,
+            entry_filters=entry_filters,
+        )
+        comparison_table = build_day_trade_comparison_table(
+            symbol=symbol_upper,
+            candles=candles,
+            risk_per_trade=risk_per_trade,
+            invalidation_confirmation_closes=invalidation_confirmation_closes,
         )
         return DayTradeBacktestResponse(
             symbol=symbol_upper,
@@ -166,10 +209,12 @@ class DayTradeBacktestService:
             provider_limit_reason=availability.provider_limit_reason,
             risk_per_trade=risk_per_trade,
             invalidation_confirmation_closes=invalidation_confirmation_closes,
+            entry_filters=entry_filters.to_model(),
             rows=rows,
             summary=summarize_day_trade_backtest(rows),
             top_winners=top_day_trade_winners(rows),
             top_losers=top_day_trade_losers(rows),
+            comparison_table=comparison_table,
         )
 
 
@@ -179,7 +224,9 @@ def simulate_day_trade_backtest(
     candles: list[IntradayBacktestCandle],
     risk_per_trade: float,
     invalidation_confirmation_closes: int = 2,
+    entry_filters: DayTradeEntryFilterConfig | None = None,
 ) -> list[DayTradeBacktestRow]:
+    filters = entry_filters or DayTradeEntryFilterConfig()
     rows: list[DayTradeBacktestRow] = []
     for trading_day, day_candles in _group_by_market_date(candles).items():
         rows.append(
@@ -189,6 +236,7 @@ def simulate_day_trade_backtest(
                 candles=day_candles,
                 risk_per_trade=risk_per_trade,
                 invalidation_confirmation_closes=invalidation_confirmation_closes,
+                entry_filters=filters,
             )
         )
     return sorted(rows, key=lambda row: row.date)
@@ -255,6 +303,64 @@ def top_day_trade_losers(
     return sorted(trades, key=lambda row: (row.r_multiple, row.dollar_pl, row.date))[:10]
 
 
+def build_day_trade_comparison_table(
+    *,
+    symbol: str,
+    candles: list[IntradayBacktestCandle],
+    risk_per_trade: float,
+    invalidation_confirmation_closes: int = 2,
+) -> list[DayTradeBacktestComparisonRow]:
+    scenarios: list[tuple[str, DayTradeEntryFilterConfig]] = [
+        ("baseline", DayTradeEntryFilterConfig()),
+        (
+            "close-confirmed breakout",
+            DayTradeEntryFilterConfig(require_close_confirmed_breakout=True),
+        ),
+        ("VWAP-aligned", DayTradeEntryFilterConfig(require_vwap_alignment=True)),
+        (
+            "OR-width-filtered",
+            DayTradeEntryFilterConfig(
+                min_or_width_pct=DEFAULT_MIN_OR_WIDTH_PCT,
+                max_or_width_pct=DEFAULT_MAX_OR_WIDTH_PCT,
+            ),
+        ),
+        (
+            "all filters combined",
+            DayTradeEntryFilterConfig(
+                require_close_confirmed_breakout=True,
+                require_vwap_alignment=True,
+                min_or_width_pct=DEFAULT_MIN_OR_WIDTH_PCT,
+                max_or_width_pct=DEFAULT_MAX_OR_WIDTH_PCT,
+                no_trade_after_noon=True,
+            ),
+        ),
+    ]
+    comparison: list[DayTradeBacktestComparisonRow] = []
+    for scenario, filters in scenarios:
+        rows = simulate_day_trade_backtest(
+            symbol=symbol,
+            candles=candles,
+            risk_per_trade=risk_per_trade,
+            invalidation_confirmation_closes=invalidation_confirmation_closes,
+            entry_filters=filters,
+        )
+        summary = summarize_day_trade_backtest(rows)
+        comparison.append(
+            DayTradeBacktestComparisonRow(
+                scenario=scenario,  # type: ignore[arg-type]
+                total_trades=summary.total_trades,
+                win_rate=summary.win_rate,
+                average_r=summary.average_r,
+                total_r=summary.total_r,
+                profit_factor=summary.profit_factor,
+                max_drawdown=summary.max_drawdown,
+                target_1_hit_pct=summary.target_1_hit_pct,
+                invalidation_pct=summary.invalidation_pct,
+            )
+        )
+    return comparison
+
+
 def normalize_intraday_candles(hist: pd.DataFrame | None) -> list[IntradayBacktestCandle]:
     if hist is None or hist.empty or not isinstance(hist.index, pd.DatetimeIndex):
         return []
@@ -314,6 +420,19 @@ def _validate_requested_intraday_window(
         )
 
 
+def _validate_entry_filters(filters: DayTradeEntryFilterConfig) -> None:
+    if filters.min_or_width_pct is not None and filters.min_or_width_pct < 0:
+        raise ValueError("min_or_width_pct must be non-negative")
+    if filters.max_or_width_pct is not None and filters.max_or_width_pct < 0:
+        raise ValueError("max_or_width_pct must be non-negative")
+    if (
+        filters.min_or_width_pct is not None
+        and filters.max_or_width_pct is not None
+        and filters.max_or_width_pct < filters.min_or_width_pct
+    ):
+        raise ValueError("max_or_width_pct must be greater than or equal to min_or_width_pct")
+
+
 def market_date(value: datetime) -> date:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
@@ -327,6 +446,7 @@ def _simulate_day(
     candles: list[IntradayBacktestCandle],
     risk_per_trade: float,
     invalidation_confirmation_closes: int,
+    entry_filters: DayTradeEntryFilterConfig,
 ) -> DayTradeBacktestRow:
     candles = sorted(candles, key=lambda candle: candle.timestamp)
     levels = _opening_range_levels(candles)
@@ -335,6 +455,8 @@ def _simulate_day(
 
     vwap_by_timestamp = _vwap_by_timestamp(candles)
     plan_vwap = _plan_vwap(candles)
+    if not _or_width_filter_passes(candles, levels, entry_filters):
+        return _no_trade_row(symbol, trading_day, levels)
     entry: IntradayBacktestCandle | None = None
     direction: DayTradeSetupDirection = "none"
     entry_price: float | None = None
@@ -343,8 +465,22 @@ def _simulate_day(
         local_time = _local_time(candle.timestamp)
         if local_time < OPENING_RANGE_END:
             continue
-        long_hit = candle.high >= levels.long_trigger
-        short_hit = candle.low <= levels.short_trigger
+        if entry_filters.no_trade_after_noon and local_time >= NOON_ET:
+            break
+        long_hit = candle.high >= levels.long_trigger and _entry_filters_pass(
+            direction="long",
+            candle=candle,
+            levels=levels,
+            plan_vwap=plan_vwap,
+            filters=entry_filters,
+        )
+        short_hit = candle.low <= levels.short_trigger and _entry_filters_pass(
+            direction="short",
+            candle=candle,
+            levels=levels,
+            plan_vwap=plan_vwap,
+            filters=entry_filters,
+        )
         if long_hit and short_hit:
             direction = _direction_from_open(candle, levels)
         elif long_hit:
@@ -596,6 +732,61 @@ def _direction_from_open(
     long_distance = abs(levels.long_trigger - candle.open)
     short_distance = abs(candle.open - levels.short_trigger)
     return "long" if long_distance <= short_distance else "short"
+
+
+def _entry_filters_pass(
+    *,
+    direction: DayTradeSetupDirection,
+    candle: IntradayBacktestCandle,
+    levels: _DayLevels,
+    plan_vwap: float | None,
+    filters: DayTradeEntryFilterConfig,
+) -> bool:
+    if filters.require_close_confirmed_breakout:
+        if direction == "long" and candle.close <= levels.opening_range_high:
+            return False
+        if direction == "short" and candle.close >= levels.opening_range_low:
+            return False
+    if filters.require_vwap_alignment:
+        if plan_vwap is None:
+            return False
+        if direction == "long" and candle.close <= plan_vwap:
+            return False
+        if direction == "short" and candle.close >= plan_vwap:
+            return False
+    return True
+
+
+def _or_width_filter_passes(
+    candles: list[IntradayBacktestCandle],
+    levels: _DayLevels,
+    filters: DayTradeEntryFilterConfig,
+) -> bool:
+    if filters.min_or_width_pct is None and filters.max_or_width_pct is None:
+        return True
+    reference_price = _opening_range_reference_price(candles, levels)
+    if reference_price <= 0:
+        return False
+    width_pct = levels.width / reference_price
+    if filters.min_or_width_pct is not None and width_pct < filters.min_or_width_pct:
+        return False
+    if filters.max_or_width_pct is not None and width_pct > filters.max_or_width_pct:
+        return False
+    return True
+
+
+def _opening_range_reference_price(
+    candles: list[IntradayBacktestCandle],
+    levels: _DayLevels,
+) -> float:
+    opening = [
+        candle
+        for candle in candles
+        if MARKET_OPEN <= _local_time(candle.timestamp) < OPENING_RANGE_END
+    ]
+    if opening:
+        return opening[-1].close
+    return (levels.opening_range_high + levels.opening_range_low) / 2
 
 
 def _closed_back_inside_range(

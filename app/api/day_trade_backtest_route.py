@@ -27,6 +27,11 @@ async def get_day_trade_backtest(
     end: date = Query(...),
     risk_per_trade: float = Query(100.0, ge=1),
     invalidation_confirmation_closes: int = Query(2, ge=1, le=10),
+    require_close_confirmed_breakout: bool = Query(False),
+    require_vwap_alignment: bool = Query(False),
+    min_or_width_pct: float | None = Query(None, ge=0),
+    max_or_width_pct: float | None = Query(None, ge=0),
+    no_trade_after_noon: bool = Query(False),
     yfinance_adapter: YFinanceAdapter = Depends(get_yfinance_adapter),
 ) -> DayTradeBacktestResponse:
     service = DayTradeBacktestService(yfinance_adapter)
@@ -38,6 +43,11 @@ async def get_day_trade_backtest(
             end=end,
             risk_per_trade=risk_per_trade,
             invalidation_confirmation_closes=invalidation_confirmation_closes,
+            require_close_confirmed_breakout=require_close_confirmed_breakout,
+            require_vwap_alignment=require_vwap_alignment,
+            min_or_width_pct=min_or_width_pct,
+            max_or_width_pct=max_or_width_pct,
+            no_trade_after_noon=no_trade_after_noon,
         )
     except DayTradeBacktestDataError as exc:
         raise HTTPException(status_code=400, detail=exc.to_detail()) from exc

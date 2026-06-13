@@ -12,8 +12,10 @@ from app.main import app
 from app.services.day_trade_backtest_service import (
     DayTradeBacktestService,
     DayTradeBacktestDataError,
+    DayTradeEntryFilterConfig,
     IntradayBacktestCandle,
     RULE_ALIGNMENT_NOTES,
+    build_day_trade_comparison_table,
     intraday_provider_availability,
     simulate_day_trade_backtest,
     summarize_day_trade_backtest,
@@ -290,6 +292,147 @@ def test_day_trade_backtest_target_still_exits_immediately_before_invalidation()
     assert row.outcome == "win"
 
 
+def test_day_trade_backtest_long_close_confirmed_breakout_filter() -> None:
+    day = date(2026, 6, 8)
+    rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        entry_filters=DayTradeEntryFilterConfig(
+            require_close_confirmed_breakout=True,
+        ),
+        candles=[
+            *_opening_range(day),
+            _candle(day, 10, 0, 101.0, 101.5, 100.8, 100.95),
+            _candle(day, 10, 5, 100.95, 101.2, 100.8, 100.9),
+        ],
+    )
+
+    assert rows[0].outcome == "no_trade"
+
+
+def test_day_trade_backtest_short_close_confirmed_breakout_filter() -> None:
+    day = date(2026, 6, 8)
+    rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        entry_filters=DayTradeEntryFilterConfig(
+            require_close_confirmed_breakout=True,
+        ),
+        candles=[
+            *_opening_range(day),
+            _candle(day, 10, 0, 99.0, 99.2, 98.8, 99.05),
+            _candle(day, 10, 5, 99.05, 99.2, 98.9, 99.1),
+        ],
+    )
+
+    assert rows[0].outcome == "no_trade"
+
+
+def test_day_trade_backtest_long_vwap_alignment_filter() -> None:
+    day = date(2026, 6, 8)
+    rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        entry_filters=DayTradeEntryFilterConfig(require_vwap_alignment=True),
+        candles=[
+            *_opening_range(day),
+            _candle(day, 10, 0, 101.0, 101.5, 100.8, 100.0),
+            _candle(day, 10, 5, 100.0, 100.9, 100.5, 100.9),
+        ],
+    )
+
+    assert rows[0].outcome == "no_trade"
+
+
+def test_day_trade_backtest_short_vwap_alignment_filter() -> None:
+    day = date(2026, 6, 8)
+    rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        entry_filters=DayTradeEntryFilterConfig(require_vwap_alignment=True),
+        candles=[
+            *_opening_range(day),
+            _candle(day, 10, 0, 99.0, 99.2, 98.8, 100.2),
+            _candle(day, 10, 5, 99.05, 99.2, 99.05, 99.1),
+        ],
+    )
+
+    assert rows[0].outcome == "no_trade"
+
+
+def test_day_trade_backtest_or_width_filter_skips_too_narrow_range() -> None:
+    day = date(2026, 6, 8)
+    rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        entry_filters=DayTradeEntryFilterConfig(min_or_width_pct=0.01),
+        candles=[
+            _candle(day, 9, 30, 100.0, 100.2, 99.8, 100.0),
+            _candle(day, 9, 35, 100.0, 100.4, 99.6, 100.0),
+            _candle(day, 10, 0, 100.4, 101.0, 100.3, 100.8),
+        ],
+    )
+
+    assert rows[0].or_width == 0.8
+    assert rows[0].outcome == "no_trade"
+
+
+def test_day_trade_backtest_or_width_filter_skips_too_wide_range() -> None:
+    day = date(2026, 6, 8)
+    rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        entry_filters=DayTradeEntryFilterConfig(max_or_width_pct=0.035),
+        candles=[
+            _candle(day, 9, 30, 100.0, 104.0, 96.0, 100.0),
+            _candle(day, 9, 35, 100.0, 103.0, 97.0, 100.0),
+            _candle(day, 10, 0, 104.0, 105.0, 103.5, 104.5),
+        ],
+    )
+
+    assert rows[0].or_width == 8.0
+    assert rows[0].outcome == "no_trade"
+
+
+def test_day_trade_backtest_no_trade_after_noon_filter() -> None:
+    day = date(2026, 6, 8)
+    rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        entry_filters=DayTradeEntryFilterConfig(no_trade_after_noon=True),
+        candles=[
+            *_opening_range(day),
+            _candle(day, 12, 0, 101.0, 101.5, 100.8, 101.2),
+            _candle(day, 12, 5, 101.2, 103.5, 101.1, 103.1),
+        ],
+    )
+
+    assert rows[0].outcome == "no_trade"
+
+
+def test_day_trade_backtest_comparison_table_contains_filter_scenarios() -> None:
+    day = date(2026, 6, 8)
+    comparison = build_day_trade_comparison_table(
+        symbol="NVDA",
+        risk_per_trade=100,
+        candles=[
+            *_opening_range(day),
+            _candle(day, 10, 0, 101.0, 101.5, 100.8, 101.2),
+            _candle(day, 10, 5, 101.2, 103.5, 101.1, 103.1),
+        ],
+    )
+
+    assert [row.scenario for row in comparison] == [
+        "baseline",
+        "close-confirmed breakout",
+        "VWAP-aligned",
+        "OR-width-filtered",
+        "all filters combined",
+    ]
+    assert all(row.total_trades == 1 for row in comparison)
+    assert comparison[0].target_1_hit_pct == 1.0
+
+
 def test_day_trade_backtest_no_trade_when_opening_range_never_breaks() -> None:
     day = date(2026, 6, 9)
     rows = simulate_day_trade_backtest(
@@ -504,6 +647,14 @@ def test_day_trade_backtest_service_loads_historical_intraday_candles() -> None:
     assert result.available_end_date == intraday_provider_availability().available_end_date
     assert "Yahoo Finance 5-minute" in result.provider_limit_reason
     assert result.invalidation_confirmation_closes == 2
+    assert result.entry_filters.require_close_confirmed_breakout is False
+    assert [row.scenario for row in result.comparison_table] == [
+        "baseline",
+        "close-confirmed breakout",
+        "VWAP-aligned",
+        "OR-width-filtered",
+        "all filters combined",
+    ]
     assert result.rows[0].outcome == "win"
 
 
@@ -582,6 +733,11 @@ def test_day_trade_backtest_route_returns_frontend_contract() -> None:
                 "end": "2026-06-05",
                 "risk_per_trade": "100",
                 "invalidation_confirmation_closes": "2",
+                "require_close_confirmed_breakout": "true",
+                "require_vwap_alignment": "true",
+                "min_or_width_pct": "0.01",
+                "max_or_width_pct": "0.035",
+                "no_trade_after_noon": "true",
             },
         )
         assert response.status_code == 200
@@ -589,6 +745,13 @@ def test_day_trade_backtest_route_returns_frontend_contract() -> None:
         assert body["symbol"] == "NVDA"
         assert body["risk_per_trade"] == 100
         assert body["invalidation_confirmation_closes"] == 2
+        assert body["entry_filters"] == {
+            "require_close_confirmed_breakout": True,
+            "require_vwap_alignment": True,
+            "min_or_width_pct": 0.01,
+            "max_or_width_pct": 0.035,
+            "no_trade_after_noon": True,
+        }
         assert body["available_start_date"]
         assert body["available_end_date"]
         assert "Yahoo Finance 5-minute" in body["provider_limit_reason"]
@@ -609,6 +772,24 @@ def test_day_trade_backtest_route_returns_frontend_contract() -> None:
         assert body["summary"]["average_or_width"] == 2.0
         assert body["top_winners"][0]["date"] == "2026-06-05"
         assert body["top_losers"] == []
+        assert [row["scenario"] for row in body["comparison_table"]] == [
+            "baseline",
+            "close-confirmed breakout",
+            "VWAP-aligned",
+            "OR-width-filtered",
+            "all filters combined",
+        ]
+        assert set(body["comparison_table"][0]) == {
+            "scenario",
+            "total_trades",
+            "win_rate",
+            "average_r",
+            "total_r",
+            "profit_factor",
+            "max_drawdown",
+            "target_1_hit_pct",
+            "invalidation_pct",
+        }
     finally:
         app.dependency_overrides.clear()
 

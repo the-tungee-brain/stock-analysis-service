@@ -23,6 +23,14 @@ DayTradeExitReason = Literal[
     "no_trade",
 ]
 
+DayTradeBacktestComparisonScenario = Literal[
+    "baseline",
+    "close-confirmed breakout",
+    "VWAP-aligned",
+    "OR-width-filtered",
+    "all filters combined",
+]
+
 _MODEL_CONFIG = ConfigDict(populate_by_name=True)
 
 
@@ -119,6 +127,45 @@ class DayTradeBacktestSummary(BaseModel):
     average_hold_minutes: float = Field(serialization_alias="average_hold_minutes")
 
 
+class DayTradeBacktestEntryFilters(BaseModel):
+    model_config = _MODEL_CONFIG
+
+    require_close_confirmed_breakout: bool = Field(
+        default=False,
+        serialization_alias="require_close_confirmed_breakout",
+    )
+    require_vwap_alignment: bool = Field(
+        default=False,
+        serialization_alias="require_vwap_alignment",
+    )
+    min_or_width_pct: float | None = Field(
+        default=None,
+        serialization_alias="min_or_width_pct",
+    )
+    max_or_width_pct: float | None = Field(
+        default=None,
+        serialization_alias="max_or_width_pct",
+    )
+    no_trade_after_noon: bool = Field(
+        default=False,
+        serialization_alias="no_trade_after_noon",
+    )
+
+
+class DayTradeBacktestComparisonRow(BaseModel):
+    model_config = _MODEL_CONFIG
+
+    scenario: DayTradeBacktestComparisonScenario
+    total_trades: int = Field(serialization_alias="total_trades")
+    win_rate: float = Field(serialization_alias="win_rate")
+    average_r: float = Field(serialization_alias="average_r")
+    total_r: float = Field(serialization_alias="total_r")
+    profit_factor: float | None = Field(serialization_alias="profit_factor")
+    max_drawdown: float = Field(serialization_alias="max_drawdown")
+    target_1_hit_pct: float = Field(serialization_alias="target_1_hit_pct")
+    invalidation_pct: float = Field(serialization_alias="invalidation_pct")
+
+
 class DayTradeBacktestResponse(BaseModel):
     model_config = _MODEL_CONFIG
 
@@ -132,7 +179,13 @@ class DayTradeBacktestResponse(BaseModel):
     invalidation_confirmation_closes: int = Field(
         serialization_alias="invalidation_confirmation_closes"
     )
+    entry_filters: DayTradeBacktestEntryFilters = Field(
+        serialization_alias="entry_filters"
+    )
     rows: list[DayTradeBacktestRow]
     summary: DayTradeBacktestSummary
     top_winners: list[DayTradeBacktestRow] = Field(serialization_alias="top_winners")
     top_losers: list[DayTradeBacktestRow] = Field(serialization_alias="top_losers")
+    comparison_table: list[DayTradeBacktestComparisonRow] = Field(
+        serialization_alias="comparison_table"
+    )
