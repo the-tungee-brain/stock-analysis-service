@@ -21,6 +21,11 @@ from app.models.day_trade_backtest_models import (
 
 REGULAR_CLOSE = time(16, 0)
 TRIGGER_BUFFER = 0.01
+YAHOO_INTRADAY_5M_HISTORY_DAYS = 60
+YAHOO_INTRADAY_5M_LIMIT_REASON = (
+    "Yahoo Finance 5-minute intraday candles are only available for "
+    "approximately 60 calendar days."
+)
 RULE_ALIGNMENT_NOTES = {
     "opening_range_window": "Aligned with live intraday bias: 9:30 inclusive to 10:00 exclusive ET.",
     "trigger_rules": "Aligned with live replay levels: OR high/low plus/minus the 0.01 trigger buffer; backtest limits execution to the first tradable side for one daily P/L row.",
@@ -52,6 +57,43 @@ class _DayLevels:
     width: float
 
 
+@dataclass(frozen=True)
+class IntradayProviderAvailability:
+    available_start_date: date
+    available_end_date: date
+    provider_limit_reason: str
+
+
+class DayTradeBacktestDataError(ValueError):
+    code = "day_trade_backtest_data_error"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        availability: IntradayProviderAvailability,
+    ) -> None:
+        super().__init__(message)
+        self.availability = availability
+
+    def to_detail(self) -> dict[str, str]:
+        return {
+            "code": self.code,
+            "message": str(self),
+            "available_start_date": self.availability.available_start_date.isoformat(),
+            "available_end_date": self.availability.available_end_date.isoformat(),
+            "provider_limit_reason": self.availability.provider_limit_reason,
+        }
+
+
+class ProviderHistoryLimitExceededError(DayTradeBacktestDataError):
+    code = "provider_history_limit_exceeded"
+
+
+class NoMarketDataAvailableError(DayTradeBacktestDataError):
+    code = "no_market_data_available"
+
+
 class DayTradeBacktestService:
     def __init__(self, yfinance_adapter: YFinanceAdapter) -> None:
         self._yfinance = yfinance_adapter
@@ -70,6 +112,12 @@ class DayTradeBacktestService:
             raise ValueError("risk_per_trade must be positive")
 
         symbol_upper = symbol.strip().upper()
+        availability = intraday_provider_availability()
+        _validate_requested_intraday_window(
+            start=start,
+            end=end,
+            availability=availability,
+        )
         hist = self._yfinance.get_history(
             symbol_upper,
             interval="5m",
@@ -77,12 +125,29 @@ class DayTradeBacktestService:
             start=start,
             end=end + timedelta(days=1),
         )
+        normalized = normalize_intraday_candles(hist)
+        if not normalized:
+            raise NoMarketDataAvailableError(
+                (
+                    f"No 5-minute market data is available for {symbol_upper} "
+                    f"from {start.isoformat()} to {end.isoformat()}."
+                ),
+                availability=availability,
+            )
         candles = [
             candle
-            for candle in normalize_intraday_candles(hist)
+            for candle in normalized
             if start <= market_date(candle.timestamp) <= end
             and _is_regular_session(candle.timestamp)
         ]
+        if not candles:
+            raise NoMarketDataAvailableError(
+                (
+                    f"No regular-session 5-minute candles are available for "
+                    f"{symbol_upper} from {start.isoformat()} to {end.isoformat()}."
+                ),
+                availability=availability,
+            )
         rows = simulate_day_trade_backtest(
             symbol=symbol_upper,
             candles=candles,
@@ -92,9 +157,14 @@ class DayTradeBacktestService:
             symbol=symbol_upper,
             start=start,
             end=end,
+            available_start_date=availability.available_start_date,
+            available_end_date=availability.available_end_date,
+            provider_limit_reason=availability.provider_limit_reason,
             risk_per_trade=risk_per_trade,
             rows=rows,
             summary=summarize_day_trade_backtest(rows),
+            top_winners=top_day_trade_winners(rows),
+            top_losers=top_day_trade_losers(rows),
         )
 
 
@@ -128,6 +198,9 @@ def summarize_day_trade_backtest(
     gross_loss = abs(sum(row.r_multiple for row in losses))
     profit_factor = None if gross_loss == 0 else round(gross_win / gross_loss, 4)
     daily_r = [row.r_multiple for row in rows]
+    stop_distances = [row.stop_distance for row in trades if row.stop_distance is not None]
+    or_widths = [row.or_width for row in rows if row.or_width is not None]
+    hold_minutes = [row.hold_minutes for row in trades if row.hold_minutes is not None]
 
     return DayTradeBacktestSummary(
         total_trading_days_tested=len(rows),
@@ -143,7 +216,32 @@ def summarize_day_trade_backtest(
         else 0.0,
         best_day=round(max(daily_r), 4) if daily_r else 0.0,
         worst_day=round(min(daily_r), 4) if daily_r else 0.0,
+        stop_hit_pct=_exit_rate(trades, "stop_hit"),
+        target_1_hit_pct=_target_1_hit_rate(trades),
+        target_2_hit_pct=_exit_rate(trades, "target_2_hit"),
+        close_exit_pct=_exit_rate(trades, "close_exit"),
+        average_stop_distance=_average(stop_distances),
+        average_or_width=_average(or_widths),
+        average_hold_minutes=_average(hold_minutes),
     )
+
+
+def top_day_trade_winners(
+    rows: list[DayTradeBacktestRow],
+) -> list[DayTradeBacktestRow]:
+    trades = [row for row in rows if row.r_multiple > 0]
+    return sorted(
+        trades,
+        key=lambda row: (row.r_multiple, row.dollar_pl, row.date),
+        reverse=True,
+    )[:10]
+
+
+def top_day_trade_losers(
+    rows: list[DayTradeBacktestRow],
+) -> list[DayTradeBacktestRow]:
+    trades = [row for row in rows if row.r_multiple < 0]
+    return sorted(trades, key=lambda row: (row.r_multiple, row.dollar_pl, row.date))[:10]
 
 
 def normalize_intraday_candles(hist: pd.DataFrame | None) -> list[IntradayBacktestCandle]:
@@ -175,6 +273,34 @@ def normalize_intraday_candles(hist: pd.DataFrame | None) -> list[IntradayBackte
             )
         )
     return sorted(candles, key=lambda candle: candle.timestamp)
+
+
+def intraday_provider_availability(
+    as_of: date | None = None,
+) -> IntradayProviderAvailability:
+    available_end = as_of or datetime.now(EASTERN).date()
+    return IntradayProviderAvailability(
+        available_start_date=available_end - timedelta(days=YAHOO_INTRADAY_5M_HISTORY_DAYS),
+        available_end_date=available_end,
+        provider_limit_reason=YAHOO_INTRADAY_5M_LIMIT_REASON,
+    )
+
+
+def _validate_requested_intraday_window(
+    *,
+    start: date,
+    end: date,
+    availability: IntradayProviderAvailability,
+) -> None:
+    if start < availability.available_start_date or end > availability.available_end_date:
+        raise ProviderHistoryLimitExceededError(
+            (
+                "Requested 5-minute intraday history is outside the available "
+                f"Yahoo Finance window ({availability.available_start_date.isoformat()} "
+                f"to {availability.available_end_date.isoformat()})."
+            ),
+            availability=availability,
+        )
 
 
 def market_date(value: datetime) -> date:
@@ -232,6 +358,9 @@ def _simulate_day(
     exit_candle = entry
     exit_price = entry.close
     outcome = "breakeven"
+    exit_reason = "close_exit"
+    stop_reason: str | None = None
+    target_reason: str | None = None
     r_multiple = 0.0
     mfe = 0.0
     mae = 0.0
@@ -263,21 +392,28 @@ def _simulate_day(
         if stop_hit:
             exit_price = stop_price
             outcome = "loss"
+            exit_reason = "stop_hit"
+            stop_reason = _stop_reason(direction, plan_vwap)
             r_multiple = -1.0
             break
         if target_2_hit:
             exit_price = target_2
             outcome = "win"
+            exit_reason = "target_2_hit"
+            target_reason = "target_2_hit_two_opening_range_widths"
             r_multiple = 2.0
             break
         if target_1_hit:
             exit_price = target_1
             outcome = "win"
+            exit_reason = "target_1_hit"
+            target_reason = "target_1_hit_one_opening_range_width"
             r_multiple = 1.0
             break
         if invalidated:
             exit_price = candle.close
             outcome = "invalidated"
+            exit_reason = "invalidated"
             r_multiple = _r_multiple(direction, entry_price, stop_price, exit_price)
             break
 
@@ -286,6 +422,13 @@ def _simulate_day(
         exit_price = exit_candle.close
         r_multiple = _r_multiple(direction, entry_price, stop_price, exit_price)
         outcome = _outcome_from_r(r_multiple)
+
+    stop_distance = abs(entry_price - stop_price)
+    target_distance = abs(target_1 - entry_price)
+    hold_minutes = (exit_candle.timestamp - entry.timestamp).total_seconds() / 60
+    rounded_r = round(r_multiple, 4)
+    rounded_mfe = round(max(0.0, mfe), 4)
+    rounded_mae = round(max(0.0, mae), 4)
 
     return DayTradeBacktestRow(
         date=trading_day,
@@ -301,13 +444,23 @@ def _simulate_day(
         stop_price=_round_price(stop_price),
         target_1=_round_price(target_1),
         target_2=_round_price(target_2),
+        or_width=_round_price(levels.width),
+        stop_distance=_round_price(stop_distance),
+        target_distance=_round_price(target_distance),
         exit_time=exit_candle.timestamp,
         exit_price=_round_price(exit_price),
+        exit_reason=exit_reason,
+        stop_reason=stop_reason,
+        target_reason=target_reason,
+        hold_minutes=round(hold_minutes, 2),
         outcome=outcome,
-        r_multiple=round(r_multiple, 4),
-        dollar_pl=round(r_multiple * risk_per_trade, 2),
-        max_favorable_excursion=round(max(0.0, mfe), 4),
-        max_adverse_excursion=round(max(0.0, mae), 4),
+        r_achieved=rounded_r,
+        r_multiple=rounded_r,
+        dollar_pl=round(rounded_r * risk_per_trade, 2),
+        mfe=rounded_mfe,
+        mae=rounded_mae,
+        max_favorable_excursion=rounded_mfe,
+        max_adverse_excursion=rounded_mae,
     )
 
 
@@ -348,9 +501,14 @@ def _no_trade_row(
         opening_range_low=_round_price(levels.opening_range_low) if levels else None,
         long_trigger=_round_price(levels.long_trigger) if levels else None,
         short_trigger=_round_price(levels.short_trigger) if levels else None,
+        or_width=_round_price(levels.width) if levels else None,
+        exit_reason="no_trade",
         outcome="no_trade",
+        r_achieved=0.0,
         r_multiple=0.0,
         dollar_pl=0.0,
+        mfe=0.0,
+        mae=0.0,
         max_favorable_excursion=0.0,
         max_adverse_excursion=0.0,
     )
@@ -435,6 +593,39 @@ def _outcome_from_r(value: float) -> str:
     if value < -0.05:
         return "loss"
     return "breakeven"
+
+
+def _stop_reason(
+    direction: DayTradeSetupDirection,
+    vwap_at_entry: float | None,
+) -> str:
+    if vwap_at_entry is not None:
+        return f"{direction}_vwap_stop_hit"
+    return f"{direction}_opening_range_stop_hit"
+
+
+def _exit_rate(rows: list[DayTradeBacktestRow], exit_reason: str) -> float:
+    if not rows:
+        return 0.0
+    hits = [row for row in rows if row.exit_reason == exit_reason]
+    return round(len(hits) / len(rows), 4)
+
+
+def _target_1_hit_rate(rows: list[DayTradeBacktestRow]) -> float:
+    if not rows:
+        return 0.0
+    hits = [
+        row
+        for row in rows
+        if row.exit_reason in {"target_1_hit", "target_2_hit"}
+    ]
+    return round(len(hits) / len(rows), 4)
+
+
+def _average(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return round(sum(values) / len(values), 4)
 
 
 def _max_drawdown(values: list[float]) -> float:

@@ -14,6 +14,14 @@ DayTradeBacktestOutcome = Literal[
 ]
 
 DayTradeSetupDirection = Literal["long", "short", "none"]
+DayTradeExitReason = Literal[
+    "stop_hit",
+    "target_1_hit",
+    "target_2_hit",
+    "invalidated",
+    "close_exit",
+    "no_trade",
+]
 
 _MODEL_CONFIG = ConfigDict(populate_by_name=True)
 
@@ -51,11 +59,27 @@ class DayTradeBacktestRow(BaseModel):
     stop_price: float | None = Field(default=None, serialization_alias="stop_price")
     target_1: float | None = Field(default=None, serialization_alias="target_1")
     target_2: float | None = Field(default=None, serialization_alias="target_2")
+    or_width: float | None = Field(default=None, serialization_alias="or_width")
+    stop_distance: float | None = Field(
+        default=None,
+        serialization_alias="stop_distance",
+    )
+    target_distance: float | None = Field(
+        default=None,
+        serialization_alias="target_distance",
+    )
     exit_time: datetime | None = Field(default=None, serialization_alias="exit_time")
     exit_price: float | None = Field(default=None, serialization_alias="exit_price")
+    exit_reason: DayTradeExitReason = Field(serialization_alias="exit_reason")
+    stop_reason: str | None = Field(default=None, serialization_alias="stop_reason")
+    target_reason: str | None = Field(default=None, serialization_alias="target_reason")
+    hold_minutes: float | None = Field(default=None, serialization_alias="hold_minutes")
     outcome: DayTradeBacktestOutcome
+    r_achieved: float = Field(serialization_alias="r_achieved")
     r_multiple: float = Field(serialization_alias="r_multiple")
     dollar_pl: float = Field(serialization_alias="dollar_pl")
+    mfe: float = Field(serialization_alias="mfe")
+    mae: float = Field(serialization_alias="mae")
     max_favorable_excursion: float = Field(
         serialization_alias="max_favorable_excursion"
     )
@@ -78,6 +102,13 @@ class DayTradeBacktestSummary(BaseModel):
     average_loss: float = Field(serialization_alias="average_loss")
     best_day: float = Field(serialization_alias="best_day")
     worst_day: float = Field(serialization_alias="worst_day")
+    stop_hit_pct: float = Field(serialization_alias="stop_hit_pct")
+    target_1_hit_pct: float = Field(serialization_alias="target_1_hit_pct")
+    target_2_hit_pct: float = Field(serialization_alias="target_2_hit_pct")
+    close_exit_pct: float = Field(serialization_alias="close_exit_pct")
+    average_stop_distance: float = Field(serialization_alias="average_stop_distance")
+    average_or_width: float = Field(serialization_alias="average_or_width")
+    average_hold_minutes: float = Field(serialization_alias="average_hold_minutes")
 
 
 class DayTradeBacktestResponse(BaseModel):
@@ -86,6 +117,11 @@ class DayTradeBacktestResponse(BaseModel):
     symbol: str
     start: date
     end: date
+    available_start_date: date = Field(serialization_alias="available_start_date")
+    available_end_date: date = Field(serialization_alias="available_end_date")
+    provider_limit_reason: str = Field(serialization_alias="provider_limit_reason")
     risk_per_trade: float = Field(serialization_alias="risk_per_trade")
     rows: list[DayTradeBacktestRow]
     summary: DayTradeBacktestSummary
+    top_winners: list[DayTradeBacktestRow] = Field(serialization_alias="top_winners")
+    top_losers: list[DayTradeBacktestRow] = Field(serialization_alias="top_losers")
