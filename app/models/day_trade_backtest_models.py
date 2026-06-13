@@ -74,6 +74,10 @@ class DayTradeBacktestRow(BaseModel):
     stop_reason: str | None = Field(default=None, serialization_alias="stop_reason")
     target_reason: str | None = Field(default=None, serialization_alias="target_reason")
     hold_minutes: float | None = Field(default=None, serialization_alias="hold_minutes")
+    entry_candle_closed_inside_or: bool = Field(
+        default=False,
+        serialization_alias="entry_candle_closed_inside_or",
+    )
     outcome: DayTradeBacktestOutcome
     r_achieved: float = Field(serialization_alias="r_achieved")
     r_multiple: float = Field(serialization_alias="r_multiple")
@@ -106,6 +110,10 @@ class DayTradeBacktestSummary(BaseModel):
     target_1_hit_pct: float = Field(serialization_alias="target_1_hit_pct")
     target_2_hit_pct: float = Field(serialization_alias="target_2_hit_pct")
     close_exit_pct: float = Field(serialization_alias="close_exit_pct")
+    invalidation_pct: float = Field(serialization_alias="invalidation_pct")
+    same_candle_invalidation_count: int = Field(
+        serialization_alias="same_candle_invalidation_count"
+    )
     average_stop_distance: float = Field(serialization_alias="average_stop_distance")
     average_or_width: float = Field(serialization_alias="average_or_width")
     average_hold_minutes: float = Field(serialization_alias="average_hold_minutes")
@@ -121,6 +129,9 @@ class DayTradeBacktestResponse(BaseModel):
     available_end_date: date = Field(serialization_alias="available_end_date")
     provider_limit_reason: str = Field(serialization_alias="provider_limit_reason")
     risk_per_trade: float = Field(serialization_alias="risk_per_trade")
+    invalidation_confirmation_closes: int = Field(
+        serialization_alias="invalidation_confirmation_closes"
+    )
     rows: list[DayTradeBacktestRow]
     summary: DayTradeBacktestSummary
     top_winners: list[DayTradeBacktestRow] = Field(serialization_alias="top_winners")

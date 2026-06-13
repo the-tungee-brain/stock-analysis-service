@@ -26,6 +26,7 @@ async def get_day_trade_backtest(
     start: date = Query(...),
     end: date = Query(...),
     risk_per_trade: float = Query(100.0, ge=1),
+    invalidation_confirmation_closes: int = Query(2, ge=1, le=10),
     yfinance_adapter: YFinanceAdapter = Depends(get_yfinance_adapter),
 ) -> DayTradeBacktestResponse:
     service = DayTradeBacktestService(yfinance_adapter)
@@ -36,6 +37,7 @@ async def get_day_trade_backtest(
             start=start,
             end=end,
             risk_per_trade=risk_per_trade,
+            invalidation_confirmation_closes=invalidation_confirmation_closes,
         )
     except DayTradeBacktestDataError as exc:
         raise HTTPException(status_code=400, detail=exc.to_detail()) from exc

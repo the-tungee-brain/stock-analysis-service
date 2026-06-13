@@ -158,6 +158,138 @@ def test_day_trade_backtest_uses_stop_first_when_stop_and_target_hit_same_candle
     assert row.dollar_pl == -250.0
 
 
+def test_day_trade_backtest_entry_candle_close_back_inside_does_not_invalidate() -> None:
+    day = date(2026, 6, 8)
+    rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        candles=[
+            *_opening_range(day),
+            _candle(day, 10, 0, 101.0, 101.5, 100.8, 100.95),
+            _candle(day, 10, 5, 101.2, 103.5, 101.1, 103.1),
+        ],
+    )
+
+    row = rows[0]
+    assert row.entry_candle_closed_inside_or is True
+    assert row.entry_time == _dt(2026, 6, 8, 10, 0)
+    assert row.exit_reason == "target_1_hit"
+    assert row.outcome == "win"
+
+
+def test_day_trade_backtest_one_close_back_inside_does_not_invalidate() -> None:
+    day = date(2026, 6, 8)
+    rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        candles=[
+            *_opening_range(day),
+            _candle(day, 10, 0, 101.0, 101.5, 100.8, 101.2),
+            _candle(day, 10, 5, 101.2, 101.4, 100.8, 100.95),
+        ],
+    )
+
+    row = rows[0]
+    assert row.entry_candle_closed_inside_or is False
+    assert row.exit_reason == "close_exit"
+    assert row.outcome == "loss"
+    assert row.exit_time == _dt(2026, 6, 8, 10, 5)
+
+
+def test_day_trade_backtest_two_consecutive_closes_back_inside_invalidates() -> None:
+    day = date(2026, 6, 8)
+    rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        candles=[
+            *_opening_range(day),
+            _candle(day, 10, 0, 101.0, 101.5, 100.8, 101.2),
+            _candle(day, 10, 5, 101.2, 101.4, 100.8, 100.95),
+            _candle(day, 10, 10, 100.95, 101.2, 100.7, 100.9),
+        ],
+    )
+
+    row = rows[0]
+    assert row.exit_reason == "invalidated"
+    assert row.outcome == "invalidated"
+    assert row.exit_time == _dt(2026, 6, 8, 10, 10)
+
+
+def test_day_trade_backtest_short_two_consecutive_closes_back_inside_invalidates() -> None:
+    day = date(2026, 6, 8)
+    rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        candles=[
+            *_opening_range(day),
+            _candle(day, 10, 0, 99.0, 99.2, 98.8, 98.9),
+            _candle(day, 10, 5, 98.9, 99.2, 98.8, 99.05),
+            _candle(day, 10, 10, 99.05, 99.3, 98.9, 99.1),
+        ],
+    )
+
+    row = rows[0]
+    assert row.setup_direction == "short"
+    assert row.exit_reason == "invalidated"
+    assert row.outcome == "invalidated"
+    assert row.exit_time == _dt(2026, 6, 8, 10, 10)
+
+
+def test_day_trade_backtest_custom_invalidation_confirmation_closes() -> None:
+    day = date(2026, 6, 8)
+    rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        invalidation_confirmation_closes=3,
+        candles=[
+            *_opening_range(day),
+            _candle(day, 10, 0, 101.0, 101.5, 100.8, 101.2),
+            _candle(day, 10, 5, 101.2, 101.4, 100.8, 100.95),
+            _candle(day, 10, 10, 100.95, 101.2, 100.7, 100.9),
+        ],
+    )
+
+    row = rows[0]
+    assert row.exit_reason == "close_exit"
+    assert row.outcome == "loss"
+
+
+def test_day_trade_backtest_summary_counts_same_candle_close_back_inside() -> None:
+    day = date(2026, 6, 8)
+    rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        candles=[
+            *_opening_range(day),
+            _candle(day, 10, 0, 101.0, 101.5, 100.8, 100.95),
+            _candle(day, 10, 5, 101.2, 103.5, 101.1, 103.1),
+        ],
+    )
+
+    summary = summarize_day_trade_backtest(rows)
+
+    assert summary.same_candle_invalidation_count == 1
+    assert summary.invalidation_pct == 0.0
+
+
+def test_day_trade_backtest_target_still_exits_immediately_before_invalidation() -> None:
+    day = date(2026, 6, 8)
+    rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        candles=[
+            *_opening_range(day),
+            _candle(day, 10, 0, 101.0, 103.5, 100.8, 100.95),
+            _candle(day, 10, 5, 101.2, 101.4, 100.8, 100.95),
+        ],
+    )
+
+    row = rows[0]
+    assert row.entry_candle_closed_inside_or is True
+    assert row.exit_reason == "target_1_hit"
+    assert row.outcome == "win"
+
+
 def test_day_trade_backtest_no_trade_when_opening_range_never_breaks() -> None:
     day = date(2026, 6, 9)
     rows = simulate_day_trade_backtest(
@@ -250,6 +382,8 @@ def test_day_trade_backtest_summary_metrics() -> None:
     assert summary.target_1_hit_pct == 0.5
     assert summary.target_2_hit_pct == 0.0
     assert summary.close_exit_pct == 0.0
+    assert summary.invalidation_pct == 0.0
+    assert summary.same_candle_invalidation_count == 0
     assert summary.average_stop_distance == 0.93
     assert summary.average_or_width == 2.0
     assert summary.average_hold_minutes == 2.5
@@ -282,6 +416,7 @@ def test_day_trade_backtest_top_winners_and_losers() -> None:
                 *_opening_range(date(2026, 6, 3)),
                 _candle(date(2026, 6, 3), 10, 0, 101.0, 101.5, 100.8, 101.2),
                 _candle(date(2026, 6, 3), 10, 5, 101.2, 101.3, 100.4, 100.5),
+                _candle(date(2026, 6, 3), 10, 10, 100.5, 101.3, 100.4, 100.5),
             ],
         ),
         *simulate_day_trade_backtest(
@@ -368,6 +503,7 @@ def test_day_trade_backtest_service_loads_historical_intraday_candles() -> None:
     assert result.available_start_date == intraday_provider_availability().available_start_date
     assert result.available_end_date == intraday_provider_availability().available_end_date
     assert "Yahoo Finance 5-minute" in result.provider_limit_reason
+    assert result.invalidation_confirmation_closes == 2
     assert result.rows[0].outcome == "win"
 
 
@@ -445,12 +581,14 @@ def test_day_trade_backtest_route_returns_frontend_contract() -> None:
                 "start": "2026-06-05",
                 "end": "2026-06-05",
                 "risk_per_trade": "100",
+                "invalidation_confirmation_closes": "2",
             },
         )
         assert response.status_code == 200
         body = response.json()
         assert body["symbol"] == "NVDA"
         assert body["risk_per_trade"] == 100
+        assert body["invalidation_confirmation_closes"] == 2
         assert body["available_start_date"]
         assert body["available_end_date"]
         assert "Yahoo Finance 5-minute" in body["provider_limit_reason"]
@@ -466,6 +604,8 @@ def test_day_trade_backtest_route_returns_frontend_contract() -> None:
         assert body["rows"][0]["outcome"] == "win"
         assert body["summary"]["total_trades"] == 1
         assert body["summary"]["target_1_hit_pct"] == 1.0
+        assert body["summary"]["invalidation_pct"] == 0.0
+        assert body["summary"]["same_candle_invalidation_count"] == 0
         assert body["summary"]["average_or_width"] == 2.0
         assert body["top_winners"][0]["date"] == "2026-06-05"
         assert body["top_losers"] == []

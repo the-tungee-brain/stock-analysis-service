@@ -32,7 +32,7 @@ RULE_ALIGNMENT_NOTES = {
     "vwap_calculation": "Aligned to live plan intent without lookahead: VWAP is calculated from regular-session candles available before 10:00 ET and then held fixed as the plan stop/control level.",
     "stop_logic": "Aligned with live day-trade plan: VWAP control level is the stop for both long and short setups.",
     "target_logic": "Level math is aligned with live replay: target 1 is one opening-range width from trigger and target 2 is two widths from trigger. Backtest exits at target 1 for a single conservative P/L row; live replay may continue the educational story toward target 2.",
-    "invalidation_logic": "Aligned with live replay: long invalidates on close back below OR high; short invalidates on close back above OR low.",
+    "invalidation_logic": "Intentional backtest confirmation layer: hard stops and targets remain immediate, but opening-range invalidation starts after the entry candle and requires consecutive closes back inside the range. Default is 2 closes below OR high for longs or above OR low for shorts; live replay may still record single-candle story milestones.",
     "close_exit_rule": "Intentional backtest-only addition: live replay records story milestones, while backtest marks any open trade to market on the final regular-session candle to produce daily P/L.",
     "timezone": "Aligned: all sessions and trading dates are interpreted in America/New_York.",
 }
@@ -105,11 +105,14 @@ class DayTradeBacktestService:
         start: date,
         end: date,
         risk_per_trade: float,
+        invalidation_confirmation_closes: int = 2,
     ) -> DayTradeBacktestResponse:
         if end < start:
             raise ValueError("end must be on or after start")
         if risk_per_trade <= 0:
             raise ValueError("risk_per_trade must be positive")
+        if invalidation_confirmation_closes <= 0:
+            raise ValueError("invalidation_confirmation_closes must be positive")
 
         symbol_upper = symbol.strip().upper()
         availability = intraday_provider_availability()
@@ -152,6 +155,7 @@ class DayTradeBacktestService:
             symbol=symbol_upper,
             candles=candles,
             risk_per_trade=risk_per_trade,
+            invalidation_confirmation_closes=invalidation_confirmation_closes,
         )
         return DayTradeBacktestResponse(
             symbol=symbol_upper,
@@ -161,6 +165,7 @@ class DayTradeBacktestService:
             available_end_date=availability.available_end_date,
             provider_limit_reason=availability.provider_limit_reason,
             risk_per_trade=risk_per_trade,
+            invalidation_confirmation_closes=invalidation_confirmation_closes,
             rows=rows,
             summary=summarize_day_trade_backtest(rows),
             top_winners=top_day_trade_winners(rows),
@@ -173,6 +178,7 @@ def simulate_day_trade_backtest(
     symbol: str,
     candles: list[IntradayBacktestCandle],
     risk_per_trade: float,
+    invalidation_confirmation_closes: int = 2,
 ) -> list[DayTradeBacktestRow]:
     rows: list[DayTradeBacktestRow] = []
     for trading_day, day_candles in _group_by_market_date(candles).items():
@@ -182,6 +188,7 @@ def simulate_day_trade_backtest(
                 trading_day=trading_day,
                 candles=day_candles,
                 risk_per_trade=risk_per_trade,
+                invalidation_confirmation_closes=invalidation_confirmation_closes,
             )
         )
     return sorted(rows, key=lambda row: row.date)
@@ -220,6 +227,10 @@ def summarize_day_trade_backtest(
         target_1_hit_pct=_target_1_hit_rate(trades),
         target_2_hit_pct=_exit_rate(trades, "target_2_hit"),
         close_exit_pct=_exit_rate(trades, "close_exit"),
+        invalidation_pct=_exit_rate(trades, "invalidated"),
+        same_candle_invalidation_count=sum(
+            1 for row in trades if row.entry_candle_closed_inside_or
+        ),
         average_stop_distance=_average(stop_distances),
         average_or_width=_average(or_widths),
         average_hold_minutes=_average(hold_minutes),
@@ -315,6 +326,7 @@ def _simulate_day(
     trading_day: date,
     candles: list[IntradayBacktestCandle],
     risk_per_trade: float,
+    invalidation_confirmation_closes: int,
 ) -> DayTradeBacktestRow:
     candles = sorted(candles, key=lambda candle: candle.timestamp)
     levels = _opening_range_levels(candles)
@@ -364,8 +376,15 @@ def _simulate_day(
     r_multiple = 0.0
     mfe = 0.0
     mae = 0.0
+    consecutive_inside_closes = 0
+    entry_index = candles.index(entry)
+    entry_candle_closed_inside_or = _closed_back_inside_range(
+        direction=direction,
+        candle=entry,
+        levels=levels,
+    )
 
-    for candle in candles[candles.index(entry) :]:
+    for index, candle in enumerate(candles[entry_index:], start=entry_index):
         favorable = (
             (candle.high - entry_price) / (entry_price - stop_price)
             if direction == "long"
@@ -382,10 +401,10 @@ def _simulate_day(
         stop_hit = candle.low <= stop_price if direction == "long" else candle.high >= stop_price
         target_2_hit = candle.high >= target_2 if direction == "long" else candle.low <= target_2
         target_1_hit = candle.high >= target_1 if direction == "long" else candle.low <= target_1
-        invalidated = (
-            candle.close < levels.opening_range_high
-            if direction == "long"
-            else candle.close > levels.opening_range_low
+        closed_back_inside = _closed_back_inside_range(
+            direction=direction,
+            candle=candle,
+            levels=levels,
         )
 
         exit_candle = candle
@@ -410,12 +429,17 @@ def _simulate_day(
             target_reason = "target_1_hit_one_opening_range_width"
             r_multiple = 1.0
             break
-        if invalidated:
-            exit_price = candle.close
-            outcome = "invalidated"
-            exit_reason = "invalidated"
-            r_multiple = _r_multiple(direction, entry_price, stop_price, exit_price)
-            break
+        if index > entry_index:
+            if closed_back_inside:
+                consecutive_inside_closes += 1
+            else:
+                consecutive_inside_closes = 0
+            if consecutive_inside_closes >= invalidation_confirmation_closes:
+                exit_price = candle.close
+                outcome = "invalidated"
+                exit_reason = "invalidated"
+                r_multiple = _r_multiple(direction, entry_price, stop_price, exit_price)
+                break
 
     else:
         exit_candle = candles[-1]
@@ -453,6 +477,7 @@ def _simulate_day(
         stop_reason=stop_reason,
         target_reason=target_reason,
         hold_minutes=round(hold_minutes, 2),
+        entry_candle_closed_inside_or=entry_candle_closed_inside_or,
         outcome=outcome,
         r_achieved=rounded_r,
         r_multiple=rounded_r,
@@ -571,6 +596,19 @@ def _direction_from_open(
     long_distance = abs(levels.long_trigger - candle.open)
     short_distance = abs(candle.open - levels.short_trigger)
     return "long" if long_distance <= short_distance else "short"
+
+
+def _closed_back_inside_range(
+    *,
+    direction: DayTradeSetupDirection,
+    candle: IntradayBacktestCandle,
+    levels: _DayLevels,
+) -> bool:
+    if direction == "long":
+        return candle.close < levels.opening_range_high
+    if direction == "short":
+        return candle.close > levels.opening_range_low
+    return False
 
 
 def _r_multiple(
