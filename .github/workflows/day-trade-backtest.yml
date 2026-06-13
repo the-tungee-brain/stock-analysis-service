@@ -59,15 +59,16 @@ jobs:
       - name: Run Day Trade backtest
         run: |
           set -euo pipefail
+          safe_symbol="$(printf '%s' "$SYMBOL" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9._-' '-')"
+          artifact="artifacts/day-trade-backtest-${safe_symbol}-${START_DATE}-${END_DATE}.json"
+
           python scripts/run_day_trade_backtest.py \
             --symbol "$SYMBOL" \
             --start "$START_DATE" \
             --end "$END_DATE" \
-            --risk-per-trade "$RISK_PER_TRADE"
+            --risk-per-trade "$RISK_PER_TRADE" \
+            --output "$artifact"
 
-          safe_symbol="$(printf '%s' "$SYMBOL" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9._-' '-')"
-          artifact="artifacts/day-trade-backtest-${safe_symbol}-${START_DATE}-${END_DATE}.json"
-          cp artifacts/day_trade_backtest.json "$artifact"
           echo "BACKTEST_ARTIFACT=$artifact" >> "$GITHUB_ENV"
 
       - name: Upload daily rows artifact

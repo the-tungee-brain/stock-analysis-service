@@ -14,7 +14,9 @@ from app.dependencies.service_dependencies import (
     get_pattern_loaded_model,
     get_research_events_service,
 )
+from app.builders.intraday_trading_bias_engine import evaluate_intraday_trading_bias
 from app.main import app
+from app.services import intraday_trading_bias_service as intraday_service_module
 from app.services.pattern_analysis_service import PatternAnalysisSnapshot
 from tests.test_symbol_intelligence_route import (
     _pattern_intelligence_payload,
@@ -149,5 +151,69 @@ def test_intraday_trading_bias_route_missing_market_bars_does_not_fail():
         payload = response.json()
         assert "SPY/QQQ intraday market bars unavailable" in payload["dataGaps"]
         assert payload["alignment"]["market"] == "mixed"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_intraday_trading_bias_route_supports_core_etfs_without_company_metadata(
+    monkeypatch,
+):
+    fake_adapter = _FakeYFinanceAdapter()
+    pattern_analysis_service = MagicMock()
+    pattern_analysis_service.get_or_build.side_effect = RuntimeError(
+        "company metadata unavailable"
+    )
+    research_events_service = MagicMock()
+    research_events_service.get_events.side_effect = RuntimeError(
+        "events unavailable"
+    )
+
+    def evaluate_with_fresh_now(inputs):
+        return evaluate_intraday_trading_bias(
+            type(inputs)(
+                symbol=inputs.symbol,
+                bars=inputs.bars,
+                market_bars=inputs.market_bars,
+                support=inputs.support,
+                resistance=inputs.resistance,
+                catalyst=inputs.catalyst,
+                data_gaps=inputs.data_gaps,
+                warnings=inputs.warnings,
+                now=datetime(2026, 6, 5, 10, 15, tzinfo=ET),
+            )
+        )
+
+    monkeypatch.setattr(
+        intraday_service_module,
+        "evaluate_intraday_trading_bias",
+        evaluate_with_fresh_now,
+    )
+
+    app.dependency_overrides[get_current_user] = _auth_user
+    app.dependency_overrides[get_current_user_id] = lambda: "user-1"
+    app.dependency_overrides[get_yfinance_adapter] = lambda: fake_adapter
+    app.dependency_overrides[get_pattern_analysis_service] = (
+        lambda: pattern_analysis_service
+    )
+    app.dependency_overrides[get_pattern_loaded_model] = lambda: MagicMock()
+    app.dependency_overrides[get_research_events_service] = (
+        lambda: research_events_service
+    )
+
+    client = TestClient(app)
+    try:
+        for symbol in ("SPY", "QQQ", "IWM", "DIA"):
+            response = client.get(
+                f"/api/v1/research/intraday-trading-bias?symbol={symbol}"
+            )
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["horizon"] == "Intraday"
+            assert payload["provider"] == "yfinance"
+            assert payload["levels"]["openRangeHigh"] is not None
+            assert payload["levels"]["openRangeLow"] is not None
+            assert payload["levels"]["vwap"] is not None
+            assert "Daily support/resistance unavailable" in payload["dataGaps"]
+            assert (symbol, "5d", "5m", True) in fake_adapter.calls
     finally:
         app.dependency_overrides.clear()

@@ -251,6 +251,42 @@ def test_completed_missed_move_is_persisted(monkeypatch) -> None:
     ]
 
 
+def test_etf_day_trade_replay_and_missed_move_generation(monkeypatch) -> None:
+    service, store = _service(
+        monkeypatch,
+        _frame(
+            [
+                (datetime(2026, 6, 5, 10, 5, tzinfo=ET), 210.0, 210.5, 209.8, 210.4),
+                (datetime(2026, 6, 5, 10, 10, tzinfo=ET), 210.5, 214.7, 210.4, 214.6),
+            ]
+        ),
+    )
+    service.now = datetime(2026, 6, 5, 16, 5, tzinfo=ET)
+
+    for symbol in ("SPY", "QQQ", "IWM", "DIA"):
+        refresh = service.refresh(
+            symbol=symbol,
+            workflow="day_trade",
+            event_date=SESSION_DATE,
+        )
+        replay = service.get_replay(
+            symbol=symbol,
+            workflow="day_trade",
+            event_date=SESSION_DATE,
+        )
+
+        assert refresh.plan_created is True
+        assert replay.symbol == symbol
+        assert replay.events
+        assert [event.event_type for event in replay.events] == [
+            "long_trigger_activated",
+            "target_1_hit",
+        ]
+
+    assert [move.symbol for move in store.missed_moves] == ["SPY", "QQQ", "IWM", "DIA"]
+    assert all(move.outcome == "target_hit" for move in store.missed_moves)
+
+
 def test_missed_moves_today_range_uses_eastern_trading_date() -> None:
     store = InMemoryTradeReplayStore()
     store.save_missed_moves(
