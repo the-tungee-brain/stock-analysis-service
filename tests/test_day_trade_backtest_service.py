@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.auth.dependencies import get_current_user
 from app.dependencies.adapter_dependencies import get_yfinance_adapter
 from app.main import app
+from app.models.day_trade_backtest_models import DayTradeBacktestFailedSymbol
 from app.services.day_trade_backtest_service import (
     DayTradeBacktestService,
     DayTradeBacktestDataError,
@@ -24,6 +25,7 @@ from app.services.day_trade_backtest_service import (
     top_day_trade_losers,
     top_day_trade_winners,
 )
+from scripts.run_day_trade_backtest import _parse_symbols
 from app.services.trade_replay_service import (
     ReplayBar,
     TradePlanRecord,
@@ -98,6 +100,11 @@ def _frame(candles: list[IntradayBacktestCandle]) -> pd.DataFrame:
         },
         index=pd.DatetimeIndex([candle.timestamp for candle in candles]),
     )
+
+
+def test_run_day_trade_backtest_parses_comma_separated_symbols() -> None:
+    assert _parse_symbols(["NVDA,AAPL,MSFT"]) == ["NVDA", "AAPL", "MSFT"]
+    assert _parse_symbols([" nvda, aapl ", "msft"]) == ["NVDA", "AAPL", "MSFT"]
 
 
 def _opening_range(day: date) -> list[IntradayBacktestCandle]:
@@ -330,6 +337,54 @@ def test_day_trade_backtest_short_close_confirmed_breakout_filter() -> None:
     assert rows[0].outcome == "no_trade"
 
 
+def test_day_trade_backtest_direction_modes_filter_entries() -> None:
+    long_day = date(2026, 6, 8)
+    short_day = date(2026, 6, 9)
+    candles = [
+        *_opening_range(long_day),
+        _candle(long_day, 10, 0, 101.0, 101.5, 100.8, 101.2),
+        _candle(long_day, 10, 5, 101.2, 103.5, 101.1, 103.1),
+        *_opening_range(short_day),
+        _candle(short_day, 10, 0, 99.0, 99.2, 98.4, 98.8),
+        _candle(short_day, 10, 5, 98.8, 98.9, 96.4, 96.8),
+    ]
+
+    long_rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        entry_filters=DayTradeEntryFilterConfig(
+            direction_mode="long_only",
+            require_close_confirmed_breakout=True,
+        ),
+        candles=candles,
+    )
+    short_rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        entry_filters=DayTradeEntryFilterConfig(
+            direction_mode="short_only",
+            require_close_confirmed_breakout=True,
+        ),
+        candles=candles,
+    )
+    both_rows = simulate_day_trade_backtest(
+        symbol="NVDA",
+        risk_per_trade=100,
+        entry_filters=DayTradeEntryFilterConfig(
+            direction_mode="long_and_short",
+            require_close_confirmed_breakout=True,
+        ),
+        candles=candles,
+    )
+
+    assert [row.setup_direction for row in long_rows] == ["long", "none"]
+    assert [row.setup_direction for row in short_rows] == ["none", "short"]
+    assert [row.setup_direction for row in both_rows] == ["long", "short"]
+    assert summarize_day_trade_backtest(long_rows).total_trades == 1
+    assert summarize_day_trade_backtest(short_rows).total_trades == 1
+    assert summarize_day_trade_backtest(both_rows).total_trades == 2
+
+
 def test_day_trade_backtest_long_vwap_alignment_filter() -> None:
     day = date(2026, 6, 8)
     rows = simulate_day_trade_backtest(
@@ -468,6 +523,14 @@ def test_day_trade_backtest_multi_symbol_aggregation() -> None:
     report = build_multi_symbol_backtest_report(
         candidate_rows_by_symbol=candidate_rows,
         baseline_rows_by_symbol=baseline_rows,
+        direction_rows_by_mode={
+            "long_only": {"NVDA": candidate_rows["NVDA"], "AAPL": []},
+            "short_only": {"NVDA": [], "AAPL": candidate_rows["AAPL"]},
+            "long_and_short": candidate_rows,
+        },
+        failed_symbols=[
+            DayTradeBacktestFailedSymbol(symbol="MSFT", reason="No market data")
+        ],
     )
 
     assert report.candidate_scenario == "close-confirmed breakout"
@@ -487,6 +550,22 @@ def test_day_trade_backtest_multi_symbol_aggregation() -> None:
     assert report.portfolio_summary.best_symbol == "NVDA"
     assert report.portfolio_summary.worst_symbol == "AAPL"
     assert len(report.baseline_comparison) == 2
+    assert [row.direction_mode for row in report.direction_comparison] == [
+        "long_only",
+        "short_only",
+        "long_and_short",
+    ]
+    assert [row.label for row in report.direction_comparison] == [
+        "Long only",
+        "Short only",
+        "Long + Short",
+    ]
+    assert report.direction_comparison[0].total_trades == 1
+    assert report.direction_comparison[1].total_trades == 1
+    assert report.direction_comparison[2].total_trades == 2
+    assert report.direction_comparison[2].max_drawdown == -1.0
+    assert report.failed_symbols[0].symbol == "MSFT"
+    assert report.failed_symbols[0].reason == "No market data"
 
 
 def test_day_trade_backtest_no_trade_when_opening_range_never_breaks() -> None:
@@ -794,6 +873,7 @@ def test_day_trade_backtest_route_returns_frontend_contract() -> None:
                 "min_or_width_pct": "0.01",
                 "max_or_width_pct": "0.035",
                 "no_trade_after_noon": "true",
+                "direction_mode": "long_only",
             },
         )
         assert response.status_code == 200
@@ -802,6 +882,7 @@ def test_day_trade_backtest_route_returns_frontend_contract() -> None:
         assert body["risk_per_trade"] == 100
         assert body["invalidation_confirmation_closes"] == 2
         assert body["entry_filters"] == {
+            "direction_mode": "long_only",
             "require_close_confirmed_breakout": True,
             "require_vwap_alignment": True,
             "min_or_width_pct": 0.01,

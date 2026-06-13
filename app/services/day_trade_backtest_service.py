@@ -14,6 +14,8 @@ from app.builders.intraday_trading_bias_engine import (
 )
 from app.models.day_trade_backtest_models import (
     DayTradeBacktestComparisonRow,
+    DayTradeBacktestDirectionComparisonRow,
+    DayTradeBacktestFailedSymbol,
     DayTradeBacktestEntryFilters,
     DayTradeBacktestMultiSymbolReport,
     DayTradeBacktestPortfolioSummary,
@@ -21,6 +23,7 @@ from app.models.day_trade_backtest_models import (
     DayTradeBacktestRow,
     DayTradeBacktestSummary,
     DayTradeBacktestSymbolAggregateRow,
+    DayTradeDirectionMode,
     DayTradeSetupDirection,
 )
 
@@ -75,6 +78,7 @@ class IntradayProviderAvailability:
 
 @dataclass(frozen=True)
 class DayTradeEntryFilterConfig:
+    direction_mode: DayTradeDirectionMode = "long_and_short"
     require_close_confirmed_breakout: bool = False
     require_vwap_alignment: bool = False
     min_or_width_pct: float | None = None
@@ -83,6 +87,7 @@ class DayTradeEntryFilterConfig:
 
     def to_model(self) -> DayTradeBacktestEntryFilters:
         return DayTradeBacktestEntryFilters(
+            direction_mode=self.direction_mode,
             require_close_confirmed_breakout=self.require_close_confirmed_breakout,
             require_vwap_alignment=self.require_vwap_alignment,
             min_or_width_pct=self.min_or_width_pct,
@@ -97,6 +102,17 @@ CLOSE_CONFIRMED_ENTRY_FILTERS = DayTradeEntryFilterConfig(
     min_or_width_pct=None,
     max_or_width_pct=None,
     no_trade_after_noon=False,
+)
+
+DIRECTION_MODE_LABELS: dict[DayTradeDirectionMode, str] = {
+    "long_only": "Long only",
+    "short_only": "Short only",
+    "long_and_short": "Long + Short",
+}
+DIRECTION_MODE_ORDER: tuple[DayTradeDirectionMode, ...] = (
+    "long_only",
+    "short_only",
+    "long_and_short",
 )
 
 
@@ -147,6 +163,7 @@ class DayTradeBacktestService:
         min_or_width_pct: float | None = None,
         max_or_width_pct: float | None = None,
         no_trade_after_noon: bool = False,
+        direction_mode: DayTradeDirectionMode = "long_and_short",
     ) -> DayTradeBacktestResponse:
         if end < start:
             raise ValueError("end must be on or after start")
@@ -155,6 +172,7 @@ class DayTradeBacktestService:
         if invalidation_confirmation_closes <= 0:
             raise ValueError("invalidation_confirmation_closes must be positive")
         entry_filters = DayTradeEntryFilterConfig(
+            direction_mode=direction_mode,
             require_close_confirmed_breakout=require_close_confirmed_breakout,
             require_vwap_alignment=require_vwap_alignment,
             min_or_width_pct=min_or_width_pct,
@@ -339,6 +357,10 @@ def build_multi_symbol_backtest_report(
     *,
     candidate_rows_by_symbol: dict[str, list[DayTradeBacktestRow]],
     baseline_rows_by_symbol: dict[str, list[DayTradeBacktestRow]] | None = None,
+    direction_rows_by_mode: (
+        dict[DayTradeDirectionMode, dict[str, list[DayTradeBacktestRow]]] | None
+    ) = None,
+    failed_symbols: list[DayTradeBacktestFailedSymbol] | None = None,
     candidate_filters: DayTradeEntryFilterConfig = CLOSE_CONFIRMED_ENTRY_FILTERS,
 ) -> DayTradeBacktestMultiSymbolReport:
     symbols = [symbol.strip().upper() for symbol in candidate_rows_by_symbol]
@@ -351,6 +373,7 @@ def build_multi_symbol_backtest_report(
         build_symbol_aggregate_row(symbol, baseline_source[symbol])
         for symbol in baseline_source
     ]
+    direction_source = direction_rows_by_mode or {}
     return DayTradeBacktestMultiSymbolReport(
         candidate_scenario=PRIMARY_CANDIDATE_SCENARIO,  # type: ignore[arg-type]
         entry_filters=candidate_filters.to_model(),
@@ -358,6 +381,34 @@ def build_multi_symbol_backtest_report(
         aggregate_comparison=aggregate,
         portfolio_summary=_portfolio_summary(candidate_rows_by_symbol, aggregate),
         baseline_comparison=baseline,
+        direction_comparison=[
+            _direction_comparison_row(mode, rows_by_symbol)
+            for mode, rows_by_symbol in direction_source.items()
+        ],
+        failed_symbols=failed_symbols or [],
+    )
+
+
+def _direction_comparison_row(
+    mode: DayTradeDirectionMode,
+    rows_by_symbol: dict[str, list[DayTradeBacktestRow]],
+) -> DayTradeBacktestDirectionComparisonRow:
+    rows = sorted(
+        [row for symbol_rows in rows_by_symbol.values() for row in symbol_rows],
+        key=lambda row: (row.date, row.symbol, row.entry_time or datetime.min),
+    )
+    summary = summarize_day_trade_backtest(rows)
+    return DayTradeBacktestDirectionComparisonRow(
+        direction_mode=mode,
+        label=DIRECTION_MODE_LABELS[mode],
+        total_trades=summary.total_trades,
+        win_rate=summary.win_rate,
+        average_r=summary.average_r,
+        total_r=summary.total_r,
+        profit_factor=summary.profit_factor,
+        max_drawdown=summary.max_drawdown,
+        target_1_hit_pct=summary.target_1_hit_pct,
+        invalidation_pct=summary.invalidation_pct,
     )
 
 
@@ -517,7 +568,9 @@ def _validate_entry_filters(filters: DayTradeEntryFilterConfig) -> None:
         and filters.max_or_width_pct is not None
         and filters.max_or_width_pct < filters.min_or_width_pct
     ):
-        raise ValueError("max_or_width_pct must be greater than or equal to min_or_width_pct")
+        raise ValueError(
+            "max_or_width_pct must be greater than or equal to min_or_width_pct"
+        )
 
 
 def market_date(value: datetime) -> date:
@@ -554,19 +607,27 @@ def _simulate_day(
             continue
         if entry_filters.no_trade_after_noon and local_time >= NOON_ET:
             break
-        long_hit = candle.high >= levels.long_trigger and _entry_filters_pass(
-            direction="long",
-            candle=candle,
-            levels=levels,
-            plan_vwap=plan_vwap,
-            filters=entry_filters,
+        long_hit = (
+            _direction_allowed("long", entry_filters)
+            and candle.high >= levels.long_trigger
+            and _entry_filters_pass(
+                direction="long",
+                candle=candle,
+                levels=levels,
+                plan_vwap=plan_vwap,
+                filters=entry_filters,
+            )
         )
-        short_hit = candle.low <= levels.short_trigger and _entry_filters_pass(
-            direction="short",
-            candle=candle,
-            levels=levels,
-            plan_vwap=plan_vwap,
-            filters=entry_filters,
+        short_hit = (
+            _direction_allowed("short", entry_filters)
+            and candle.low <= levels.short_trigger
+            and _entry_filters_pass(
+                direction="short",
+                candle=candle,
+                levels=levels,
+                plan_vwap=plan_vwap,
+                filters=entry_filters,
+            )
         )
         if long_hit and short_hit:
             direction = _direction_from_open(candle, levels)
@@ -841,6 +902,17 @@ def _entry_filters_pass(
             return False
         if direction == "short" and candle.close >= plan_vwap:
             return False
+    return True
+
+
+def _direction_allowed(
+    direction: DayTradeSetupDirection,
+    filters: DayTradeEntryFilterConfig,
+) -> bool:
+    if filters.direction_mode == "long_only":
+        return direction == "long"
+    if filters.direction_mode == "short_only":
+        return direction == "short"
     return True
 
 

@@ -3,10 +3,10 @@ name: Day Trade backtest
 on:
   workflow_dispatch:
     inputs:
-      symbol:
-        description: "Ticker symbol"
+      symbols:
+        description: "Ticker symbols, comma-separated"
         required: true
-        default: "NVDA"
+        default: "NVDA,AAPL,MSFT,AMZN,TSLA,SPY,QQQ"
         type: string
       start:
         description: "Start date (YYYY-MM-DD)"
@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      SYMBOL: ${{ inputs.symbol }}
+      SYMBOLS: ${{ inputs.symbols }}
       START_DATE: ${{ inputs.start }}
       END_DATE: ${{ inputs.end }}
       RISK_PER_TRADE: ${{ inputs.risk_per_trade }}
@@ -59,11 +59,11 @@ jobs:
       - name: Run Day Trade backtest
         run: |
           set -euo pipefail
-          safe_symbol="$(printf '%s' "$SYMBOL" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9._-' '-')"
-          artifact="artifacts/day-trade-backtest-${safe_symbol}-${START_DATE}-${END_DATE}.json"
+          safe_symbols="$(printf '%s' "$SYMBOLS" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9._-' '-')"
+          artifact="artifacts/day-trade-backtest-${safe_symbols}-${START_DATE}-${END_DATE}.json"
 
           python scripts/run_day_trade_backtest.py \
-            --symbol "$SYMBOL" \
+            --symbols "$SYMBOLS" \
             --start "$START_DATE" \
             --end "$END_DATE" \
             --risk-per-trade "$RISK_PER_TRADE" \
@@ -74,5 +74,5 @@ jobs:
       - name: Upload daily rows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: day-trade-backtest-${{ inputs.symbol }}-${{ inputs.start }}-${{ inputs.end }}
+          name: day-trade-backtest-${{ inputs.symbols }}-${{ inputs.start }}-${{ inputs.end }}
           path: ${{ env.BACKTEST_ARTIFACT }}

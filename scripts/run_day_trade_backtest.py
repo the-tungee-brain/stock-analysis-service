@@ -15,14 +15,17 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.adapters.market.yfinance_adapter import YFinanceAdapter  # noqa: E402
+from app.models.day_trade_backtest_models import DayTradeBacktestFailedSymbol  # noqa: E402
 from app.services.day_trade_backtest_service import (  # noqa: E402
     CLOSE_CONFIRMED_ENTRY_FILTERS,
+    DIRECTION_MODE_ORDER,
+    DayTradeBacktestDataError,
     DayTradeBacktestService,
     build_multi_symbol_backtest_report,
     intraday_provider_availability,
 )
 
-DEFAULT_SYMBOLS = ["NVDA", "AAPL", "MSFT", "AMZN", "TSLA"]
+DEFAULT_SYMBOLS = ["NVDA", "AAPL", "MSFT", "AMZN", "TSLA", "SPY", "QQQ"]
 DEFAULT_OUTPUT = Path("artifacts/day_trade_backtest_multi_symbol.json")
 
 
@@ -52,7 +55,11 @@ def _parse_symbols(values: Sequence[str] | None) -> list[str]:
         return DEFAULT_SYMBOLS
     symbols: list[str] = []
     for value in values:
-        symbols.extend(part.strip().upper() for part in value.split(",") if part.strip())
+        symbols.extend(
+            part.strip().upper()
+            for part in value.split(",")
+            if part.strip()
+        )
     return symbols or DEFAULT_SYMBOLS
 
 
@@ -100,35 +107,56 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    symbols = [args.single_symbol.upper()] if args.single_symbol else _parse_symbols(args.symbols)
+    symbols = (
+        _parse_symbols([args.single_symbol])
+        if args.single_symbol
+        else _parse_symbols(args.symbols)
+    )
     service = DayTradeBacktestService(YFinanceAdapter())
     candidate_results = {}
     baseline_results = {}
+    direction_results = {mode: {} for mode in DIRECTION_MODE_ORDER}
+    failed_symbols: list[DayTradeBacktestFailedSymbol] = []
     for symbol in symbols:
-        candidate_results[symbol] = service.run_backtest(
-            symbol=symbol,
-            start=args.start,
-            end=args.end,
-            risk_per_trade=args.risk_per_trade,
-            require_close_confirmed_breakout=True,
-            require_vwap_alignment=False,
-            min_or_width_pct=None,
-            max_or_width_pct=None,
-            no_trade_after_noon=False,
-            invalidation_confirmation_closes=2,
-        )
-        baseline_results[symbol] = service.run_backtest(
-            symbol=symbol,
-            start=args.start,
-            end=args.end,
-            risk_per_trade=args.risk_per_trade,
-            require_close_confirmed_breakout=False,
-            require_vwap_alignment=False,
-            min_or_width_pct=None,
-            max_or_width_pct=None,
-            no_trade_after_noon=False,
-            invalidation_confirmation_closes=2,
-        )
+        try:
+            symbol_direction_results = {}
+            for mode in DIRECTION_MODE_ORDER:
+                symbol_direction_results[mode] = service.run_backtest(
+                    symbol=symbol,
+                    start=args.start,
+                    end=args.end,
+                    risk_per_trade=args.risk_per_trade,
+                    require_close_confirmed_breakout=True,
+                    require_vwap_alignment=False,
+                    min_or_width_pct=None,
+                    max_or_width_pct=None,
+                    no_trade_after_noon=False,
+                    invalidation_confirmation_closes=2,
+                    direction_mode=mode,
+                )
+            baseline_result = service.run_backtest(
+                symbol=symbol,
+                start=args.start,
+                end=args.end,
+                risk_per_trade=args.risk_per_trade,
+                require_close_confirmed_breakout=False,
+                require_vwap_alignment=False,
+                min_or_width_pct=None,
+                max_or_width_pct=None,
+                no_trade_after_noon=False,
+                invalidation_confirmation_closes=2,
+            )
+        except DayTradeBacktestDataError as exc:
+            failed_symbols.append(
+                DayTradeBacktestFailedSymbol(symbol=symbol, reason=str(exc))
+            )
+            print(f"Skipping {symbol}: {exc}", file=sys.stderr)
+            continue
+
+        for mode, result in symbol_direction_results.items():
+            direction_results[mode][symbol] = result
+        candidate_results[symbol] = symbol_direction_results["long_and_short"]
+        baseline_results[symbol] = baseline_result
 
     report = build_multi_symbol_backtest_report(
         candidate_rows_by_symbol={
@@ -137,6 +165,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         baseline_rows_by_symbol={
             symbol: result.rows for symbol, result in baseline_results.items()
         },
+        direction_rows_by_mode={
+            mode: {
+                symbol: result.rows for symbol, result in mode_results.items()
+            }
+            for mode, mode_results in direction_results.items()
+        },
+        failed_symbols=failed_symbols,
         candidate_filters=CLOSE_CONFIRMED_ENTRY_FILTERS,
     )
     payload = {
@@ -148,6 +183,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             symbol: result.model_dump(mode="json", by_alias=True)
             for symbol, result in candidate_results.items()
         },
+        "direction_results": {
+            direction_mode: {
+                symbol: result.model_dump(mode="json", by_alias=True)
+                for symbol, result in mode_results.items()
+            }
+            for direction_mode, mode_results in direction_results.items()
+        },
+        "failed_symbols": [
+            failed.model_dump(mode="json", by_alias=True)
+            for failed in failed_symbols
+        ],
     }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -162,6 +208,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"Symbols: {', '.join(report.symbols)}")
     print(f"Period: {args.start} to {args.end}")
     print(f"Risk per trade: ${args.risk_per_trade:.2f}")
+    if failed_symbols:
+        failed_label = ", ".join(failed.symbol for failed in failed_symbols)
+        print(f"Failed symbols: {failed_label}")
     print(f"Total trades: {summary.total_trades}")
     print(f"Avg R: {_format_number(summary.average_r)}")
     print(f"Total R: {_format_number(summary.total_r)}")
@@ -176,6 +225,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{row.symbol}: trades={row.total_trades} win={_format_rate(row.win_rate)} "
             f"avgR={_format_number(row.average_r)} totalR={_format_number(row.total_r)} "
             f"PF={_format_number(row.profit_factor)} DD={_format_number(row.max_drawdown)}"
+        )
+    print("")
+    print("Direction Mode")
+    print("--------------")
+    for row in report.direction_comparison:
+        print(row.label)
+        print(
+            f"  trades={row.total_trades} win={_format_rate(row.win_rate)} "
+            f"avgR={_format_number(row.average_r)} totalR={_format_number(row.total_r)} "
+            f"PF={_format_number(row.profit_factor)} DD={_format_number(row.max_drawdown)} "
+            f"target1={_format_rate(row.target_1_hit_pct)} "
+            f"invalidation={_format_rate(row.invalidation_pct)}"
         )
     print(f"JSON written: {args.output}")
     return 0

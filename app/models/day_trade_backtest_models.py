@@ -14,6 +14,7 @@ DayTradeBacktestOutcome = Literal[
 ]
 
 DayTradeSetupDirection = Literal["long", "short", "none"]
+DayTradeDirectionMode = Literal["long_only", "short_only", "long_and_short"]
 DayTradeExitReason = Literal[
     "stop_hit",
     "target_1_hit",
@@ -130,6 +131,10 @@ class DayTradeBacktestSummary(BaseModel):
 class DayTradeBacktestEntryFilters(BaseModel):
     model_config = _MODEL_CONFIG
 
+    direction_mode: DayTradeDirectionMode = Field(
+        default="long_and_short",
+        serialization_alias="direction_mode",
+    )
     require_close_confirmed_breakout: bool = Field(
         default=False,
         serialization_alias="require_close_confirmed_breakout",
@@ -181,6 +186,28 @@ class DayTradeBacktestSymbolAggregateRow(BaseModel):
     stop_hit_pct: float = Field(serialization_alias="stop_hit_pct")
 
 
+class DayTradeBacktestDirectionComparisonRow(BaseModel):
+    model_config = _MODEL_CONFIG
+
+    direction_mode: DayTradeDirectionMode = Field(serialization_alias="direction_mode")
+    label: str
+    total_trades: int = Field(serialization_alias="total_trades")
+    win_rate: float = Field(serialization_alias="win_rate")
+    average_r: float = Field(serialization_alias="average_r")
+    total_r: float = Field(serialization_alias="total_r")
+    profit_factor: float | None = Field(serialization_alias="profit_factor")
+    max_drawdown: float = Field(serialization_alias="max_drawdown")
+    target_1_hit_pct: float = Field(serialization_alias="target_1_hit_pct")
+    invalidation_pct: float = Field(serialization_alias="invalidation_pct")
+
+
+class DayTradeBacktestFailedSymbol(BaseModel):
+    model_config = _MODEL_CONFIG
+
+    symbol: str
+    reason: str
+
+
 class DayTradeBacktestPortfolioSummary(BaseModel):
     model_config = _MODEL_CONFIG
 
@@ -211,6 +238,14 @@ class DayTradeBacktestMultiSymbolReport(BaseModel):
     )
     baseline_comparison: list[DayTradeBacktestSymbolAggregateRow] = Field(
         serialization_alias="baseline_comparison"
+    )
+    direction_comparison: list[DayTradeBacktestDirectionComparisonRow] = Field(
+        default_factory=list,
+        serialization_alias="direction_comparison",
+    )
+    failed_symbols: list[DayTradeBacktestFailedSymbol] = Field(
+        default_factory=list,
+        serialization_alias="failed_symbols",
     )
 
 

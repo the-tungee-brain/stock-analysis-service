@@ -7,7 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.dependencies.adapter_dependencies import get_yfinance_adapter
-from app.models.day_trade_backtest_models import DayTradeBacktestResponse
+from app.models.day_trade_backtest_models import (
+    DayTradeBacktestResponse,
+    DayTradeDirectionMode,
+)
 from app.services.day_trade_backtest_service import (
     DayTradeBacktestDataError,
     DayTradeBacktestService,
@@ -32,6 +35,7 @@ async def get_day_trade_backtest(
     min_or_width_pct: float | None = Query(None, ge=0),
     max_or_width_pct: float | None = Query(None, ge=0),
     no_trade_after_noon: bool = Query(False),
+    direction_mode: DayTradeDirectionMode = Query("long_and_short"),
     yfinance_adapter: YFinanceAdapter = Depends(get_yfinance_adapter),
 ) -> DayTradeBacktestResponse:
     service = DayTradeBacktestService(yfinance_adapter)
@@ -48,6 +52,7 @@ async def get_day_trade_backtest(
             min_or_width_pct=min_or_width_pct,
             max_or_width_pct=max_or_width_pct,
             no_trade_after_noon=no_trade_after_noon,
+            direction_mode=direction_mode,
         )
     except DayTradeBacktestDataError as exc:
         raise HTTPException(status_code=400, detail=exc.to_detail()) from exc
