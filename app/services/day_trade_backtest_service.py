@@ -26,6 +26,7 @@ from app.models.day_trade_backtest_models import (
     DayTradeDirectionMode,
     DayTradeSetupDirection,
 )
+from app.services.day_trade_direction import day_trade_direction_allowed
 
 REGULAR_CLOSE = time(16, 0)
 NOON_ET = time(12, 0)
@@ -952,11 +953,7 @@ def _direction_allowed(
     direction: DayTradeSetupDirection,
     filters: DayTradeEntryFilterConfig,
 ) -> bool:
-    if filters.direction_mode == "long_only":
-        return direction == "long"
-    if filters.direction_mode == "short_only":
-        return direction == "short"
-    return True
+    return day_trade_direction_allowed(direction, filters.direction_mode)
 
 
 def _or_width_filter_passes(

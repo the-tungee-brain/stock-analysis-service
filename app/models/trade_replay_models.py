@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.day_trade_backtest_models import DayTradeDirectionMode
+
 TradeReplayWorkflow = Literal["day_trade", "swing_trade"]
 TradeReplaySeverity = Literal["info", "important", "warning"]
 TradeReplayActionability = Literal["active", "missed", "invalidated"]
@@ -49,6 +51,10 @@ class TradeReplayResponse(BaseModel):
     symbol: str
     date: date
     workflow: TradeReplayWorkflow
+    direction_mode: DayTradeDirectionMode | None = Field(
+        default=None,
+        serialization_alias="direction_mode",
+    )
     source: TradeReplaySource = "delayed"
     source_freshness_label: str | None = Field(
         default=None,
@@ -99,6 +105,10 @@ class TradeReplayRefreshRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=12)
     workflow: TradeReplayWorkflow
     date: date
+    direction_mode: DayTradeDirectionMode | None = Field(
+        default=None,
+        serialization_alias="direction_mode",
+    )
 
 
 class TradeReplayRefreshResponse(BaseModel):
@@ -108,6 +118,10 @@ class TradeReplayRefreshResponse(BaseModel):
     symbol: str
     date: date
     workflow: TradeReplayWorkflow
+    direction_mode: DayTradeDirectionMode | None = Field(
+        default=None,
+        serialization_alias="direction_mode",
+    )
     plan_id: str | None = Field(default=None, serialization_alias="plan_id")
     plan_created: bool = Field(default=False, serialization_alias="plan_created")
     events_created: int = Field(default=0, serialization_alias="events_created")

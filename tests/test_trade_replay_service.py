@@ -599,6 +599,115 @@ def test_trade_replay_routes_match_frontend_contract(monkeypatch) -> None:
         app.dependency_overrides.clear()
 
 
+def test_day_trade_live_replay_long_only_returns_only_long_events(monkeypatch) -> None:
+    service, _store = _service(
+        monkeypatch,
+        _frame(
+            [
+                (datetime(2026, 6, 5, 10, 5, tzinfo=ET), 210.0, 210.5, 209.5, 210.4),
+                (datetime(2026, 6, 5, 10, 10, tzinfo=ET), 214.0, 215.0, 213.0, 214.8),
+                (datetime(2026, 6, 5, 10, 20, tzinfo=ET), 207.0, 207.5, 205.8, 206.0),
+                (datetime(2026, 6, 5, 10, 25, tzinfo=ET), 202.0, 203.0, 201.5, 202.0),
+            ]
+        ),
+    )
+
+    replay = service.get_replay(
+        symbol="NVDA",
+        workflow="day_trade",
+        event_date=SESSION_DATE,
+        direction_mode="long_only",
+    )
+
+    assert replay.direction_mode == "long_only"
+    assert [event.event_type for event in replay.events] == [
+        "long_trigger_activated",
+        "target_1_hit",
+    ]
+    assert all("short" not in event.dedupe_key for event in replay.events)
+
+
+def test_day_trade_live_replay_short_only_returns_only_short_events(monkeypatch) -> None:
+    service, _store = _service(
+        monkeypatch,
+        _frame(
+            [
+                (datetime(2026, 6, 5, 10, 5, tzinfo=ET), 210.0, 210.5, 209.5, 210.4),
+                (datetime(2026, 6, 5, 10, 10, tzinfo=ET), 214.0, 215.0, 213.0, 214.8),
+                (datetime(2026, 6, 5, 10, 20, tzinfo=ET), 207.0, 207.5, 205.8, 206.0),
+                (datetime(2026, 6, 5, 10, 25, tzinfo=ET), 202.0, 203.0, 201.5, 202.0),
+            ]
+        ),
+    )
+
+    replay = service.get_replay(
+        symbol="NVDA",
+        workflow="day_trade",
+        event_date=SESSION_DATE,
+        direction_mode="short_only",
+    )
+
+    assert replay.direction_mode == "short_only"
+    assert [event.event_type for event in replay.events] == [
+        "short_trigger_activated",
+        "target_1_hit",
+    ]
+    assert all("long" not in event.dedupe_key for event in replay.events)
+
+
+def test_day_trade_live_replay_long_and_short_can_evaluate_both_sides(monkeypatch) -> None:
+    service, _store = _service(
+        monkeypatch,
+        _frame(
+            [
+                (datetime(2026, 6, 5, 10, 5, tzinfo=ET), 210.0, 210.5, 209.5, 210.4),
+                (datetime(2026, 6, 5, 10, 10, tzinfo=ET), 214.0, 215.0, 213.0, 214.8),
+                (datetime(2026, 6, 5, 10, 20, tzinfo=ET), 207.0, 207.5, 205.8, 206.0),
+                (datetime(2026, 6, 5, 10, 25, tzinfo=ET), 202.0, 203.0, 201.5, 202.0),
+            ]
+        ),
+    )
+
+    replay = service.get_replay(
+        symbol="NVDA",
+        workflow="day_trade",
+        event_date=SESSION_DATE,
+        direction_mode="long_and_short",
+    )
+
+    assert replay.direction_mode == "long_and_short"
+    assert "long_trigger_activated" in [event.event_type for event in replay.events]
+    assert "short_trigger_activated" in [event.event_type for event in replay.events]
+    assert any("long" in event.dedupe_key for event in replay.events)
+    assert any("short" in event.dedupe_key for event in replay.events)
+
+
+def test_trade_replay_route_rejects_invalid_direction_mode(monkeypatch) -> None:
+    service, _store = _service(monkeypatch, _frame([]))
+
+    class _FakeUser:
+        identity_sub = "user-1"
+
+    app.dependency_overrides[get_current_user] = lambda: _FakeUser()
+    app.dependency_overrides[get_current_user_id] = lambda: "user-1"
+    app.dependency_overrides[get_trade_replay_service] = lambda: service
+    client = TestClient(app)
+    try:
+        response = client.get(
+            "/api/v1/research/trade-replay",
+            params={
+                "symbol": "NVDA",
+                "workflow": "day_trade",
+                "date": "2026-06-05",
+                "direction_mode": "sideways",
+            },
+        )
+        assert response.status_code == 400
+        assert "direction_mode must be one of" in response.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_swing_trade_entry_and_target_events_are_generated() -> None:
     levels = {
         "side": "Long",

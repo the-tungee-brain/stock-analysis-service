@@ -11,6 +11,7 @@ import pandas as pd
 
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.builders.intraday_trading_bias_engine import EASTERN
+from app.models.day_trade_backtest_models import DayTradeDirectionMode
 from app.models.trade_replay_models import (
     MissedMoveOutcome,
     MissedMoveSummaryRow,
@@ -23,12 +24,14 @@ from app.models.trade_replay_models import (
     TradeReplaySource,
     TradeReplayWorkflow,
 )
+from app.services.day_trade_direction import day_trade_direction_allowed
 from app.services.intraday_trading_bias_service import build_intraday_trading_bias
 from app.services.trader_playbook_service import build_trader_playbook
 from models.prediction_service import LoadedModel
 
 SOURCE_FRESHNESS_DELAYED = "Educational / delayed — not for live execution."
 TARGET_2_OFFSET_MICROSECONDS = 1
+DEFAULT_LIVE_DAY_TRADE_DIRECTION_MODE: DayTradeDirectionMode = "long_only"
 COMPLETED_MISSED_MOVE_OUTCOMES = {
     "target_1_hit",
     "target_2_hit",
@@ -252,6 +255,7 @@ class TradeReplayService:
         workflow: TradeReplayWorkflow,
         event_date: date,
         missed_move_id: str | None = None,
+        direction_mode: DayTradeDirectionMode = DEFAULT_LIVE_DAY_TRADE_DIRECTION_MODE,
     ) -> TradeReplayResponse:
         if missed_move_id:
             missed_move = self.store.get_missed_move(missed_move_id)
@@ -260,20 +264,67 @@ class TradeReplayService:
                     symbol=missed_move.symbol,
                     date=missed_move.event_date,
                     workflow=missed_move.workflow,
+                    direction_mode=direction_mode if workflow == "day_trade" else None,
                     source=missed_move.source,
                     source_freshness_label=missed_move.source_freshness_label,
-                    events=_sort_story_events(missed_move.replay_events),
+                    events=(
+                        _filter_events_for_direction(
+                            _sort_story_events(missed_move.replay_events),
+                            direction_mode,
+                        )
+                        if missed_move.workflow == "day_trade"
+                        else _sort_story_events(missed_move.replay_events)
+                    ),
                 )
             return TradeReplayResponse(
                 symbol=symbol.strip().upper(),
                 date=event_date,
                 workflow=workflow,
+                direction_mode=direction_mode if workflow == "day_trade" else None,
                 source="historical",
                 source_freshness_label=SOURCE_FRESHNESS_DELAYED,
                 events=[],
             )
 
         symbol_upper = symbol.strip().upper()
+        if workflow == "day_trade":
+            plan = self._build_day_trade_plan(
+                symbol_upper,
+                event_date,
+                direction_mode=direction_mode,
+            )
+            bars = self._load_bars(
+                symbol_upper,
+                workflow,
+                event_date,
+                plan.generated_at,
+            )
+            events = generate_replay_events(
+                plan,
+                bars,
+                direction_mode=direction_mode,
+            )
+            if not events and not bars:
+                events = _filter_events_for_direction(
+                    _sort_story_events(
+                        self.store.list_events(
+                            symbol=symbol_upper,
+                            workflow=workflow,
+                            event_date=event_date,
+                        )
+                    ),
+                    direction_mode,
+                )
+            return TradeReplayResponse(
+                symbol=symbol_upper,
+                date=event_date,
+                workflow=workflow,
+                direction_mode=direction_mode,
+                source=plan.source,
+                source_freshness_label=plan.source_freshness_label,
+                events=events,
+            )
+
         plan = self.store.latest_plan(
             symbol=symbol_upper,
             workflow=workflow,
@@ -289,6 +340,7 @@ class TradeReplayService:
             symbol=symbol_upper,
             date=event_date,
             workflow=workflow,
+            direction_mode=None,
             source=plan.source if plan is not None else "delayed",
             source_freshness_label=(
                 plan.source_freshness_label
@@ -304,9 +356,15 @@ class TradeReplayService:
         symbol: str,
         workflow: TradeReplayWorkflow,
         event_date: date,
+        direction_mode: DayTradeDirectionMode = DEFAULT_LIVE_DAY_TRADE_DIRECTION_MODE,
     ) -> TradeReplayRefreshResponse:
         symbol_upper = symbol.strip().upper()
-        plan = self._build_plan(symbol_upper, workflow, event_date)
+        plan = self._build_plan(
+            symbol_upper,
+            workflow,
+            event_date,
+            direction_mode=direction_mode,
+        )
         saved = self.store.save_plan_if_changed(plan)
         bars = self._load_bars(
             symbol_upper,
@@ -314,7 +372,11 @@ class TradeReplayService:
             event_date,
             saved.plan.generated_at,
         )
-        events = generate_replay_events(saved.plan, bars)
+        events = generate_replay_events(
+            saved.plan,
+            bars,
+            direction_mode=direction_mode if workflow == "day_trade" else "long_and_short",
+        )
         created = self.store.append_events(events)
         self.store.save_missed_moves(
             build_completed_missed_moves(saved.plan, events, bars)
@@ -324,6 +386,7 @@ class TradeReplayService:
             symbol=symbol_upper,
             date=event_date,
             workflow=workflow,
+            direction_mode=direction_mode if workflow == "day_trade" else None,
             plan_id=saved.plan.plan_id,
             plan_created=saved.created,
             events_created=created,
@@ -368,12 +431,23 @@ class TradeReplayService:
         symbol: str,
         workflow: TradeReplayWorkflow,
         event_date: date,
+        direction_mode: DayTradeDirectionMode = DEFAULT_LIVE_DAY_TRADE_DIRECTION_MODE,
     ) -> TradePlanRecord:
         if workflow == "day_trade":
-            return self._build_day_trade_plan(symbol, event_date)
+            return self._build_day_trade_plan(
+                symbol,
+                event_date,
+                direction_mode=direction_mode,
+            )
         return self._build_swing_trade_plan(symbol, event_date)
 
-    def _build_day_trade_plan(self, symbol: str, event_date: date) -> TradePlanRecord:
+    def _build_day_trade_plan(
+        self,
+        symbol: str,
+        event_date: date,
+        *,
+        direction_mode: DayTradeDirectionMode = DEFAULT_LIVE_DAY_TRADE_DIRECTION_MODE,
+    ) -> TradePlanRecord:
         bias = build_intraday_trading_bias(
             symbol,
             yfinance_adapter=self.yfinance_adapter,
@@ -391,31 +465,42 @@ class TradeReplayService:
             else None
         )
         buffer = 0.01
+        allow_long = day_trade_direction_allowed("long", direction_mode)
+        allow_short = day_trade_direction_allowed("short", direction_mode)
         plan_levels: dict[str, float | str | None] = {
             "long_entry": (
                 _round_price(or_high + buffer) if or_high is not None else None
-            ),
-            "long_stop": vwap,
+            )
+            if allow_long
+            else None,
+            "long_stop": vwap if allow_long else None,
             "long_target_1": (
                 _round_price(or_high + buffer + width)
                 if or_high is not None and width is not None
                 else None
-            ),
-            "long_target_2": _round_price(levels.resistance),
+            )
+            if allow_long
+            else None,
+            "long_target_2": _round_price(levels.resistance) if allow_long else None,
             "short_entry": (
                 _round_price(or_low - buffer) if or_low is not None else None
-            ),
-            "short_stop": vwap,
+            )
+            if allow_short
+            else None,
+            "short_stop": vwap if allow_short else None,
             "short_target_1": (
                 _round_price(or_low - buffer - width)
                 if or_low is not None and width is not None
                 else None
-            ),
-            "short_target_2": _round_price(levels.support),
+            )
+            if allow_short
+            else None,
+            "short_target_2": _round_price(levels.support) if allow_short else None,
             "open_range_high": or_high,
             "open_range_low": or_low,
             "vwap": vwap,
             "setup_type": bias.setup_type,
+            "direction_mode": direction_mode,
         }
         generated_at = _day_plan_start(event_date)
         payload = {
@@ -424,6 +509,7 @@ class TradeReplayService:
             "confidence": bias.confidence,
             "action": bias.action,
             "levels": plan_levels,
+            "direction_mode": direction_mode,
             "warnings": bias.warnings,
             "data_gaps": bias.data_gaps,
             "methodology": "Opening range breakout/breakdown plan using VWAP as intraday control.",
@@ -508,9 +594,10 @@ class TradeReplayService:
 def generate_replay_events(
     plan: TradePlanRecord,
     bars: list[ReplayBar],
+    direction_mode: DayTradeDirectionMode = "long_and_short",
 ) -> list[TradeReplayEvent]:
     if plan.workflow == "day_trade":
-        return _generate_day_trade_events(plan, bars)
+        return _generate_day_trade_events(plan, bars, direction_mode=direction_mode)
     return _generate_swing_trade_events(plan, bars)
 
 
@@ -575,16 +662,19 @@ def plan_signature(
 def _generate_day_trade_events(
     plan: TradePlanRecord,
     bars: list[ReplayBar],
+    direction_mode: DayTradeDirectionMode = "long_and_short",
 ) -> list[TradeReplayEvent]:
     levels = plan.levels
-    long_entry = _float(levels.get("long_entry"))
-    long_stop = _float(levels.get("long_stop"))
-    long_target = _float(levels.get("long_target_1"))
-    long_target_2 = _float(levels.get("long_target_2"))
-    short_entry = _float(levels.get("short_entry"))
-    short_stop = _float(levels.get("short_stop"))
-    short_target = _float(levels.get("short_target_1"))
-    short_target_2 = _float(levels.get("short_target_2"))
+    allow_long = day_trade_direction_allowed("long", direction_mode)
+    allow_short = day_trade_direction_allowed("short", direction_mode)
+    long_entry = _float(levels.get("long_entry")) if allow_long else None
+    long_stop = _float(levels.get("long_stop")) if allow_long else None
+    long_target = _float(levels.get("long_target_1")) if allow_long else None
+    long_target_2 = _float(levels.get("long_target_2")) if allow_long else None
+    short_entry = _float(levels.get("short_entry")) if allow_short else None
+    short_stop = _float(levels.get("short_stop")) if allow_short else None
+    short_target = _float(levels.get("short_target_1")) if allow_short else None
+    short_target_2 = _float(levels.get("short_target_2")) if allow_short else None
     or_high = _float(levels.get("open_range_high"))
     or_low = _float(levels.get("open_range_low"))
     vwap = _float(levels.get("vwap"))
@@ -1203,6 +1293,29 @@ def _dedupe_events(events: list[TradeReplayEvent]) -> list[TradeReplayEvent]:
         seen.add(key)
         result.append(event)
     return sorted(result, key=lambda event: event.event_time)
+
+
+def _event_direction(event: TradeReplayEvent) -> str | None:
+    text = f"{event.event_type} {event.dedupe_key} {event.message}".lower()
+    if "short" in text:
+        return "short"
+    if "long" in text:
+        return "long"
+    return None
+
+
+def _filter_events_for_direction(
+    events: list[TradeReplayEvent],
+    direction_mode: DayTradeDirectionMode,
+) -> list[TradeReplayEvent]:
+    if direction_mode == "long_and_short":
+        return events
+    target_direction = "long" if direction_mode == "long_only" else "short"
+    return [
+        event
+        for event in events
+        if _event_direction(event) in {None, target_direction}
+    ]
 
 
 _STORY_EVENT_TYPES = {

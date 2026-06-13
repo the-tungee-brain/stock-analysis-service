@@ -1,10 +1,11 @@
 import asyncio
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth.dependencies import get_current_user_id
 from app.dependencies.service_dependencies import get_trade_replay_service
+from app.models.day_trade_backtest_models import DayTradeDirectionMode
 from app.models.trade_replay_models import (
     MissedMovesRange,
     MissedMovesSort,
@@ -14,9 +15,24 @@ from app.models.trade_replay_models import (
     TradeReplayResponse,
     TradeReplayWorkflow,
 )
+from app.services.day_trade_direction import (
+    DAY_TRADE_DIRECTION_MODES,
+    parse_day_trade_direction_mode,
+)
 from app.services.trade_replay_service import TradeReplayService
 
 router = APIRouter()
+
+
+def _direction_mode_or_400(value: str) -> DayTradeDirectionMode:
+    parsed = parse_day_trade_direction_mode(value)
+    if parsed is None:
+        allowed = ", ".join(DAY_TRADE_DIRECTION_MODES)
+        raise HTTPException(
+            status_code=400,
+            detail=f"direction_mode must be one of: {allowed}",
+        )
+    return parsed
 
 
 @router.get(
@@ -52,16 +68,19 @@ async def get_trade_replay(
     workflow: TradeReplayWorkflow = Query(...),
     date_: date = Query(..., alias="date"),
     missed_move_id: str | None = Query(default=None),
+    direction_mode: str = Query("long_only"),
     user_id: str = Depends(get_current_user_id),
     service: TradeReplayService = Depends(get_trade_replay_service),
 ):
     del user_id
+    parsed_direction_mode = _direction_mode_or_400(direction_mode)
     return await asyncio.to_thread(
         service.get_replay,
         symbol=symbol,
         workflow=workflow,
         event_date=date_,
         missed_move_id=missed_move_id,
+        direction_mode=parsed_direction_mode,
     )
 
 
@@ -76,9 +95,15 @@ async def refresh_trade_replay(
     service: TradeReplayService = Depends(get_trade_replay_service),
 ):
     del user_id
+    direction_mode = (
+        request.direction_mode
+        if request.direction_mode is not None
+        else _direction_mode_or_400("long_only")
+    )
     return await asyncio.to_thread(
         service.refresh,
         symbol=request.symbol,
         workflow=request.workflow,
         event_date=request.date,
+        direction_mode=direction_mode,
     )
