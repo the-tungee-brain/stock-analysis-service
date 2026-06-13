@@ -810,14 +810,21 @@ def _generate_day_trade_events(
             )
             short_active = False
             short_done = True
-        if long_active and long_target is not None and long_stop is not None:
-            if (long_target - bar.close) <= max(bar.close - long_stop, 0):
+        long_extension_target = (
+            long_target_2 if long_target_1_hit and long_target_2 is not None else long_target
+        )
+        if (
+            long_active
+            and long_extension_target is not None
+            and long_stop is not None
+        ):
+            if (long_extension_target - bar.close) <= max(bar.close - long_stop, 0):
                 events.append(
                     _event(
                         plan,
                         event_type="setup_extended",
                         bar=bar,
-                        level_price=long_target,
+                        level_price=long_extension_target,
                         observed_price=bar.close,
                         message=_with_session_context(
                             bar,
@@ -834,14 +841,23 @@ def _generate_day_trade_events(
                 )
                 long_active = False
                 long_done = True
-        if short_active and short_target is not None and short_stop is not None:
-            if (bar.close - short_target) <= max(short_stop - bar.close, 0):
+        short_extension_target = (
+            short_target_2
+            if short_target_1_hit and short_target_2 is not None
+            else short_target
+        )
+        if (
+            short_active
+            and short_extension_target is not None
+            and short_stop is not None
+        ):
+            if (bar.close - short_extension_target) <= max(short_stop - bar.close, 0):
                 events.append(
                     _event(
                         plan,
                         event_type="setup_extended",
                         bar=bar,
-                        level_price=short_target,
+                        level_price=short_extension_target,
                         observed_price=bar.close,
                         message=_with_session_context(
                             bar,

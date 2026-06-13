@@ -204,14 +204,17 @@ class YFinanceAdapter:
         self,
         symbol: str,
         *,
-        period: str,
+        period: str | None = None,
         interval: str,
         auto_adjust: bool = True,
         prepost: bool = False,
+        start: date | datetime | None = None,
+        end: date | datetime | None = None,
     ) -> pd.DataFrame:
         symbol_upper = symbol.strip().upper()
         cache_key = (
-            f"{symbol_upper}|{period}|{interval}|adj={int(auto_adjust)}|pre={int(prepost)}"
+            f"{symbol_upper}|{period}|{start}|{end}|{interval}|"
+            f"adj={int(auto_adjust)}|pre={int(prepost)}"
         )
         cached = self._get_cached(
             self._history_cache,
@@ -226,15 +229,20 @@ class YFinanceAdapter:
             ticker = self._ticker(symbol_upper)
             try:
                 with yfinance_fetch_lock():
-                    hist = ticker.history(
-                        period=period,
-                        interval=interval,
-                        auto_adjust=auto_adjust,
-                        prepost=prepost,
-                    )
+                    history_kwargs = {
+                        "interval": interval,
+                        "auto_adjust": auto_adjust,
+                        "prepost": prepost,
+                    }
+                    if start is not None or end is not None:
+                        history_kwargs["start"] = start
+                        history_kwargs["end"] = end
+                    else:
+                        history_kwargs["period"] = period or "1mo"
+                    hist = ticker.history(**history_kwargs)
             except Exception as exc:
                 self._log_yahoo_failure(
-                    f"history({period},{interval})",
+                    f"history({period or start},{interval})",
                     symbol_upper,
                     exc,
                 )
