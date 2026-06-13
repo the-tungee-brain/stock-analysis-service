@@ -166,6 +166,54 @@ class DayTradeBacktestComparisonRow(BaseModel):
     invalidation_pct: float = Field(serialization_alias="invalidation_pct")
 
 
+class DayTradeBacktestSymbolAggregateRow(BaseModel):
+    model_config = _MODEL_CONFIG
+
+    symbol: str
+    total_trades: int = Field(serialization_alias="total_trades")
+    win_rate: float = Field(serialization_alias="win_rate")
+    average_r: float = Field(serialization_alias="average_r")
+    total_r: float = Field(serialization_alias="total_r")
+    profit_factor: float | None = Field(serialization_alias="profit_factor")
+    max_drawdown: float = Field(serialization_alias="max_drawdown")
+    target_1_hit_pct: float = Field(serialization_alias="target_1_hit_pct")
+    invalidation_pct: float = Field(serialization_alias="invalidation_pct")
+    stop_hit_pct: float = Field(serialization_alias="stop_hit_pct")
+
+
+class DayTradeBacktestPortfolioSummary(BaseModel):
+    model_config = _MODEL_CONFIG
+
+    total_trades: int = Field(serialization_alias="total_trades")
+    total_r: float = Field(serialization_alias="total_r")
+    average_r: float = Field(serialization_alias="average_r")
+    profit_factor: float | None = Field(serialization_alias="profit_factor")
+    max_drawdown: float = Field(serialization_alias="max_drawdown")
+    best_symbol: str | None = Field(serialization_alias="best_symbol")
+    worst_symbol: str | None = Field(serialization_alias="worst_symbol")
+
+
+class DayTradeBacktestMultiSymbolReport(BaseModel):
+    model_config = _MODEL_CONFIG
+
+    candidate_scenario: DayTradeBacktestComparisonScenario = Field(
+        serialization_alias="candidate_scenario"
+    )
+    entry_filters: DayTradeBacktestEntryFilters = Field(
+        serialization_alias="entry_filters"
+    )
+    symbols: list[str]
+    aggregate_comparison: list[DayTradeBacktestSymbolAggregateRow] = Field(
+        serialization_alias="aggregate_comparison"
+    )
+    portfolio_summary: DayTradeBacktestPortfolioSummary = Field(
+        serialization_alias="portfolio_summary"
+    )
+    baseline_comparison: list[DayTradeBacktestSymbolAggregateRow] = Field(
+        serialization_alias="baseline_comparison"
+    )
+
+
 class DayTradeBacktestResponse(BaseModel):
     model_config = _MODEL_CONFIG
 

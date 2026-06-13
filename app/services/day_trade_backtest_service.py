@@ -15,9 +15,12 @@ from app.builders.intraday_trading_bias_engine import (
 from app.models.day_trade_backtest_models import (
     DayTradeBacktestComparisonRow,
     DayTradeBacktestEntryFilters,
+    DayTradeBacktestMultiSymbolReport,
+    DayTradeBacktestPortfolioSummary,
     DayTradeBacktestResponse,
     DayTradeBacktestRow,
     DayTradeBacktestSummary,
+    DayTradeBacktestSymbolAggregateRow,
     DayTradeSetupDirection,
 )
 
@@ -26,6 +29,7 @@ NOON_ET = time(12, 0)
 TRIGGER_BUFFER = 0.01
 DEFAULT_MIN_OR_WIDTH_PCT = 0.01
 DEFAULT_MAX_OR_WIDTH_PCT = 0.035
+PRIMARY_CANDIDATE_SCENARIO = "close-confirmed breakout"
 YAHOO_INTRADAY_5M_HISTORY_DAYS = 60
 YAHOO_INTRADAY_5M_LIMIT_REASON = (
     "Yahoo Finance 5-minute intraday candles are only available for "
@@ -85,6 +89,15 @@ class DayTradeEntryFilterConfig:
             max_or_width_pct=self.max_or_width_pct,
             no_trade_after_noon=self.no_trade_after_noon,
         )
+
+
+CLOSE_CONFIRMED_ENTRY_FILTERS = DayTradeEntryFilterConfig(
+    require_close_confirmed_breakout=True,
+    require_vwap_alignment=False,
+    min_or_width_pct=None,
+    max_or_width_pct=None,
+    no_trade_after_noon=False,
+)
 
 
 class DayTradeBacktestDataError(ValueError):
@@ -301,6 +314,80 @@ def top_day_trade_losers(
 ) -> list[DayTradeBacktestRow]:
     trades = [row for row in rows if row.r_multiple < 0]
     return sorted(trades, key=lambda row: (row.r_multiple, row.dollar_pl, row.date))[:10]
+
+
+def build_symbol_aggregate_row(
+    symbol: str,
+    rows: list[DayTradeBacktestRow],
+) -> DayTradeBacktestSymbolAggregateRow:
+    summary = summarize_day_trade_backtest(rows)
+    return DayTradeBacktestSymbolAggregateRow(
+        symbol=symbol.strip().upper(),
+        total_trades=summary.total_trades,
+        win_rate=summary.win_rate,
+        average_r=summary.average_r,
+        total_r=summary.total_r,
+        profit_factor=summary.profit_factor,
+        max_drawdown=summary.max_drawdown,
+        target_1_hit_pct=summary.target_1_hit_pct,
+        invalidation_pct=summary.invalidation_pct,
+        stop_hit_pct=summary.stop_hit_pct,
+    )
+
+
+def build_multi_symbol_backtest_report(
+    *,
+    candidate_rows_by_symbol: dict[str, list[DayTradeBacktestRow]],
+    baseline_rows_by_symbol: dict[str, list[DayTradeBacktestRow]] | None = None,
+    candidate_filters: DayTradeEntryFilterConfig = CLOSE_CONFIRMED_ENTRY_FILTERS,
+) -> DayTradeBacktestMultiSymbolReport:
+    symbols = [symbol.strip().upper() for symbol in candidate_rows_by_symbol]
+    aggregate = [
+        build_symbol_aggregate_row(symbol, candidate_rows_by_symbol[symbol])
+        for symbol in candidate_rows_by_symbol
+    ]
+    baseline_source = baseline_rows_by_symbol or {}
+    baseline = [
+        build_symbol_aggregate_row(symbol, baseline_source[symbol])
+        for symbol in baseline_source
+    ]
+    return DayTradeBacktestMultiSymbolReport(
+        candidate_scenario=PRIMARY_CANDIDATE_SCENARIO,  # type: ignore[arg-type]
+        entry_filters=candidate_filters.to_model(),
+        symbols=symbols,
+        aggregate_comparison=aggregate,
+        portfolio_summary=_portfolio_summary(candidate_rows_by_symbol, aggregate),
+        baseline_comparison=baseline,
+    )
+
+
+def _portfolio_summary(
+    rows_by_symbol: dict[str, list[DayTradeBacktestRow]],
+    aggregate: list[DayTradeBacktestSymbolAggregateRow],
+) -> DayTradeBacktestPortfolioSummary:
+    trades = [
+        row
+        for rows in rows_by_symbol.values()
+        for row in rows
+        if row.outcome != "no_trade"
+    ]
+    ordered = sorted(trades, key=lambda row: (row.date, row.symbol, row.entry_time or datetime.min))
+    total_r = round(sum(row.r_multiple for row in ordered), 4)
+    wins = [row for row in ordered if row.r_multiple > 0]
+    losses = [row for row in ordered if row.r_multiple < 0]
+    gross_win = sum(row.r_multiple for row in wins)
+    gross_loss = abs(sum(row.r_multiple for row in losses))
+    best = max(aggregate, key=lambda row: row.total_r, default=None)
+    worst = min(aggregate, key=lambda row: row.total_r, default=None)
+    return DayTradeBacktestPortfolioSummary(
+        total_trades=len(ordered),
+        total_r=total_r,
+        average_r=round(total_r / len(ordered), 4) if ordered else 0.0,
+        profit_factor=None if gross_loss == 0 else round(gross_win / gross_loss, 4),
+        max_drawdown=round(_max_drawdown([row.r_multiple for row in ordered]), 4),
+        best_symbol=best.symbol if best else None,
+        worst_symbol=worst.symbol if worst else None,
+    )
 
 
 def build_day_trade_comparison_table(

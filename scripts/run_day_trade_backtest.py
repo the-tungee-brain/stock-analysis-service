@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Sequence
 
@@ -16,10 +16,14 @@ if str(ROOT) not in sys.path:
 
 from app.adapters.market.yfinance_adapter import YFinanceAdapter  # noqa: E402
 from app.services.day_trade_backtest_service import (  # noqa: E402
+    CLOSE_CONFIRMED_ENTRY_FILTERS,
     DayTradeBacktestService,
+    build_multi_symbol_backtest_report,
+    intraday_provider_availability,
 )
 
-DEFAULT_OUTPUT = Path("artifacts/day_trade_backtest.json")
+DEFAULT_SYMBOLS = ["NVDA", "AAPL", "MSFT", "AMZN", "TSLA"]
+DEFAULT_OUTPUT = Path("artifacts/day_trade_backtest_multi_symbol.json")
 
 
 def _parse_date(value: str) -> date:
@@ -43,11 +47,43 @@ def _format_number(value: float | int | None) -> str:
     return f"{value:.4g}"
 
 
+def _parse_symbols(values: Sequence[str] | None) -> list[str]:
+    if not values:
+        return DEFAULT_SYMBOLS
+    symbols: list[str] = []
+    for value in values:
+        symbols.extend(part.strip().upper() for part in value.split(",") if part.strip())
+    return symbols or DEFAULT_SYMBOLS
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--symbol", default="NVDA", help="Ticker symbol")
-    parser.add_argument("--start", type=_parse_date, required=True, help="YYYY-MM-DD")
-    parser.add_argument("--end", type=_parse_date, required=True, help="YYYY-MM-DD")
+    parser.add_argument(
+        "--symbols",
+        nargs="*",
+        default=None,
+        help="Ticker symbols, either space-separated or comma-separated",
+    )
+    parser.add_argument(
+        "--symbol",
+        dest="single_symbol",
+        default=None,
+        help="Run one ticker symbol (legacy alias)",
+    )
+    availability = intraday_provider_availability()
+    default_start = availability.available_start_date + timedelta(days=2)
+    parser.add_argument(
+        "--start",
+        type=_parse_date,
+        default=default_start,
+        help="YYYY-MM-DD; defaults to the earliest available 5m Yahoo date",
+    )
+    parser.add_argument(
+        "--end",
+        type=_parse_date,
+        default=availability.available_end_date,
+        help="YYYY-MM-DD; defaults to the latest available 5m Yahoo date",
+    )
     parser.add_argument(
         "--risk-per-trade",
         "--risk_per_trade",
@@ -64,33 +100,83 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
+    symbols = [args.single_symbol.upper()] if args.single_symbol else _parse_symbols(args.symbols)
     service = DayTradeBacktestService(YFinanceAdapter())
-    result = service.run_backtest(
-        symbol=args.symbol,
-        start=args.start,
-        end=args.end,
-        risk_per_trade=args.risk_per_trade,
+    candidate_results = {}
+    baseline_results = {}
+    for symbol in symbols:
+        candidate_results[symbol] = service.run_backtest(
+            symbol=symbol,
+            start=args.start,
+            end=args.end,
+            risk_per_trade=args.risk_per_trade,
+            require_close_confirmed_breakout=True,
+            require_vwap_alignment=False,
+            min_or_width_pct=None,
+            max_or_width_pct=None,
+            no_trade_after_noon=False,
+            invalidation_confirmation_closes=2,
+        )
+        baseline_results[symbol] = service.run_backtest(
+            symbol=symbol,
+            start=args.start,
+            end=args.end,
+            risk_per_trade=args.risk_per_trade,
+            require_close_confirmed_breakout=False,
+            require_vwap_alignment=False,
+            min_or_width_pct=None,
+            max_or_width_pct=None,
+            no_trade_after_noon=False,
+            invalidation_confirmation_closes=2,
+        )
+
+    report = build_multi_symbol_backtest_report(
+        candidate_rows_by_symbol={
+            symbol: result.rows for symbol, result in candidate_results.items()
+        },
+        baseline_rows_by_symbol={
+            symbol: result.rows for symbol, result in baseline_results.items()
+        },
+        candidate_filters=CLOSE_CONFIRMED_ENTRY_FILTERS,
     )
+    payload = {
+        **report.model_dump(mode="json", by_alias=True),
+        "start": args.start.isoformat(),
+        "end": args.end.isoformat(),
+        "risk_per_trade": args.risk_per_trade,
+        "results": {
+            symbol: result.model_dump(mode="json", by_alias=True)
+            for symbol, result in candidate_results.items()
+        },
+    }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
-        json.dumps(result.model_dump(mode="json", by_alias=True), indent=2),
+        json.dumps(payload, indent=2),
         encoding="utf-8",
     )
 
-    summary = result.summary
-    print("Day Trade backtest summary")
-    print(f"Symbol: {result.symbol}")
-    print(f"Period: {result.start} to {result.end}")
-    print(f"Risk per trade: ${result.risk_per_trade:.2f}")
+    summary = report.portfolio_summary
+    print("Day Trade multi-symbol backtest summary")
+    print("Candidate: close-confirmed breakout")
+    print(f"Symbols: {', '.join(report.symbols)}")
+    print(f"Period: {args.start} to {args.end}")
+    print(f"Risk per trade: ${args.risk_per_trade:.2f}")
     print(f"Total trades: {summary.total_trades}")
-    print(f"Win rate: {_format_rate(summary.win_rate)}")
     print(f"Avg R: {_format_number(summary.average_r)}")
     print(f"Total R: {_format_number(summary.total_r)}")
     print(f"Profit factor: {_format_number(summary.profit_factor)}")
     print(f"Max drawdown: {_format_number(summary.max_drawdown)}")
-    print(f"Best day: {_format_number(summary.best_day)}")
-    print(f"Worst day: {_format_number(summary.worst_day)}")
+    print(f"Best symbol: {summary.best_symbol or 'n/a'}")
+    print(f"Worst symbol: {summary.worst_symbol or 'n/a'}")
+    print("")
+    print("Symbol comparison")
+    for row in report.aggregate_comparison:
+        print(
+            f"{row.symbol}: trades={row.total_trades} win={_format_rate(row.win_rate)} "
+            f"avgR={_format_number(row.average_r)} totalR={_format_number(row.total_r)} "
+            f"PF={_format_number(row.profit_factor)} DD={_format_number(row.max_drawdown)}"
+        )
     print(f"JSON written: {args.output}")
     return 0
 

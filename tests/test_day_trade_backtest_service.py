@@ -15,7 +15,9 @@ from app.services.day_trade_backtest_service import (
     DayTradeEntryFilterConfig,
     IntradayBacktestCandle,
     RULE_ALIGNMENT_NOTES,
+    CLOSE_CONFIRMED_ENTRY_FILTERS,
     build_day_trade_comparison_table,
+    build_multi_symbol_backtest_report,
     intraday_provider_availability,
     simulate_day_trade_backtest,
     summarize_day_trade_backtest,
@@ -431,6 +433,60 @@ def test_day_trade_backtest_comparison_table_contains_filter_scenarios() -> None
     ]
     assert all(row.total_trades == 1 for row in comparison)
     assert comparison[0].target_1_hit_pct == 1.0
+
+
+def test_day_trade_backtest_multi_symbol_aggregation() -> None:
+    nvda_day = date(2026, 6, 8)
+    aapl_day = date(2026, 6, 9)
+    candidate_rows = {
+        "NVDA": simulate_day_trade_backtest(
+            symbol="NVDA",
+            risk_per_trade=100,
+            entry_filters=CLOSE_CONFIRMED_ENTRY_FILTERS,
+            candles=[
+                *_opening_range(nvda_day),
+                _candle(nvda_day, 10, 0, 101.0, 101.5, 100.8, 101.2),
+                _candle(nvda_day, 10, 5, 101.2, 103.5, 101.1, 103.1),
+            ],
+        ),
+        "AAPL": simulate_day_trade_backtest(
+            symbol="AAPL",
+            risk_per_trade=100,
+            entry_filters=CLOSE_CONFIRMED_ENTRY_FILTERS,
+            candles=[
+                *_opening_range(aapl_day),
+                _candle(aapl_day, 10, 0, 101.0, 101.5, 100.8, 101.2),
+                _candle(aapl_day, 10, 5, 101.2, 101.4, 100.0, 100.5),
+            ],
+        ),
+    }
+    baseline_rows = {
+        symbol: rows
+        for symbol, rows in candidate_rows.items()
+    }
+
+    report = build_multi_symbol_backtest_report(
+        candidate_rows_by_symbol=candidate_rows,
+        baseline_rows_by_symbol=baseline_rows,
+    )
+
+    assert report.candidate_scenario == "close-confirmed breakout"
+    assert report.entry_filters.require_close_confirmed_breakout is True
+    assert [row.symbol for row in report.aggregate_comparison] == ["NVDA", "AAPL"]
+    assert report.aggregate_comparison[0].total_trades == 1
+    assert report.aggregate_comparison[0].total_r == 1.0
+    assert report.aggregate_comparison[0].target_1_hit_pct == 1.0
+    assert report.aggregate_comparison[1].total_trades == 1
+    assert report.aggregate_comparison[1].total_r == -1.0
+    assert report.aggregate_comparison[1].stop_hit_pct == 1.0
+    assert report.portfolio_summary.total_trades == 2
+    assert report.portfolio_summary.total_r == 0.0
+    assert report.portfolio_summary.average_r == 0.0
+    assert report.portfolio_summary.profit_factor == 1.0
+    assert report.portfolio_summary.max_drawdown == -1.0
+    assert report.portfolio_summary.best_symbol == "NVDA"
+    assert report.portfolio_summary.worst_symbol == "AAPL"
+    assert len(report.baseline_comparison) == 2
 
 
 def test_day_trade_backtest_no_trade_when_opening_range_never_breaks() -> None:
