@@ -23,6 +23,15 @@ on:
         required: true
         default: "100"
         type: string
+      direction_mode:
+        description: "Highlighted candidate direction mode"
+        required: true
+        default: "long_only"
+        type: choice
+        options:
+          - long_only
+          - short_only
+          - long_and_short
 
 jobs:
   backtest:
@@ -33,6 +42,7 @@ jobs:
       START_DATE: ${{ inputs.start }}
       END_DATE: ${{ inputs.end }}
       RISK_PER_TRADE: ${{ inputs.risk_per_trade }}
+      DIRECTION_MODE: ${{ inputs.direction_mode }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -60,13 +70,14 @@ jobs:
         run: |
           set -euo pipefail
           safe_symbols="$(printf '%s' "$SYMBOLS" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9._-' '-')"
-          artifact="artifacts/day-trade-backtest-${safe_symbols}-${START_DATE}-${END_DATE}.json"
+          artifact="artifacts/day-trade-backtest-${safe_symbols}-${DIRECTION_MODE}-${START_DATE}-${END_DATE}.json"
 
           python scripts/run_day_trade_backtest.py \
             --symbols "$SYMBOLS" \
             --start "$START_DATE" \
             --end "$END_DATE" \
             --risk-per-trade "$RISK_PER_TRADE" \
+            --direction-mode "$DIRECTION_MODE" \
             --output "$artifact"
 
           echo "BACKTEST_ARTIFACT=$artifact" >> "$GITHUB_ENV"
@@ -74,5 +85,5 @@ jobs:
       - name: Upload daily rows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: day-trade-backtest-${{ inputs.symbols }}-${{ inputs.start }}-${{ inputs.end }}
+          name: day-trade-backtest-${{ inputs.symbols }}-${{ inputs.direction_mode }}-${{ inputs.start }}-${{ inputs.end }}
           path: ${{ env.BACKTEST_ARTIFACT }}

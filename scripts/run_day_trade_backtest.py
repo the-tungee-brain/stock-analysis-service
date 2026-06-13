@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Sequence
@@ -105,6 +106,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=DEFAULT_OUTPUT,
         help="JSON output path",
     )
+    parser.add_argument(
+        "--direction-mode",
+        choices=DIRECTION_MODE_ORDER,
+        default="long_only",
+        help="Highlighted candidate direction mode",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     symbols = (
@@ -117,6 +124,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     baseline_results = {}
     direction_results = {mode: {} for mode in DIRECTION_MODE_ORDER}
     failed_symbols: list[DayTradeBacktestFailedSymbol] = []
+    candidate_filters = replace(
+        CLOSE_CONFIRMED_ENTRY_FILTERS,
+        direction_mode=args.direction_mode,
+    )
     for symbol in symbols:
         try:
             symbol_direction_results = {}
@@ -155,7 +166,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         for mode, result in symbol_direction_results.items():
             direction_results[mode][symbol] = result
-        candidate_results[symbol] = symbol_direction_results["long_and_short"]
+        candidate_results[symbol] = symbol_direction_results[args.direction_mode]
         baseline_results[symbol] = baseline_result
 
     report = build_multi_symbol_backtest_report(
@@ -172,13 +183,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             for mode, mode_results in direction_results.items()
         },
         failed_symbols=failed_symbols,
-        candidate_filters=CLOSE_CONFIRMED_ENTRY_FILTERS,
+        candidate_filters=candidate_filters,
     )
     payload = {
         **report.model_dump(mode="json", by_alias=True),
         "start": args.start.isoformat(),
         "end": args.end.isoformat(),
         "risk_per_trade": args.risk_per_trade,
+        "direction_mode": args.direction_mode,
         "results": {
             symbol: result.model_dump(mode="json", by_alias=True)
             for symbol, result in candidate_results.items()
@@ -205,6 +217,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     summary = report.portfolio_summary
     print("Day Trade multi-symbol backtest summary")
     print("Candidate: close-confirmed breakout")
+    print(f"Direction mode: {args.direction_mode}")
     print(f"Symbols: {', '.join(report.symbols)}")
     print(f"Period: {args.start} to {args.end}")
     print(f"Risk per trade: ${args.risk_per_trade:.2f}")
