@@ -36,13 +36,19 @@ async def get_position_guidance(
     schwab_auth_service: SchwabAuthService = Depends(get_schwab_auth_service),
     research_service: CompanyResearchService = Depends(get_company_research_service),
 ) -> SymbolPositionGuidanceResponse:
+    symbol_upper = symbol.strip().upper()
     try:
         token = schwab_auth_service.get_valid_token_by_user_id(user_id=user_id)
     except SchwabReauthRequired as exc:
-        raise HTTPException(
-            status_code=401,
-            detail=schwab_auth_service.reauth_http_detail(user_id, exc),
-        ) from exc
+        detail = schwab_auth_service.reauth_http_detail(user_id, exc)
+        return SymbolPositionGuidanceResponse(
+            symbol=symbol_upper,
+            has_positions=False,
+            reauth_required=True,
+            authorization_url=detail.get("authorization_url"),
+            synthesis_narrative=str(detail.get("message") or exc),
+            data_gaps=["schwab_reauth_required"],
+        )
 
     enriched = await asyncio.to_thread(
         load_portfolio_for_user,
@@ -52,7 +58,6 @@ async def get_position_guidance(
     )
     positions_by_symbol = enriched["positions"]
     account = enriched["account"]
-    symbol_upper = symbol.strip().upper()
     positions = positions_by_symbol.get(symbol_upper, [])
 
     return await asyncio.to_thread(

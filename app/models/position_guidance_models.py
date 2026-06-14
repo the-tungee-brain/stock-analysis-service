@@ -95,6 +95,8 @@ class SymbolPositionGuidanceResponse(BaseModel):
     symbol: str
     as_of_date: str | None = Field(default=None, alias="asOfDate")
     has_positions: bool = Field(default=False, alias="hasPositions")
+    reauth_required: bool = Field(default=False, alias="reauthRequired")
+    authorization_url: str | None = Field(default=None, alias="authorizationUrl")
     thesis: SymbolThesisBlock | None = None
     positions: list[PositionGuidanceItem] = Field(default_factory=list)
     synthesis_narrative: str = Field(default="", alias="synthesisNarrative")
