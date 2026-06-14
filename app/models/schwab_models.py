@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Literal
 from datetime import datetime, timedelta, timezone
 
@@ -196,6 +196,8 @@ class SchwabAccessTokenResponse(BaseModel):
 
 
 class SchwabAuthTokenItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     id: Optional[int] = Field(default=None, description="Auto-generated ID (IDENTITY)")
     user_id: str = Field(..., max_length=100, description="Unique user identifier")
     access_token: str = Field(..., description="Schwab access token")
@@ -214,7 +216,3 @@ class SchwabAuthTokenItem(BaseModel):
     updated_at: Optional[datetime] = Field(
         default=None, description="Record updated timestamp"
     )
-
-    class Config:
-        from_attributes = True
-        populate_by_name = True

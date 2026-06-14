@@ -13,8 +13,12 @@ def test_etf_decimal_ratio_yield_converts_to_percent_points():
     assert dividend_yield_pct_or_none(0.0035, asset_type="ETF") == 0.35
 
 
-def test_etf_large_raw_yield_requires_explicit_decimal_ratio_convention():
-    assert dividend_yield_pct_or_none(0.35, asset_type="ETF") is None
+def test_etf_percent_point_yield_below_one_stays_percent_points():
+    assert dividend_yield_pct_or_none(0.35, asset_type="ETF") == 0.35
+    assert dividend_yield_pct_or_none(0.99, asset_type="ETF") == 0.99
+
+
+def test_etf_large_raw_yield_can_be_forced_to_decimal_ratio_convention():
     assert (
         dividend_yield_pct_or_none(
             0.35,

@@ -86,7 +86,11 @@ class FundamentalsBuilder:
         )
         add(
             "Dividend yield",
-            self._fmt_dividend_yield(info.get("dividendYield"), asset_type=asset_type),
+            self._fmt_dividend_yield(
+                info.get("dividendYield"),
+                asset_type=asset_type,
+                symbol=symbol,
+            ),
             "Annual dividend as a share of the stock price. Relevant for income-focused investors.",
         )
         add(
@@ -125,6 +129,7 @@ class FundamentalsBuilder:
             "dividend_yield": self._fmt_dividend_yield(
                 info.get("dividendYield"),
                 asset_type="ETF",
+                symbol=symbol,
             ),
             "expense_ratio": self._fmt_expense_ratio(info),
         }
@@ -158,11 +163,13 @@ class FundamentalsBuilder:
         value: float | None,
         *,
         asset_type: str | None = None,
+        symbol: str | None = None,
     ) -> str | None:
         pct = dividend_yield_pct_or_none(
             value,
             asset_type=asset_type,
             source="yfinance.info.dividendYield",
+            symbol=symbol,
         )
         if pct is None:
             return None

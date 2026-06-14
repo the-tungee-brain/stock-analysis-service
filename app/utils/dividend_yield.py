@@ -43,10 +43,8 @@ def normalize_dividend_yield_pct(
     elif kind == "ETF":
         if raw < 0.2:
             pct = raw * 100.0
-        elif raw >= 1.0:
-            pct = raw
         else:
-            pct = None
+            pct = raw
     else:
         pct = raw * 100.0 if raw < 0.1 else raw
 

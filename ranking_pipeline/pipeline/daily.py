@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import logging
 
-import pandas as pd
-
 from data.download import download_and_store_symbol
 from data.paths import RANKING_DIR
 from data.store import raw_exists

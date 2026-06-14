@@ -2,7 +2,7 @@ import json
 import re
 from typing import Any, Type, TypeVar
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
 
