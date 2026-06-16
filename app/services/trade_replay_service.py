@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Protocol
 
@@ -88,16 +88,27 @@ class MissedMoveRecord:
     workflow: TradeReplayWorkflow
     event_date: date
     setup_type: str
+    direction: str
+    trigger_time: datetime | None
     trigger_price: float | None
     outcome: MissedMoveOutcome
     max_move_after_trigger_pct: float | None
     setup_quality_score: float | None
+    entry: float | None
+    stop: float | None
+    target_1: float | None
+    target_2: float | None
+    open_range_high: float | None
+    open_range_low: float | None
+    vwap: float | None
+    event_count: int
     source: TradeReplaySource
     source_freshness_label: str | None
     trigger_event_id: str
     terminal_event_id: str
     replay_events: list[TradeReplayEvent]
     created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class TradeReplayStore(Protocol):
@@ -144,6 +155,7 @@ class InMemoryTradeReplayStore:
         self.missed_moves: list[MissedMoveRecord] = []
         self._event_keys: set[tuple[str, date, str, str, str]] = set()
         self._missed_move_ids: set[str] = set()
+        self._missed_move_keys: dict[tuple[str, date, str, str, str], str] = {}
 
     def save_plan_if_changed(self, plan: TradePlanRecord) -> PlanSaveResult:
         existing = self.latest_plan(
@@ -210,8 +222,23 @@ class InMemoryTradeReplayStore:
     def save_missed_moves(self, missed_moves: list[MissedMoveRecord]) -> int:
         created = 0
         for missed_move in missed_moves:
+            key = _missed_move_natural_key(missed_move)
+            existing_id = self._missed_move_keys.get(key)
+            if existing_id is not None:
+                self.missed_moves = [
+                    replace(
+                        missed_move,
+                        missed_move_id=existing_id,
+                        created_at=item.created_at or missed_move.created_at,
+                    )
+                    if item.missed_move_id == existing_id
+                    else item
+                    for item in self.missed_moves
+                ]
+                continue
             if missed_move.missed_move_id in self._missed_move_ids:
                 continue
+            self._missed_move_keys[key] = missed_move.missed_move_id
             self._missed_move_ids.add(missed_move.missed_move_id)
             self.missed_moves.append(missed_move)
             created += 1
@@ -1542,22 +1569,35 @@ def _missed_move_record(
     bars: list[ReplayBar],
     outcome: MissedMoveOutcome,
 ) -> MissedMoveRecord:
+    direction = _trigger_side(trigger) or "unknown"
+    now = datetime.now(timezone.utc)
     return MissedMoveRecord(
         missed_move_id=_missed_move_id(plan, trigger, terminal),
         symbol=plan.symbol,
         workflow=plan.workflow,
         event_date=trigger.event_date,
         setup_type=_setup_type(plan, trigger),
+        direction=direction,
+        trigger_time=trigger.event_time,
         trigger_price=trigger.level_price,
         outcome=outcome,
         max_move_after_trigger_pct=_max_move_after_trigger_pct(trigger, bars),
         setup_quality_score=_setup_quality_score(plan),
+        entry=_level_for_direction(plan, direction, "entry"),
+        stop=_level_for_direction(plan, direction, "stop"),
+        target_1=_level_for_direction(plan, direction, "target_1"),
+        target_2=_level_for_direction(plan, direction, "target_2"),
+        open_range_high=_float(plan.levels.get("open_range_high")),
+        open_range_low=_float(plan.levels.get("open_range_low")),
+        vwap=_float(plan.levels.get("vwap")),
+        event_count=len(replay_events),
         source=plan.source,
         source_freshness_label=plan.source_freshness_label,
         trigger_event_id=trigger.id,
         terminal_event_id=terminal.id,
         replay_events=_sort_story_events(replay_events),
-        created_at=datetime.now(timezone.utc),
+        created_at=now,
+        updated_at=now,
     )
 
 
@@ -1598,6 +1638,28 @@ def _setup_quality_score(plan: TradePlanRecord) -> float | None:
         if score is not None:
             return score
     return None
+
+
+def _level_for_direction(
+    plan: TradePlanRecord,
+    direction: str,
+    level: str,
+) -> float | None:
+    if plan.workflow == "day_trade" and direction in {"long", "short"}:
+        return _float(plan.levels.get(f"{direction}_{level}"))
+    return _float(plan.levels.get(level))
+
+
+def _missed_move_natural_key(
+    missed_move: MissedMoveRecord,
+) -> tuple[str, date, str, str, str]:
+    return (
+        missed_move.symbol.upper(),
+        missed_move.event_date,
+        missed_move.workflow,
+        missed_move.setup_type,
+        missed_move.direction,
+    )
 
 
 def _score_value(value: Any) -> float | None:
@@ -1704,10 +1766,20 @@ def _summary_row(record: MissedMoveRecord) -> MissedMoveSummaryRow:
         symbol=record.symbol,
         workflow=record.workflow,
         setup_type=record.setup_type,
+        direction=record.direction,
+        trigger_time=record.trigger_time,
         trigger_price=record.trigger_price,
         outcome=record.outcome,
         max_move_after_trigger_pct=record.max_move_after_trigger_pct,
         setup_quality_score=record.setup_quality_score,
+        entry=record.entry,
+        stop=record.stop,
+        target_1=record.target_1,
+        target_2=record.target_2,
+        open_range_high=record.open_range_high,
+        open_range_low=record.open_range_low,
+        vwap=record.vwap,
+        event_count=record.event_count,
         source=record.source,
         source_freshness_label=record.source_freshness_label,
     )

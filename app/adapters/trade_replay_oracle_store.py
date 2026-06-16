@@ -85,18 +85,32 @@ class OracleTradeReplayStore:
                 workflow VARCHAR2(32) NOT NULL,
                 event_date DATE NOT NULL,
                 setup_type VARCHAR2(255) NOT NULL,
+                direction VARCHAR2(16) DEFAULT 'unknown' NOT NULL,
+                trigger_time TIMESTAMP WITH TIME ZONE,
                 trigger_price NUMBER,
                 outcome VARCHAR2(32) NOT NULL,
                 max_move_after_trigger_pct NUMBER,
                 setup_quality_score NUMBER,
+                entry NUMBER,
+                stop NUMBER,
+                target_1 NUMBER,
+                target_2 NUMBER,
+                open_range_high NUMBER,
+                open_range_low NUMBER,
+                vwap NUMBER,
+                event_count NUMBER,
                 source VARCHAR2(24) NOT NULL,
                 source_freshness_label VARCHAR2(255),
                 trigger_event_id VARCHAR2(64) NOT NULL,
                 terminal_event_id VARCHAR2(64) NOT NULL,
                 replay_events_json CLOB NOT NULL,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
                 CONSTRAINT uq_missed_move_story UNIQUE (
                     symbol, event_date, workflow, trigger_event_id, terminal_event_id
+                ),
+                CONSTRAINT uq_missed_move_natural UNIQUE (
+                    symbol, event_date, workflow, setup_type, direction
                 )
             )
             """,
@@ -115,6 +129,25 @@ class OracleTradeReplayStore:
                     if not _is_name_already_used(exc):
                         raise
             self._ensure_column(cur, _PLAN_TABLE, "RISK_JSON", "CLOB")
+            for column_name, column_type in (
+                ("DIRECTION", "VARCHAR2(16) DEFAULT 'unknown'"),
+                ("TRIGGER_TIME", "TIMESTAMP WITH TIME ZONE"),
+                ("ENTRY", "NUMBER"),
+                ("STOP", "NUMBER"),
+                ("TARGET_1", "NUMBER"),
+                ("TARGET_2", "NUMBER"),
+                ("OPEN_RANGE_HIGH", "NUMBER"),
+                ("OPEN_RANGE_LOW", "NUMBER"),
+                ("VWAP", "NUMBER"),
+                ("EVENT_COUNT", "NUMBER"),
+                ("UPDATED_AT", "TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP"),
+            ):
+                self._ensure_column(
+                    cur,
+                    _MISSED_MOVE_TABLE,
+                    column_name,
+                    column_type,
+                )
             self._ensure_unique_constraint(
                 cur,
                 table_name=_PLAN_TABLE,
@@ -137,6 +170,18 @@ class OracleTradeReplayStore:
                     "WORKFLOW",
                     "TRIGGER_EVENT_ID",
                     "TERMINAL_EVENT_ID",
+                ),
+            )
+            self._ensure_unique_constraint(
+                cur,
+                table_name=_MISSED_MOVE_TABLE,
+                constraint_name="UQ_MISSED_MOVE_NATURAL",
+                columns=(
+                    "SYMBOL",
+                    "EVENT_DATE",
+                    "WORKFLOW",
+                    "SETUP_TYPE",
+                    "DIRECTION",
                 ),
             )
             con.commit()
@@ -192,8 +237,19 @@ class OracleTradeReplayStore:
                 f"ALTER TABLE {table_name} ADD CONSTRAINT {constraint_name} UNIQUE ({column_sql})"
             )
         except oracledb.DatabaseError as exc:
-            if not _is_name_already_used(exc):
-                raise
+            if _is_name_already_used(exc):
+                return
+            if _is_unique_constraint_duplicate_data(exc):
+                logger.warning(
+                    (
+                        "Skipping unique constraint %s on %s because existing "
+                        "rows violate it; new writes still upsert by natural key"
+                    ),
+                    constraint_name,
+                    table_name,
+                )
+                return
+            raise
 
     def save_plan_if_changed(self, plan: TradePlanRecord) -> PlanSaveResult:
         existing = self.latest_plan(
@@ -335,38 +391,125 @@ class OracleTradeReplayStore:
             logger.info("Missed moves save skipped: no completed missed moves to persist")
             return 0
         sql = f"""
-            INSERT INTO {_MISSED_MOVE_TABLE} (
-                missed_move_id, symbol, workflow, event_date, setup_type,
-                trigger_price, outcome, max_move_after_trigger_pct,
-                setup_quality_score, source, source_freshness_label,
-                trigger_event_id, terminal_event_id, replay_events_json, created_at
-            ) VALUES (
-                :missed_move_id, :symbol, :workflow, :event_date, :setup_type,
-                :trigger_price, :outcome, :max_move_after_trigger_pct,
-                :setup_quality_score, :source, :source_freshness_label,
-                :trigger_event_id, :terminal_event_id, :replay_events_json, :created_at
+            MERGE INTO {_MISSED_MOVE_TABLE} t
+            USING (
+                SELECT
+                    :missed_move_id AS missed_move_id,
+                    :symbol AS symbol,
+                    :workflow AS workflow,
+                    :event_date AS event_date,
+                    :setup_type AS setup_type,
+                    :direction AS direction,
+                    :trigger_time AS trigger_time,
+                    :trigger_price AS trigger_price,
+                    :outcome AS outcome,
+                    :max_move_after_trigger_pct AS max_move_after_trigger_pct,
+                    :setup_quality_score AS setup_quality_score,
+                    :entry AS entry,
+                    :stop AS stop,
+                    :target_1 AS target_1,
+                    :target_2 AS target_2,
+                    :open_range_high AS open_range_high,
+                    :open_range_low AS open_range_low,
+                    :vwap AS vwap,
+                    :event_count AS event_count,
+                    :source AS source,
+                    :source_freshness_label AS source_freshness_label,
+                    :trigger_event_id AS trigger_event_id,
+                    :terminal_event_id AS terminal_event_id,
+                    :replay_events_json AS replay_events_json,
+                    :created_at AS created_at,
+                    :updated_at AS updated_at
+                FROM dual
+            ) s
+            ON (
+                t.symbol = s.symbol
+                AND t.event_date = s.event_date
+                AND t.workflow = s.workflow
+                AND t.setup_type = s.setup_type
+                AND t.direction = s.direction
             )
+            WHEN MATCHED THEN
+                UPDATE SET
+                    t.trigger_time = s.trigger_time,
+                    t.trigger_price = s.trigger_price,
+                    t.outcome = s.outcome,
+                    t.max_move_after_trigger_pct = s.max_move_after_trigger_pct,
+                    t.setup_quality_score = s.setup_quality_score,
+                    t.entry = s.entry,
+                    t.stop = s.stop,
+                    t.target_1 = s.target_1,
+                    t.target_2 = s.target_2,
+                    t.open_range_high = s.open_range_high,
+                    t.open_range_low = s.open_range_low,
+                    t.vwap = s.vwap,
+                    t.event_count = s.event_count,
+                    t.source = s.source,
+                    t.source_freshness_label = s.source_freshness_label,
+                    t.trigger_event_id = s.trigger_event_id,
+                    t.terminal_event_id = s.terminal_event_id,
+                    t.replay_events_json = s.replay_events_json,
+                    t.updated_at = s.updated_at
+            WHEN NOT MATCHED THEN
+                INSERT (
+                    missed_move_id, symbol, workflow, event_date, setup_type,
+                    direction, trigger_time, trigger_price, outcome,
+                    max_move_after_trigger_pct, setup_quality_score, entry,
+                    stop, target_1, target_2, open_range_high, open_range_low,
+                    vwap, event_count, source, source_freshness_label,
+                    trigger_event_id, terminal_event_id, replay_events_json,
+                    created_at, updated_at
+                )
+                VALUES (
+                    s.missed_move_id, s.symbol, s.workflow, s.event_date,
+                    s.setup_type, s.direction, s.trigger_time, s.trigger_price,
+                    s.outcome, s.max_move_after_trigger_pct,
+                    s.setup_quality_score, s.entry, s.stop, s.target_1,
+                    s.target_2, s.open_range_high, s.open_range_low, s.vwap,
+                    s.event_count, s.source, s.source_freshness_label,
+                    s.trigger_event_id, s.terminal_event_id,
+                    s.replay_events_json, s.created_at, s.updated_at
+                )
         """
         created = 0
+        updated = 0
         con = self._client.acquire()
         try:
             cur = con.cursor()
             for missed_move in missed_moves:
+                payload = _missed_move_to_row(missed_move)
+                existed = self._missed_move_natural_key_exists(
+                    cur,
+                    symbol=missed_move.symbol,
+                    workflow=missed_move.workflow,
+                    event_date=missed_move.event_date,
+                    setup_type=missed_move.setup_type,
+                    direction=missed_move.direction,
+                )
                 try:
-                    cur.execute(sql, _missed_move_to_row(missed_move))
-                    created += 1
+                    cur.execute(sql, payload)
+                    if existed:
+                        updated += 1
+                    else:
+                        created += 1
                 except oracledb.IntegrityError:
-                    continue
+                    self._update_missed_move_by_story_key(cur, payload)
+                    updated += 1
             con.commit()
         finally:
             con.close()
         logger.info(
-            "Missed moves save completed: attempted=%s created=%s symbols=%s dates=%s setup_types=%s",
+            (
+                "Missed moves save completed: attempted=%s created=%s "
+                "updated=%s symbols=%s dates=%s setup_types=%s directions=%s"
+            ),
             len(missed_moves),
             created,
+            updated,
             _count_by_attr(missed_moves, "symbol"),
             _count_by_event_date(missed_moves),
             _count_by_attr(missed_moves, "setup_type"),
+            _count_by_attr(missed_moves, "direction"),
         )
         return created
 
@@ -380,9 +523,12 @@ class OracleTradeReplayStore:
     ) -> list[MissedMoveRecord]:
         sql = f"""
             SELECT missed_move_id, symbol, workflow, event_date, setup_type,
-                   trigger_price, outcome, max_move_after_trigger_pct,
-                   setup_quality_score, source, source_freshness_label,
-                   trigger_event_id, terminal_event_id, replay_events_json, created_at
+                   direction, trigger_time, trigger_price, outcome,
+                   max_move_after_trigger_pct, setup_quality_score, entry, stop,
+                   target_1, target_2, open_range_high, open_range_low, vwap,
+                   event_count, source, source_freshness_label,
+                   trigger_event_id, terminal_event_id, replay_events_json,
+                   created_at, updated_at
             FROM {_MISSED_MOVE_TABLE}
             WHERE symbol = :symbol
               AND workflow = :workflow
@@ -494,15 +640,85 @@ class OracleTradeReplayStore:
     def get_missed_move(self, missed_move_id: str) -> MissedMoveRecord | None:
         sql = f"""
             SELECT missed_move_id, symbol, workflow, event_date, setup_type,
-                   trigger_price, outcome, max_move_after_trigger_pct,
-                   setup_quality_score, source, source_freshness_label,
-                   trigger_event_id, terminal_event_id, replay_events_json, created_at
+                   direction, trigger_time, trigger_price, outcome,
+                   max_move_after_trigger_pct, setup_quality_score, entry, stop,
+                   target_1, target_2, open_range_high, open_range_low, vwap,
+                   event_count, source, source_freshness_label,
+                   trigger_event_id, terminal_event_id, replay_events_json,
+                   created_at, updated_at
             FROM {_MISSED_MOVE_TABLE}
             WHERE missed_move_id = :missed_move_id
             FETCH FIRST 1 ROWS ONLY
         """
         row = self._fetchone(sql, {"missed_move_id": missed_move_id})
         return _missed_move_from_row(row) if row is not None else None
+
+    def _missed_move_natural_key_exists(
+        self,
+        cur: oracledb.Cursor,
+        *,
+        symbol: str,
+        workflow: TradeReplayWorkflow,
+        event_date: date,
+        setup_type: str,
+        direction: str,
+    ) -> bool:
+        cur.execute(
+            f"""
+            SELECT 1
+            FROM {_MISSED_MOVE_TABLE}
+            WHERE symbol = :symbol
+              AND event_date = :event_date
+              AND workflow = :workflow
+              AND setup_type = :setup_type
+              AND direction = :direction
+            FETCH FIRST 1 ROWS ONLY
+            """,
+            {
+                "symbol": symbol.upper(),
+                "event_date": event_date,
+                "workflow": workflow,
+                "setup_type": setup_type,
+                "direction": direction,
+            },
+        )
+        return cur.fetchone() is not None
+
+    def _update_missed_move_by_story_key(
+        self,
+        cur: oracledb.Cursor,
+        payload: dict[str, Any],
+    ) -> None:
+        cur.execute(
+            f"""
+            UPDATE {_MISSED_MOVE_TABLE}
+            SET setup_type = :setup_type,
+                direction = :direction,
+                trigger_time = :trigger_time,
+                trigger_price = :trigger_price,
+                outcome = :outcome,
+                max_move_after_trigger_pct = :max_move_after_trigger_pct,
+                setup_quality_score = :setup_quality_score,
+                entry = :entry,
+                stop = :stop,
+                target_1 = :target_1,
+                target_2 = :target_2,
+                open_range_high = :open_range_high,
+                open_range_low = :open_range_low,
+                vwap = :vwap,
+                event_count = :event_count,
+                source = :source,
+                source_freshness_label = :source_freshness_label,
+                replay_events_json = :replay_events_json,
+                updated_at = :updated_at
+            WHERE symbol = :symbol
+              AND event_date = :event_date
+              AND workflow = :workflow
+              AND trigger_event_id = :trigger_event_id
+              AND terminal_event_id = :terminal_event_id
+            """,
+            payload,
+        )
 
     def _find_plan_by_signature(
         self,
@@ -645,10 +861,20 @@ def _missed_move_to_row(missed_move: MissedMoveRecord) -> dict[str, Any]:
         "workflow": missed_move.workflow,
         "event_date": missed_move.event_date,
         "setup_type": missed_move.setup_type,
+        "direction": missed_move.direction,
+        "trigger_time": missed_move.trigger_time,
         "trigger_price": missed_move.trigger_price,
         "outcome": missed_move.outcome,
         "max_move_after_trigger_pct": missed_move.max_move_after_trigger_pct,
         "setup_quality_score": missed_move.setup_quality_score,
+        "entry": missed_move.entry,
+        "stop": missed_move.stop,
+        "target_1": missed_move.target_1,
+        "target_2": missed_move.target_2,
+        "open_range_high": missed_move.open_range_high,
+        "open_range_low": missed_move.open_range_low,
+        "vwap": missed_move.vwap,
+        "event_count": missed_move.event_count,
         "source": missed_move.source,
         "source_freshness_label": missed_move.source_freshness_label,
         "trigger_event_id": missed_move.trigger_event_id,
@@ -661,6 +887,7 @@ def _missed_move_to_row(missed_move: MissedMoveRecord) -> dict[str, Any]:
             sort_keys=True,
         ),
         "created_at": missed_move.created_at or datetime.now(timezone.utc),
+        "updated_at": missed_move.updated_at or datetime.now(timezone.utc),
     }
 
 
@@ -687,16 +914,27 @@ def _missed_move_from_row(row: tuple[Any, ...]) -> MissedMoveRecord:
         workflow,
         event_date,
         setup_type,
+        direction,
+        trigger_time,
         trigger_price,
         outcome,
         max_move_after_trigger_pct,
         setup_quality_score,
+        entry,
+        stop,
+        target_1,
+        target_2,
+        open_range_high,
+        open_range_low,
+        vwap,
+        event_count,
         source,
         source_freshness_label,
         trigger_event_id,
         terminal_event_id,
         replay_events_json,
         created_at,
+        updated_at,
     ) = row
     events_payload = json.loads(_lob_text(replay_events_json) or "[]")
     return MissedMoveRecord(
@@ -705,6 +943,8 @@ def _missed_move_from_row(row: tuple[Any, ...]) -> MissedMoveRecord:
         workflow=str(workflow),  # type: ignore[arg-type]
         event_date=event_date,
         setup_type=str(setup_type),
+        direction=str(direction or "unknown"),
+        trigger_time=_aware_datetime(trigger_time) if trigger_time else None,
         trigger_price=float(trigger_price) if trigger_price is not None else None,
         outcome=str(outcome),  # type: ignore[arg-type]
         max_move_after_trigger_pct=(
@@ -715,6 +955,16 @@ def _missed_move_from_row(row: tuple[Any, ...]) -> MissedMoveRecord:
         setup_quality_score=(
             float(setup_quality_score) if setup_quality_score is not None else None
         ),
+        entry=float(entry) if entry is not None else None,
+        stop=float(stop) if stop is not None else None,
+        target_1=float(target_1) if target_1 is not None else None,
+        target_2=float(target_2) if target_2 is not None else None,
+        open_range_high=(
+            float(open_range_high) if open_range_high is not None else None
+        ),
+        open_range_low=float(open_range_low) if open_range_low is not None else None,
+        vwap=float(vwap) if vwap is not None else None,
+        event_count=int(event_count) if event_count is not None else len(events_payload),
         source=str(source),  # type: ignore[arg-type]
         source_freshness_label=(
             str(source_freshness_label) if source_freshness_label else None
@@ -725,6 +975,7 @@ def _missed_move_from_row(row: tuple[Any, ...]) -> MissedMoveRecord:
             TradeReplayEvent.model_validate(item) for item in events_payload
         ],
         created_at=_aware_datetime(created_at),
+        updated_at=_aware_datetime(updated_at) if updated_at else None,
     )
 
 
@@ -748,3 +999,10 @@ def _is_name_already_used(exc: oracledb.DatabaseError) -> bool:
     code = getattr(error, "code", None)
     message = str(exc)
     return code == 955 or "ORA-00955" in message
+
+
+def _is_unique_constraint_duplicate_data(exc: oracledb.DatabaseError) -> bool:
+    error = exc.args[0] if exc.args else None
+    code = getattr(error, "code", None)
+    message = str(exc)
+    return code == 2261 or code == 2299 or "ORA-02299" in message

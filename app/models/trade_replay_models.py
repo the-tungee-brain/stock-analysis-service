@@ -71,6 +71,11 @@ class MissedMoveSummaryRow(BaseModel):
     symbol: str
     workflow: TradeReplayWorkflow
     setup_type: str = Field(serialization_alias="setup_type")
+    direction: str | None = None
+    trigger_time: datetime | None = Field(
+        default=None,
+        serialization_alias="trigger_time",
+    )
     trigger_price: float | None = Field(default=None, serialization_alias="trigger_price")
     outcome: MissedMoveOutcome
     max_move_after_trigger_pct: float | None = Field(
@@ -81,6 +86,20 @@ class MissedMoveSummaryRow(BaseModel):
         default=None,
         serialization_alias="setup_quality_score",
     )
+    entry: float | None = None
+    stop: float | None = None
+    target_1: float | None = Field(default=None, serialization_alias="target_1")
+    target_2: float | None = Field(default=None, serialization_alias="target_2")
+    open_range_high: float | None = Field(
+        default=None,
+        serialization_alias="open_range_high",
+    )
+    open_range_low: float | None = Field(
+        default=None,
+        serialization_alias="open_range_low",
+    )
+    vwap: float | None = None
+    event_count: int | None = Field(default=None, serialization_alias="event_count")
     source: TradeReplaySource = "historical"
     source_freshness_label: str | None = Field(
         default=None,

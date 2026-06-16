@@ -262,6 +262,17 @@ def get_trade_replay_service(request: Request) -> TradeReplayService:
     return request.app.state.trade_replay_service
 
 
+def get_day_trade_replay_persistence_service(request: Request):
+    from app.services.day_trade_replay_persistence_service import (
+        DayTradeReplayPersistenceService,
+    )
+
+    service: DayTradeReplayPersistenceService = (
+        request.app.state.day_trade_replay_persistence_service
+    )
+    return service
+
+
 def get_momentum_breakout_notification_service(
     request: Request,
 ) -> CompositeNotificationService:

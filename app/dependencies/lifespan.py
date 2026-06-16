@@ -131,6 +131,11 @@ from app.jobs.momentum_breakout_alert_scheduler import (
     resolve_refresh_interval_sec,
     run_momentum_breakout_alert_scheduler,
 )
+from app.jobs.day_trade_replay_persistence_scheduler import (
+    is_day_trade_replay_persistence_scheduler_enabled,
+    resolve_day_trade_replay_persistence_interval_sec,
+    run_day_trade_replay_persistence_scheduler,
+)
 from app.services.strategy.momentum_breakout_alert_price_provider import (
     FinnhubMomentumBreakoutPriceProvider,
 )
@@ -174,6 +179,10 @@ from app.services.strategy.momentum_breakout_snapshot_serving_service import (
 from app.services.strategy.custom_trade_plan_service import CustomTradePlanService
 from app.services.strategy.wheel_backtest_service import WheelBacktestService
 from app.services.pattern_analysis_service import PatternAnalysisService
+from app.services.day_trade_replay_persistence_service import (
+    DayTradeReplayPersistenceService,
+    TrackedDayTradeSymbolResolver,
+)
 from app.services.trade_replay_service import TradeReplayService
 
 
@@ -579,6 +588,12 @@ async def lifespan(app: FastAPI):
         pattern_analysis_service=pattern_analysis_service,
         research_events_service=research_events_service,
     )
+    day_trade_replay_persistence_service = DayTradeReplayPersistenceService(
+        trade_replay_service=trade_replay_service,
+        symbol_resolver=TrackedDayTradeSymbolResolver(
+            oracle_pool=powerpocketdb_client,
+        ),
+    )
 
     app.state.http_session = session
     app.state.redis_client = redis_client
@@ -651,21 +666,36 @@ async def lifespan(app: FastAPI):
         momentum_breakout_admin_metrics_service
     )
     app.state.trade_replay_service = trade_replay_service
+    app.state.day_trade_replay_persistence_service = (
+        day_trade_replay_persistence_service
+    )
 
-    scheduler_task = None
+    scheduler_tasks = []
     if is_scheduler_enabled() and mb_alerts_enabled():
-        scheduler_task = asyncio.create_task(
-            run_momentum_breakout_alert_scheduler(
-                momentum_breakout_alert_refresh_service,
-                interval_sec=resolve_refresh_interval_sec(),
+        scheduler_tasks.append(
+            asyncio.create_task(
+                run_momentum_breakout_alert_scheduler(
+                    momentum_breakout_alert_refresh_service,
+                    interval_sec=resolve_refresh_interval_sec(),
+                )
+            )
+        )
+    if is_day_trade_replay_persistence_scheduler_enabled():
+        scheduler_tasks.append(
+            asyncio.create_task(
+                run_day_trade_replay_persistence_scheduler(
+                    day_trade_replay_persistence_service,
+                    interval_sec=resolve_day_trade_replay_persistence_interval_sec(),
+                )
             )
         )
 
     try:
         yield
     finally:
-        if scheduler_task is not None:
+        for scheduler_task in scheduler_tasks:
             scheduler_task.cancel()
+        for scheduler_task in scheduler_tasks:
             try:
                 await scheduler_task
             except asyncio.CancelledError:

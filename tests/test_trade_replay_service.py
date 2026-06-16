@@ -25,6 +25,10 @@ from app.services.trade_replay_service import (
     generate_replay_events,
     plan_signature,
 )
+from app.services.day_trade_replay_persistence_service import (
+    DayTradeReplayPersistenceService,
+    TrackedDayTradeSymbolResolver,
+)
 
 ET = ZoneInfo("America/New_York")
 SESSION_DATE = date(2026, 6, 5)
@@ -191,16 +195,27 @@ def _missed_move(
         workflow="day_trade",
         event_date=event_date,
         setup_type="Long opening range breakout",
+        direction="long",
+        trigger_time=trigger.event_time,
         trigger_price=100.0,
         outcome=outcome,  # type: ignore[arg-type]
         max_move_after_trigger_pct=max_move,
         setup_quality_score=quality,
+        entry=100.0,
+        stop=98.0,
+        target_1=104.0,
+        target_2=108.0,
+        open_range_high=99.99,
+        open_range_low=96.0,
+        vwap=98.0,
+        event_count=2,
         source="delayed",
         source_freshness_label=replay_module.SOURCE_FRESHNESS_DELAYED,
         trigger_event_id=trigger.id,
         terminal_event_id=terminal.id,
         replay_events=[trigger, terminal],
         created_at=datetime.combine(event_date, datetime.min.time(), tzinfo=timezone.utc),
+        updated_at=datetime.combine(event_date, datetime.min.time(), tzinfo=timezone.utc),
     )
 
 
@@ -268,6 +283,13 @@ def test_completed_missed_move_is_persisted(monkeypatch) -> None:
     missed_move = store.missed_moves[0]
     assert missed_move.symbol == "NVDA"
     assert missed_move.outcome == "target_hit"
+    assert missed_move.direction == "long"
+    assert missed_move.entry == 210.4
+    assert missed_move.stop == 208.38
+    assert missed_move.open_range_high == 210.39
+    assert missed_move.open_range_low == 206.18
+    assert missed_move.vwap == 208.38
+    assert missed_move.event_count == 2
     assert missed_move.trigger_price == 210.4
     assert missed_move.max_move_after_trigger_pct is not None
     assert [event.event_type for event in missed_move.replay_events] == [
@@ -327,6 +349,15 @@ def test_day_trade_refresh_uses_historical_levels_when_live_bias_is_inactive(
     assert latest_plan.levels["open_range_high"] == 210.4
     assert latest_plan.levels["open_range_low"] == 205.5
     assert latest_plan.levels["vwap"] is not None
+    row = summary.rows[0]
+    assert row.direction == "long"
+    assert row.entry == 210.41
+    assert row.stop == latest_plan.levels["vwap"]
+    assert row.target_1 == 215.31
+    assert row.open_range_high == 210.4
+    assert row.open_range_low == 205.5
+    assert row.vwap is not None
+    assert row.event_count == 2
 
 
 def test_etf_day_trade_replay_and_missed_move_generation(monkeypatch) -> None:
@@ -411,6 +442,79 @@ def test_missed_moves_today_pre_market_uses_previous_trading_day() -> None:
     )
 
     assert [row.id for row in summary.rows] == ["previous"]
+
+
+def test_day_trade_persistence_job_persists_and_is_idempotent(monkeypatch) -> None:
+    service, store = _service(
+        monkeypatch,
+        _frame(
+            [
+                (datetime(2026, 6, 5, 10, 5, tzinfo=ET), 210.0, 210.5, 209.8, 210.4),
+                (datetime(2026, 6, 5, 10, 10, tzinfo=ET), 210.5, 214.7, 210.4, 214.6),
+            ]
+        ),
+    )
+    persistence = DayTradeReplayPersistenceService(
+        trade_replay_service=service,
+        symbol_resolver=TrackedDayTradeSymbolResolver(),
+    )
+
+    first = persistence.persist_for_trading_date(SESSION_DATE, symbols=["NVDA"])
+    second = persistence.persist_for_trading_date(SESSION_DATE, symbols=["NVDA"])
+    service.now = datetime(2026, 6, 5, 16, 30, tzinfo=ET)
+
+    assert first.symbols_processed == 1
+    assert second.symbols_processed == 1
+    assert len(store.missed_moves) == 1
+    summary = service.list_missed_moves(
+        symbol="NVDA",
+        workflow="day_trade",
+        range_="today",
+        sort="most_recent",
+    )
+    assert [row.symbol for row in summary.rows] == ["NVDA"]
+
+
+def test_day_trade_persistence_job_skips_weekend(monkeypatch) -> None:
+    service, store = _service(monkeypatch, pd.DataFrame())
+    persistence = DayTradeReplayPersistenceService(
+        trade_replay_service=service,
+        symbol_resolver=TrackedDayTradeSymbolResolver(),
+    )
+
+    result = persistence.persist_for_trading_date(
+        date(2026, 6, 6),
+        symbols=["NVDA"],
+    )
+
+    assert result.symbols_processed == 0
+    assert result.skipped == ["2026-06-06 is not a trading day"]
+    assert store.missed_moves == []
+
+
+def test_day_trade_backfill_symbol_range_only_runs_trading_days(monkeypatch) -> None:
+    service, store = _service(
+        monkeypatch,
+        _frame(
+            [
+                (datetime(2026, 6, 5, 10, 5, tzinfo=ET), 210.0, 210.5, 209.8, 210.4),
+                (datetime(2026, 6, 5, 10, 10, tzinfo=ET), 210.5, 214.7, 210.4, 214.6),
+            ]
+        ),
+    )
+    persistence = DayTradeReplayPersistenceService(
+        trade_replay_service=service,
+        symbol_resolver=TrackedDayTradeSymbolResolver(),
+    )
+
+    results = persistence.backfill_symbol_range(
+        "NVDA",
+        date(2026, 6, 5),
+        date(2026, 6, 7),
+    )
+
+    assert [result.trading_date for result in results] == [SESSION_DATE]
+    assert len(store.missed_moves) == 1
 
 
 def test_missed_moves_last_5_trading_days_excludes_weekends_and_holidays() -> None:
