@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -42,6 +43,11 @@ COMPLETED_MISSED_MOVE_OUTCOMES = {
     "rr_degraded",
     "entry_missed",
 }
+MARKET_OPEN = time(9, 30)
+OPENING_RANGE_END = time(10, 0)
+MARKET_CLOSE = time(16, 0)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -378,8 +384,23 @@ class TradeReplayService:
             direction_mode=direction_mode if workflow == "day_trade" else "long_and_short",
         )
         created = self.store.append_events(events)
-        self.store.save_missed_moves(
-            build_completed_missed_moves(saved.plan, events, bars)
+        missed_moves = build_completed_missed_moves(saved.plan, events, bars)
+        missed_moves_created = self.store.save_missed_moves(missed_moves)
+        logger.info(
+            (
+                "Trade replay refresh trace: symbol=%s workflow=%s date=%s "
+                "direction_mode=%s bars=%s events=%s events_created=%s "
+                "completed_missed_moves=%s missed_moves_created=%s"
+            ),
+            symbol_upper,
+            workflow,
+            event_date.isoformat(),
+            direction_mode if workflow == "day_trade" else None,
+            len(bars),
+            len(events),
+            created,
+            len(missed_moves),
+            missed_moves_created,
         )
         return TradeReplayRefreshResponse(
             success=True,
@@ -406,6 +427,20 @@ class TradeReplayService:
         end_date = _current_trading_date(self.now or datetime.now(timezone.utc))
         trading_dates = _trading_day_window(end_date, 1 if range_ == "today" else 5)
         start_date = min(trading_dates)
+        logger.info(
+            (
+                "Missed moves query trace: symbol=%s workflow=%s range=%s sort=%s "
+                "timezone=%s start_date=%s end_date=%s trading_days=%s"
+            ),
+            symbol_upper,
+            workflow,
+            range_,
+            sort,
+            str(EASTERN),
+            start_date.isoformat(),
+            end_date.isoformat(),
+            ",".join(day.isoformat() for day in sorted(trading_dates)),
+        )
         rows = self.store.list_missed_moves(
             symbol=symbol_upper,
             workflow=workflow,
@@ -418,6 +453,18 @@ class TradeReplayService:
             if row.event_date in trading_dates and _is_trading_day(row.event_date)
         ]
         rows = _sort_missed_moves(rows, sort)
+        logger.info(
+            (
+                "Missed moves query result: symbol=%s workflow=%s range=%s "
+                "returned_rows=%s count_by_date=%s count_by_setup_type=%s"
+            ),
+            symbol_upper,
+            workflow,
+            range_,
+            len(rows),
+            _count_by_date(rows),
+            _count_by_setup_type(rows),
+        )
         return MissedMovesSummaryResponse(
             range=range_,
             sort=sort,
@@ -459,6 +506,11 @@ class TradeReplayService:
         or_high = _round_price(levels.open_range_high)
         or_low = _round_price(levels.open_range_low)
         vwap = _round_price(levels.vwap)
+        if or_high is None or or_low is None or vwap is None:
+            historical_levels = self._historical_day_trade_levels(symbol, event_date)
+            or_high = or_high if or_high is not None else historical_levels.get("or_high")
+            or_low = or_low if or_low is not None else historical_levels.get("or_low")
+            vwap = vwap if vwap is not None else historical_levels.get("vwap")
         width = _round_price(
             (or_high - or_low)
             if or_high is not None and or_low is not None
@@ -499,9 +551,31 @@ class TradeReplayService:
             "open_range_high": or_high,
             "open_range_low": or_low,
             "vwap": vwap,
-            "setup_type": bias.setup_type,
+            "setup_type": (
+                bias.setup_type
+                if bias.setup_type != "None" or or_high is None or or_low is None
+                else "OpeningRangeBreakout"
+            ),
             "direction_mode": direction_mode,
         }
+        logger.info(
+            (
+                "Day trade plan levels trace: symbol=%s date=%s direction_mode=%s "
+                "or_high=%s or_low=%s vwap=%s width=%s long_entry=%s "
+                "short_entry=%s data_gaps=%s warnings=%s"
+            ),
+            symbol,
+            event_date.isoformat(),
+            direction_mode,
+            or_high,
+            or_low,
+            vwap,
+            width,
+            plan_levels["long_entry"],
+            plan_levels["short_entry"],
+            bias.data_gaps,
+            bias.warnings,
+        )
         generated_at = _day_plan_start(event_date)
         payload = {
             "workflow": "day_trade",
@@ -522,6 +596,45 @@ class TradeReplayService:
             levels=plan_levels,
             payload=payload,
         )
+
+    def _historical_day_trade_levels(
+        self,
+        symbol: str,
+        event_date: date,
+    ) -> dict[str, float | None]:
+        hist = self.yfinance_adapter.get_history(
+            symbol,
+            period="5d",
+            interval="5m",
+            prepost=True,
+        )
+        bars = [
+            bar
+            for bar in _normalize_history(hist)
+            if _market_date(bar.timestamp) == event_date and _is_regular_session(bar)
+        ]
+        opening_range_bars = [
+            bar for bar in bars if _local_time(bar.timestamp) < OPENING_RANGE_END
+        ]
+        levels = {
+            "or_high": _round_price(_max_high(opening_range_bars)),
+            "or_low": _round_price(_min_low(opening_range_bars)),
+            "vwap": _round_price(_vwap(opening_range_bars)),
+        }
+        logger.info(
+            (
+                "Historical day trade levels trace: symbol=%s date=%s "
+                "regular_bars=%s opening_range_bars=%s or_high=%s or_low=%s vwap=%s"
+            ),
+            symbol,
+            event_date.isoformat(),
+            len(bars),
+            len(opening_range_bars),
+            levels["or_high"],
+            levels["or_low"],
+            levels["vwap"],
+        )
+        return levels
 
     def _build_swing_trade_plan(self, symbol: str, event_date: date) -> TradePlanRecord:
         playbook = build_trader_playbook(
@@ -1271,6 +1384,40 @@ def _market_date(value: datetime) -> date:
     return value.astimezone(EASTERN).date()
 
 
+def _local_time(value: datetime) -> time:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(EASTERN).time()
+
+
+def _is_regular_session(bar: ReplayBar) -> bool:
+    local_time = _local_time(bar.timestamp)
+    return MARKET_OPEN <= local_time < MARKET_CLOSE
+
+
+def _max_high(bars: list[ReplayBar]) -> float | None:
+    if not bars:
+        return None
+    return max(bar.high for bar in bars)
+
+
+def _min_low(bars: list[ReplayBar]) -> float | None:
+    if not bars:
+        return None
+    return min(bar.low for bar in bars)
+
+
+def _vwap(bars: list[ReplayBar]) -> float | None:
+    volume_total = sum(max(bar.volume, 0) for bar in bars)
+    if volume_total <= 0:
+        return None
+    dollar_volume = sum(
+        ((bar.high + bar.low + bar.close) / 3) * max(bar.volume, 0)
+        for bar in bars
+    )
+    return dollar_volume / volume_total
+
+
 def _stable_json_ready(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _stable_json_ready(value[key]) for key in sorted(value)}
@@ -1531,6 +1678,21 @@ def _sort_missed_moves(
     )
 
 
+def _count_by_date(records: list[MissedMoveRecord]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        key = record.event_date.isoformat()
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _count_by_setup_type(records: list[MissedMoveRecord]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        counts[record.setup_type] = counts.get(record.setup_type, 0) + 1
+    return counts
+
+
 def _date_ordinal(value: date) -> int:
     return value.toordinal()
 
@@ -1554,7 +1716,10 @@ def _summary_row(record: MissedMoveRecord) -> MissedMoveSummaryRow:
 def _current_trading_date(value: datetime) -> date:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
-    local_day = value.astimezone(EASTERN).date()
+    local_value = value.astimezone(EASTERN)
+    local_day = local_value.date()
+    if local_value.time() < MARKET_OPEN:
+        local_day -= timedelta(days=1)
     while not _is_trading_day(local_day):
         local_day -= timedelta(days=1)
     return local_day

@@ -73,6 +73,31 @@ def _bias_response() -> IntradayTradingBiasResponse:
     )
 
 
+def _inactive_bias_response() -> IntradayTradingBiasResponse:
+    return IntradayTradingBiasResponse(
+        bias="Neutral",
+        confidence="Low",
+        setup_type="None",
+        action="Watch",
+        levels=IntradayTradingBiasLevels(),
+        alignment=IntradayTradingBiasAlignment(
+            market="mixed",
+            intraday_trend="mixed",
+            vwap="below",
+            volume="neutral",
+            catalyst="none",
+        ),
+        reasons=[],
+        warnings=[
+            "Delayed/polled yfinance bars; not real-time.",
+            "Intraday read is inactive because market is closed or bars are stale.",
+        ],
+        data_gaps=["Intraday read is stale or outside market hours"],
+        last_updated=datetime(2026, 6, 5, 20, 0, tzinfo=timezone.utc),
+        staleness_seconds=7200,
+    )
+
+
 def _frame(rows: list[tuple[datetime, float, float, float, float]]) -> pd.DataFrame:
     return pd.DataFrame(
         {
@@ -251,6 +276,59 @@ def test_completed_missed_move_is_persisted(monkeypatch) -> None:
     ]
 
 
+def test_day_trade_refresh_uses_historical_levels_when_live_bias_is_inactive(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        replay_module,
+        "build_intraday_trading_bias",
+        lambda *args, **kwargs: _inactive_bias_response(),
+    )
+    bars = _frame(
+        [
+            (datetime(2026, 6, 5, 9, 30, tzinfo=ET), 206.0, 207.0, 205.5, 206.5),
+            (datetime(2026, 6, 5, 9, 35, tzinfo=ET), 206.5, 208.0, 206.0, 207.5),
+            (datetime(2026, 6, 5, 9, 40, tzinfo=ET), 207.5, 209.0, 207.0, 208.5),
+            (datetime(2026, 6, 5, 9, 45, tzinfo=ET), 208.5, 209.5, 208.0, 209.0),
+            (datetime(2026, 6, 5, 9, 50, tzinfo=ET), 209.0, 210.0, 208.5, 209.5),
+            (datetime(2026, 6, 5, 9, 55, tzinfo=ET), 209.5, 210.4, 209.0, 210.0),
+            (datetime(2026, 6, 5, 10, 5, tzinfo=ET), 210.2, 210.6, 210.0, 210.5),
+            (datetime(2026, 6, 5, 10, 10, tzinfo=ET), 210.5, 215.0, 210.4, 214.8),
+        ]
+    )
+    store = InMemoryTradeReplayStore()
+    service = TradeReplayService(
+        store=store,
+        yfinance_adapter=_FakeYFinanceAdapter(bars),  # type: ignore[arg-type]
+        now=datetime(2026, 6, 5, 16, 30, tzinfo=ET),
+    )
+
+    refresh = service.refresh(
+        symbol="NVDA",
+        workflow="day_trade",
+        event_date=SESSION_DATE,
+    )
+    summary = service.list_missed_moves(
+        symbol="NVDA",
+        workflow="day_trade",
+        range_="today",
+        sort="most_recent",
+    )
+
+    assert refresh.events_created == 2
+    assert len(store.missed_moves) == 1
+    assert len(summary.rows) == 1
+    latest_plan = store.latest_plan(
+        symbol="NVDA",
+        workflow="day_trade",
+        plan_date=SESSION_DATE,
+    )
+    assert latest_plan is not None
+    assert latest_plan.levels["open_range_high"] == 210.4
+    assert latest_plan.levels["open_range_low"] == 205.5
+    assert latest_plan.levels["vwap"] is not None
+
+
 def test_etf_day_trade_replay_and_missed_move_generation(monkeypatch) -> None:
     service, store = _service(
         monkeypatch,
@@ -309,6 +387,30 @@ def test_missed_moves_today_range_uses_eastern_trading_date() -> None:
     )
 
     assert [row.id for row in summary.rows] == ["today"]
+
+
+def test_missed_moves_today_pre_market_uses_previous_trading_day() -> None:
+    store = InMemoryTradeReplayStore()
+    store.save_missed_moves(
+        [
+            _missed_move(missed_move_id="previous", event_date=date(2026, 6, 15)),
+            _missed_move(missed_move_id="older", event_date=date(2026, 6, 12)),
+        ]
+    )
+    service = TradeReplayService(
+        store=store,
+        yfinance_adapter=_FakeYFinanceAdapter(pd.DataFrame()),  # type: ignore[arg-type]
+        now=datetime(2026, 6, 16, 1, 30, tzinfo=ET),
+    )
+
+    summary = service.list_missed_moves(
+        symbol="NVDA",
+        workflow="day_trade",
+        range_="today",
+        sort="most_recent",
+    )
+
+    assert [row.id for row in summary.rows] == ["previous"]
 
 
 def test_missed_moves_last_5_trading_days_excludes_weekends_and_holidays() -> None:

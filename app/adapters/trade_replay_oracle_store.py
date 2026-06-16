@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -16,6 +17,8 @@ from app.services.trade_replay_service import (
 _PLAN_TABLE = "TRADE_PLANS"
 _EVENT_TABLE = "TRADE_REPLAY_EVENTS"
 _MISSED_MOVE_TABLE = "MISSED_MOVES"
+
+logger = logging.getLogger(__name__)
 
 
 class OracleTradeReplayStore:
@@ -329,6 +332,7 @@ class OracleTradeReplayStore:
 
     def save_missed_moves(self, missed_moves: list[MissedMoveRecord]) -> int:
         if not missed_moves:
+            logger.info("Missed moves save skipped: no completed missed moves to persist")
             return 0
         sql = f"""
             INSERT INTO {_MISSED_MOVE_TABLE} (
@@ -356,6 +360,14 @@ class OracleTradeReplayStore:
             con.commit()
         finally:
             con.close()
+        logger.info(
+            "Missed moves save completed: attempted=%s created=%s symbols=%s dates=%s setup_types=%s",
+            len(missed_moves),
+            created,
+            _count_by_attr(missed_moves, "symbol"),
+            _count_by_event_date(missed_moves),
+            _count_by_attr(missed_moves, "setup_type"),
+        )
         return created
 
     def list_missed_moves(
@@ -386,7 +398,98 @@ class OracleTradeReplayStore:
                 "end_date": end_date,
             },
         )
-        return [_missed_move_from_row(row) for row in rows]
+        records = [_missed_move_from_row(row) for row in rows]
+        logger.info(
+            (
+                "Missed moves SQL result: symbol=%s workflow=%s start_date=%s "
+                "end_date=%s returned_rows=%s latest_date=%s count_by_date=%s "
+                "count_by_setup_type=%s"
+            ),
+            symbol.upper(),
+            workflow,
+            start_date.isoformat(),
+            end_date.isoformat(),
+            len(records),
+            max((record.event_date for record in records), default=None),
+            _count_by_event_date(records),
+            _count_by_attr(records, "setup_type"),
+        )
+        self._log_missed_move_table_snapshot(symbol=symbol.upper(), workflow=workflow)
+        return records
+
+    def _log_missed_move_table_snapshot(
+        self,
+        *,
+        symbol: str,
+        workflow: TradeReplayWorkflow,
+    ) -> None:
+        total_sql = f"""
+            SELECT COUNT(*), MAX(event_date)
+            FROM {_MISSED_MOVE_TABLE}
+            WHERE symbol = :symbol
+              AND workflow = :workflow
+        """
+        by_symbol_sql = f"""
+            SELECT symbol, COUNT(*)
+            FROM {_MISSED_MOVE_TABLE}
+            WHERE workflow = :workflow
+            GROUP BY symbol
+            ORDER BY COUNT(*) DESC
+            FETCH FIRST 20 ROWS ONLY
+        """
+        by_date_sql = f"""
+            SELECT event_date, COUNT(*)
+            FROM {_MISSED_MOVE_TABLE}
+            WHERE symbol = :symbol
+              AND workflow = :workflow
+            GROUP BY event_date
+            ORDER BY event_date DESC
+            FETCH FIRST 10 ROWS ONLY
+        """
+        by_setup_sql = f"""
+            SELECT setup_type, COUNT(*)
+            FROM {_MISSED_MOVE_TABLE}
+            WHERE symbol = :symbol
+              AND workflow = :workflow
+            GROUP BY setup_type
+            ORDER BY COUNT(*) DESC
+        """
+        try:
+            total_row = self._fetchone(
+                total_sql,
+                {"symbol": symbol, "workflow": workflow},
+            )
+            by_symbol = self._fetchall(by_symbol_sql, {"workflow": workflow})
+            by_date = self._fetchall(
+                by_date_sql,
+                {"symbol": symbol, "workflow": workflow},
+            )
+            by_setup = self._fetchall(
+                by_setup_sql,
+                {"symbol": symbol, "workflow": workflow},
+            )
+        except Exception:
+            logger.warning(
+                "Missed moves table snapshot failed for %s/%s",
+                symbol,
+                workflow,
+                exc_info=True,
+            )
+            return
+        logger.info(
+            (
+                "Missed moves table snapshot: symbol=%s workflow=%s "
+                "symbol_total=%s latest_symbol_date=%s count_by_symbol=%s "
+                "count_by_trading_date=%s count_by_setup_type=%s"
+            ),
+            symbol,
+            workflow,
+            total_row[0] if total_row else 0,
+            total_row[1] if total_row else None,
+            {str(row[0]): int(row[1]) for row in by_symbol},
+            {str(row[0]): int(row[1]) for row in by_date},
+            {str(row[0]): int(row[1]) for row in by_setup},
+        )
 
     def get_missed_move(self, missed_move_id: str) -> MissedMoveRecord | None:
         sql = f"""
@@ -559,6 +662,22 @@ def _missed_move_to_row(missed_move: MissedMoveRecord) -> dict[str, Any]:
         ),
         "created_at": missed_move.created_at or datetime.now(timezone.utc),
     }
+
+
+def _count_by_attr(records: list[MissedMoveRecord], attr: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        key = str(getattr(record, attr))
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _count_by_event_date(records: list[MissedMoveRecord]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        key = record.event_date.isoformat()
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _missed_move_from_row(row: tuple[Any, ...]) -> MissedMoveRecord:
