@@ -4,6 +4,8 @@ import math
 from numbers import Real
 from typing import Any
 
+from starlette.responses import JSONResponse
+
 try:
     import numpy as np
 except Exception:  # pragma: no cover - numpy is available in normal backend runtime
@@ -34,3 +36,10 @@ def sanitize_json_value(value: Any) -> Any:
         return value if math.isfinite(float(value)) else None
 
     return value
+
+
+class SanitizedJSONResponse(JSONResponse):
+    """JSON response that converts NaN/Infinity-like values to null."""
+
+    def render(self, content: Any) -> bytes:
+        return super().render(sanitize_json_value(content))
