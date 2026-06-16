@@ -10,6 +10,7 @@ _MODEL_CONFIG = ConfigDict(populate_by_name=True)
 
 OptimizationRating = Literal["Excellent", "Good", "Fair", "Weak", "Poor"]
 OptimizationStatus = Literal["strong", "good", "watch", "poor", "unavailable"]
+OptimizationScoreTone = Literal["excellent", "good", "fair", "weak", "poor"]
 
 
 class PortfolioStockWeight(BaseModel):
@@ -72,6 +73,18 @@ class PortfolioOptimizationSuggestion(BaseModel):
     title: str
     why: str
     action: str
+    current_allocation_pct: float | None = Field(
+        default=None, serialization_alias="currentAllocationPct"
+    )
+    target_allocation_pct: float | None = Field(
+        default=None, serialization_alias="targetAllocationPct"
+    )
+    current_value: float | None = Field(default=None, serialization_alias="currentValue")
+    target_value: float | None = Field(default=None, serialization_alias="targetValue")
+    delta_value: float | None = Field(default=None, serialization_alias="deltaValue")
+    estimated_shares: float | None = Field(
+        default=None, serialization_alias="estimatedShares"
+    )
     impact_score: float = Field(serialization_alias="impactScore")
     estimated_score_improvement: float = Field(
         serialization_alias="estimatedScoreImprovement"
@@ -84,6 +97,8 @@ class PortfolioOptimizationResponse(BaseModel):
 
     diversification_score: int = Field(serialization_alias="diversificationScore")
     rating: OptimizationRating
+    score_tone: OptimizationScoreTone = Field(serialization_alias="scoreTone")
+    score_color: str = Field(serialization_alias="scoreColor")
     stock_weights: list[PortfolioStockWeight] = Field(
         default_factory=list, serialization_alias="stockWeights"
     )

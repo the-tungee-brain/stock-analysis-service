@@ -113,8 +113,19 @@ def test_portfolio_optimization_scores_concentrated_portfolio():
     assert response.stock_weights[0].invested_weight_pct == pytest.approx(84.21, rel=1e-3)
     assert response.stock_weights[0].weight_pct == 80.0
     assert response.stock_weights[0].level == "critical"
+    assert response.rating == "Poor"
+    assert response.score_tone == "poor"
+    assert response.score_color == "#dc2626"
     assert response.ranked_suggestions[0].category == "stockConcentration"
     assert "NVDA" in response.ranked_suggestions[0].title
+    assert response.ranked_suggestions[0].current_allocation_pct == 80.0
+    assert response.ranked_suggestions[0].target_allocation_pct == 40.0
+    assert response.ranked_suggestions[0].current_value == 80_000
+    assert response.ranked_suggestions[0].target_value == 40_000
+    assert response.ranked_suggestions[0].delta_value == -40_000
+    assert response.ranked_suggestions[0].estimated_shares == 50.0
+    assert "Educational estimate" in response.ranked_suggestions[0].action
+    assert "$40,000" in response.ranked_suggestions[0].action
 
 
 def test_portfolio_optimization_scores_diversified_portfolio():
@@ -340,6 +351,8 @@ def test_portfolio_optimization_response_uses_camel_case_aliases():
     payload = response.model_dump(by_alias=True)
 
     assert "diversificationScore" in payload
+    assert "scoreTone" in payload
+    assert "scoreColor" in payload
     assert "stockWeights" in payload
     assert "portfolioWeightPct" in payload["stockWeights"][0]
     assert "investedWeightPct" in payload["stockWeights"][0]
@@ -347,6 +360,11 @@ def test_portfolio_optimization_response_uses_camel_case_aliases():
     assert "topDrivers" in payload
     assert "rankedSuggestions" in payload
     assert "estimatedScoreImprovement" in payload["rankedSuggestions"][0]
+    assert "targetAllocationPct" in payload["rankedSuggestions"][0]
+    assert "currentValue" in payload["rankedSuggestions"][0]
+    assert "targetValue" in payload["rankedSuggestions"][0]
+    assert "deltaValue" in payload["rankedSuggestions"][0]
+    assert "estimatedShares" in payload["rankedSuggestions"][0]
     assert "dataGaps" in payload
 
 

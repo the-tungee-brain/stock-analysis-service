@@ -30,6 +30,8 @@ class _OptimizationHoldingRow:
     symbol: str
     market_value: float
     asset_type: str | None = None
+    quantity: float | None = None
+    latest_price: float | None = None
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
@@ -66,6 +68,18 @@ class PortfolioOptimizationService:
                 market_value=(existing.market_value if existing else 0.0)
                 + market_value,
                 asset_type=(existing.asset_type if existing else position.asset_type),
+                quantity=(existing.quantity if existing else 0.0)
+                + (
+                    abs(position.quantity)
+                    if PortfolioOptimizationService._is_equity_type(position.asset_type)
+                    else 0.0
+                ),
+                latest_price=(
+                    abs(position.market_value) / abs(position.quantity)
+                    if position.quantity
+                    and PortfolioOptimizationService._is_equity_type(position.asset_type)
+                    else (existing.latest_price if existing else None)
+                ),
             )
 
         return self._build_from_rows(
@@ -194,6 +208,8 @@ class PortfolioOptimizationService:
         return PortfolioOptimizationResponse(
             diversification_score=int(_clamp(score)),
             rating=self._rating(score),
+            score_tone=self._score_tone(score),
+            score_color=self._score_color(score),
             stock_weights=stock_weights,
             sector_weights=sector_weights,
             breakdown=breakdown,
@@ -205,10 +221,12 @@ class PortfolioOptimizationService:
             )[:5],
             ranked_suggestions=self._suggestions(
                 stock_weights=stock_weights,
+                rows=rows,
                 distinct_symbols=len(stock_weights),
                 effective_names=effective_names,
                 top_sector=top_sector,
                 etf_weight=etf_weight,
+                liquidation_value=liquidation_value,
             )[:5],
             data_gaps=data_gaps,
         )
@@ -227,6 +245,8 @@ class PortfolioOptimizationService:
         return PortfolioOptimizationResponse(
             diversification_score=0,
             rating="Poor",
+            score_tone="poor",
+            score_color=PortfolioOptimizationService._score_color(0),
             stock_weights=[],
             sector_weights=[],
             breakdown=PortfolioOptimizationBreakdown(
@@ -261,8 +281,41 @@ class PortfolioOptimizationService:
                 market_value=(existing.market_value if existing else 0.0)
                 + abs(position.marketValue),
                 asset_type=(existing.asset_type if existing else asset_type),
+                quantity=(existing.quantity if existing else 0.0)
+                + PortfolioOptimizationService._position_quantity_for_shares(position),
+                latest_price=PortfolioOptimizationService._latest_share_price(
+                    position=position,
+                    existing_price=existing.latest_price if existing else None,
+                ),
             )
         return list(rows.values())
+
+    @staticmethod
+    def _position_quantity_for_shares(position: Position) -> float:
+        if not PortfolioOptimizationService._is_equity_type(
+            position.instrument.assetType
+        ):
+            return 0.0
+        return abs((position.longQuantity or 0.0) - (position.shortQuantity or 0.0))
+
+    @staticmethod
+    def _latest_share_price(
+        *,
+        position: Position,
+        existing_price: float | None,
+    ) -> float | None:
+        if not PortfolioOptimizationService._is_equity_type(
+            position.instrument.assetType
+        ):
+            return existing_price
+        quantity = PortfolioOptimizationService._position_quantity_for_shares(position)
+        if quantity <= 0:
+            return existing_price
+        return abs(position.marketValue) / quantity
+
+    @staticmethod
+    def _is_equity_type(value: str | None) -> bool:
+        return (value or "").strip().upper() in {"EQUITY", "STOCK"}
 
     @staticmethod
     def _stock_weights_from_rows(
@@ -372,6 +425,22 @@ class PortfolioOptimizationService:
         if score >= 40:
             return "Weak"
         return "Poor"
+
+    @staticmethod
+    def _score_tone(score: float) -> str:
+        return PortfolioOptimizationService._rating(score).lower()
+
+    @staticmethod
+    def _score_color(score: float) -> str:
+        if score >= 85:
+            return "#16a34a"
+        if score >= 70:
+            return "#22c55e"
+        if score >= 55:
+            return "#ca8a04"
+        if score >= 40:
+            return "#f97316"
+        return "#dc2626"
 
     @staticmethod
     def _local_sector_weights(
@@ -511,30 +580,61 @@ class PortfolioOptimizationService:
     def _suggestions(
         *,
         stock_weights: list[PortfolioStockWeight],
+        rows: list[_OptimizationHoldingRow],
         distinct_symbols: int,
         effective_names: float,
         top_sector: SectorWeight | None,
         etf_weight: float,
+        liquidation_value: float,
     ) -> list[PortfolioOptimizationSuggestion]:
         suggestions: list[PortfolioOptimizationSuggestion] = []
         rank = 1
+        rows_by_symbol = {row.symbol: row for row in rows}
 
         top_stock = stock_weights[0] if stock_weights else None
         if top_stock and top_stock.portfolio_weight_pct >= 20:
             target = (
-                50.0
+                40.0
                 if top_stock.portfolio_weight_pct >= 70
                 else 30.0
                 if top_stock.portfolio_weight_pct >= 50
                 else 20.0
             )
+            target_value = PortfolioOptimizationService._allocation_value(
+                liquidation_value,
+                target,
+            )
+            delta_value = target_value - top_stock.market_value
+            estimated_shares = PortfolioOptimizationService._estimated_trim_shares(
+                row=rows_by_symbol.get(top_stock.symbol),
+                trim_value=abs(delta_value),
+            )
+            trim_phrase = PortfolioOptimizationService._dollar_phrase(abs(delta_value))
+            share_phrase = (
+                f", roughly {PortfolioOptimizationService._shares_phrase(estimated_shares)}"
+                if estimated_shares is not None
+                else ""
+            )
             suggestions.append(
                 PortfolioOptimizationSuggestion(
                     rank=rank,
                     category="stockConcentration",
-                    title=f"Reduce {top_stock.symbol} below {target:.0f}%",
-                    why=f"{top_stock.symbol} is {top_stock.portfolio_weight_pct:.1f}% of portfolio value.",
-                    action="Trim or avoid adding until the position falls below the target weight.",
+                    title=f"Trim {top_stock.symbol} toward {target:.0f}%",
+                    why=(
+                        f"{top_stock.symbol} is the main source of single-name "
+                        "concentration risk."
+                    ),
+                    action=(
+                        "Educational estimate: "
+                        f"trim about {trim_phrase} of {top_stock.symbol}"
+                        f"{share_phrase} to move toward {target:.1f}%."
+                    ),
+                    current_allocation_pct=top_stock.portfolio_weight_pct,
+                    target_allocation_pct=target,
+                    current_value=top_stock.market_value,
+                    target_value=target_value,
+                    delta_value=round(delta_value, 2),
+                    estimated_shares=estimated_shares,
                     impact_score=min(100, top_stock.portfolio_weight_pct * 1.4),
                     estimated_score_improvement=round(
                         min(
@@ -549,16 +649,39 @@ class PortfolioOptimizationService:
             rank += 1
 
         if top_sector and top_sector.weight_pct >= 35:
+            target = 60.0 if top_sector.weight_pct >= 60 else 35.0
+            current_value = PortfolioOptimizationService._allocation_value(
+                liquidation_value,
+                top_sector.weight_pct,
+            )
+            target_value = PortfolioOptimizationService._allocation_value(
+                liquidation_value,
+                target,
+            )
+            delta_value = target_value - current_value
             suggestions.append(
                 PortfolioOptimizationSuggestion(
                     rank=rank,
                     category="sectorConcentration",
-                    title=f"Reduce {top_sector.sector} exposure",
-                    why=f"{top_sector.sector} represents {top_sector.weight_pct:.1f}% of portfolio value.",
-                    action="Direct new capital away from this sector until exposure normalizes.",
+                    title=f"Bring {top_sector.sector} below {target:.0f}%",
+                    why=(
+                        "Portfolio risk is concentrated in one sector, which can "
+                        "make outcomes depend on the same market drivers."
+                    ),
+                    action=(
+                        "Educational estimate: "
+                        "redirect about "
+                        f"{PortfolioOptimizationService._dollar_phrase(abs(delta_value))} "
+                        f"of {top_sector.sector} exposure into other sectors over time."
+                    ),
+                    current_allocation_pct=top_sector.weight_pct,
+                    target_allocation_pct=target,
+                    current_value=current_value,
+                    target_value=target_value,
+                    delta_value=round(delta_value, 2),
                     impact_score=min(100, top_sector.weight_pct * 1.2),
                     estimated_score_improvement=round(
-                        min(25, max(top_sector.weight_pct - 35, 0) * 0.3),
+                        min(25, max(top_sector.weight_pct - target, 0) * 0.3),
                         0,
                     ),
                     symbols=top_sector.symbols[:5],
@@ -566,17 +689,38 @@ class PortfolioOptimizationService:
             )
             rank += 1
 
-        if etf_weight < 30:
+        if etf_weight < 25:
+            target = 25.0
+            current_value = PortfolioOptimizationService._allocation_value(
+                liquidation_value,
+                etf_weight,
+            )
+            target_value = PortfolioOptimizationService._allocation_value(
+                liquidation_value,
+                target,
+            )
+            delta_value = target_value - current_value
             suggestions.append(
                 PortfolioOptimizationSuggestion(
                     rank=rank,
                     category="etfDiversification",
-                    title="Increase broad-market ETF exposure",
-                    why=f"ETF exposure is {etf_weight:.1f}%, leaving diversification dependent on single names.",
-                    action="Use future contributions or trim proceeds for broad ETF exposure.",
+                    title=f"Increase broad ETF exposure to {target:.0f}%",
+                    why=(
+                        "Broad ETFs reduce dependence on single-stock outcomes."
+                    ),
+                    action=(
+                        "Educational estimate: "
+                        f"buy about {PortfolioOptimizationService._dollar_phrase(delta_value)} "
+                        "of broad-market ETFs such as VOO, VTI, or SCHB."
+                    ),
+                    current_allocation_pct=round(etf_weight, 2),
+                    target_allocation_pct=target,
+                    current_value=current_value,
+                    target_value=target_value,
+                    delta_value=round(delta_value, 2),
                     impact_score=min(100, 70 - etf_weight),
                     estimated_score_improvement=round(
-                        min(15, (30 - etf_weight) * 0.3),
+                        min(15, (target - etf_weight) * 0.3),
                         0,
                     ),
                     symbols=[],
@@ -591,18 +735,56 @@ class PortfolioOptimizationService:
                     category="positionCount",
                     title="Broaden position count",
                     why=f"The portfolio has {distinct_symbols} names and {effective_names:.1f} effective names.",
-                    action="Add diversified exposure before adding more to the largest holdings.",
+                    action=(
+                        "Educational estimate: use new capital or trim proceeds to "
+                        "build toward at least 8 distinct holdings; about "
+                        f"{PortfolioOptimizationService._dollar_phrase(liquidation_value / 8)} "
+                        "per holding would be an equal-weight reference point."
+                    ),
                     impact_score=max(25, (8 - distinct_symbols) * 12),
                     estimated_score_improvement=round(min(10, 8 - distinct_symbols), 0),
                     symbols=[],
                 )
             )
 
-        suggestions.sort(key=lambda item: item.impact_score, reverse=True)
+        suggestions.sort(
+            key=lambda item: item.estimated_score_improvement,
+            reverse=True,
+        )
         return [
             item.model_copy(update={"rank": index + 1})
             for index, item in enumerate(suggestions)
         ]
+
+    @staticmethod
+    def _allocation_value(total_value: float, allocation_pct: float) -> float:
+        return round(total_value * (allocation_pct / 100.0), 2)
+
+    @staticmethod
+    def _estimated_trim_shares(
+        *,
+        row: _OptimizationHoldingRow | None,
+        trim_value: float,
+    ) -> float | None:
+        if row is None or not PortfolioOptimizationService._is_equity_type(
+            row.asset_type
+        ):
+            return None
+        if row.latest_price is None or row.latest_price <= 0:
+            return None
+        if row.quantity is not None and row.quantity <= 0:
+            return None
+        return round(trim_value / row.latest_price, 2)
+
+    @staticmethod
+    def _dollar_phrase(value: float) -> str:
+        return f"${abs(value):,.0f}"
+
+    @staticmethod
+    def _shares_phrase(value: float) -> str:
+        if value == round(value):
+            return f"{int(round(value))} shares"
+        return f"{value:,.2f} shares"
 
     @staticmethod
     def _effective_names(stock_weights: list[PortfolioStockWeight]) -> float:
