@@ -468,6 +468,25 @@ class TradeReplayService:
             end_date.isoformat(),
             ",".join(day.isoformat() for day in sorted(trading_dates)),
         )
+        if workflow == "day_trade" and end_date in trading_dates:
+            try:
+                self.refresh(
+                    symbol=symbol_upper,
+                    workflow=workflow,
+                    event_date=end_date,
+                    direction_mode="long_and_short",
+                )
+            except Exception:
+                logger.warning(
+                    (
+                        "Missed moves current-day materialization failed: "
+                        "symbol=%s workflow=%s date=%s"
+                    ),
+                    symbol_upper,
+                    workflow,
+                    end_date.isoformat(),
+                    exc_info=True,
+                )
         rows = self.store.list_missed_moves(
             symbol=symbol_upper,
             workflow=workflow,

@@ -360,6 +360,33 @@ def test_day_trade_refresh_uses_historical_levels_when_live_bias_is_inactive(
     assert row.event_count == 2
 
 
+def test_missed_moves_summary_materializes_current_day(monkeypatch) -> None:
+    service, store = _service(
+        monkeypatch,
+        _frame(
+            [
+                (datetime(2026, 6, 5, 10, 5, tzinfo=ET), 210.0, 210.5, 209.8, 210.4),
+                (datetime(2026, 6, 5, 10, 10, tzinfo=ET), 210.5, 214.7, 210.4, 214.6),
+            ]
+        ),
+    )
+    service.now = datetime(2026, 6, 5, 16, 30, tzinfo=ET)
+
+    assert store.missed_moves == []
+
+    summary = service.list_missed_moves(
+        symbol="nvda",
+        workflow="day_trade",
+        range_="today",
+        sort="most_recent",
+    )
+
+    assert len(summary.rows) == 1
+    assert summary.rows[0].symbol == "NVDA"
+    assert summary.rows[0].outcome == "target_hit"
+    assert len(store.missed_moves) == 1
+
+
 def test_etf_day_trade_replay_and_missed_move_generation(monkeypatch) -> None:
     service, store = _service(
         monkeypatch,
