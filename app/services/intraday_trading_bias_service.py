@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any
 
 import pandas as pd
 
 from app.adapters.market.yfinance_adapter import YFinanceAdapter
 from app.builders.intraday_trading_bias_engine import (
+    EASTERN,
     IntradayBar,
     IntradayTradingBiasInputs,
+    OPENING_RANGE_END,
     classify_session,
     evaluate_intraday_trading_bias,
 )
@@ -57,7 +60,7 @@ def build_intraday_trading_bias(
         research_events_service=research_events_service,
     )
 
-    return evaluate_intraday_trading_bias(
+    response = evaluate_intraday_trading_bias(
         IntradayTradingBiasInputs(
             symbol=symbol_upper,
             bars=bars,
@@ -69,6 +72,89 @@ def build_intraday_trading_bias(
             warnings=warnings,
         )
     )
+    _log_intraday_setup_trace(symbol_upper, bars, response)
+    return response
+
+
+def _log_intraday_setup_trace(
+    symbol_upper: str,
+    bars: list[IntradayBar],
+    response: IntradayTradingBiasResponse,
+) -> None:
+    regular_bars = [bar for bar in bars if bar.session == "regular"]
+    trading_date = _latest_trading_date(regular_bars or bars)
+    opening_range_bars = [
+        bar
+        for bar in regular_bars
+        if bar.timestamp.astimezone(EASTERN).time() < OPENING_RANGE_END
+    ]
+    opening_range_high = _max_high(opening_range_bars)
+    opening_range_low = _min_low(opening_range_bars)
+    vwap = _vwap(regular_bars)
+    rejection_reason = _intraday_rejection_reason(response)
+
+    logger.info(
+        (
+            "Intraday day-trade setup trace: symbol=%s trading_date=%s "
+            "intraday_bars=%s regular_bars=%s opening_range_high=%s "
+            "opening_range_low=%s vwap=%s setup_status=%s rejection_reason=%s"
+        ),
+        symbol_upper,
+        trading_date.isoformat() if trading_date else None,
+        len(bars),
+        len(regular_bars),
+        _round_for_log(opening_range_high),
+        _round_for_log(opening_range_low),
+        _round_for_log(vwap),
+        f"{response.bias}/{response.setup_type}/{response.action}",
+        rejection_reason,
+    )
+
+
+def _latest_trading_date(bars: list[IntradayBar]) -> date | None:
+    if not bars:
+        return None
+    return max(bar.timestamp.astimezone(EASTERN).date() for bar in bars)
+
+
+def _intraday_rejection_reason(response: IntradayTradingBiasResponse) -> str | None:
+    if response.levels.open_range_high is None or response.levels.open_range_low is None:
+        if response.data_gaps:
+            return "; ".join(response.data_gaps)
+        if response.warnings:
+            return "; ".join(response.warnings)
+        return "opening_range_missing"
+    if response.action in {"Avoid", "RiskOff", "Watch"}:
+        reasons = response.reasons or response.warnings or response.data_gaps
+        return "; ".join(reasons) if reasons else response.action
+    return None
+
+
+def _max_high(bars: list[IntradayBar]) -> float | None:
+    if not bars:
+        return None
+    return max(bar.high for bar in bars)
+
+
+def _min_low(bars: list[IntradayBar]) -> float | None:
+    if not bars:
+        return None
+    return min(bar.low for bar in bars)
+
+
+def _vwap(bars: list[IntradayBar]) -> float | None:
+    volume_total = sum(max(bar.volume, 0) for bar in bars)
+    if volume_total <= 0:
+        return None
+    dollar_volume = sum(
+        ((bar.high + bar.low + bar.close) / 3) * max(bar.volume, 0)
+        for bar in bars
+    )
+    return dollar_volume / volume_total
+
+
+def _round_for_log(value: float | None) -> float | None:
+    return round(value, 4) if value is not None else None
 
 
 def _load_intraday_bars(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
@@ -217,3 +218,49 @@ def test_intraday_trading_bias_route_supports_core_etfs_without_company_metadata
             assert (symbol, "5d", "5m", True) in fake_adapter.calls
     finally:
         app.dependency_overrides.clear()
+
+
+def test_intraday_trading_bias_logs_day_trade_setup_trace(monkeypatch, caplog):
+    fake_adapter = _FakeYFinanceAdapter()
+
+    def evaluate_with_fresh_now(inputs):
+        return evaluate_intraday_trading_bias(
+            type(inputs)(
+                symbol=inputs.symbol,
+                bars=inputs.bars,
+                market_bars=inputs.market_bars,
+                support=inputs.support,
+                resistance=inputs.resistance,
+                catalyst=inputs.catalyst,
+                data_gaps=inputs.data_gaps,
+                warnings=inputs.warnings,
+                now=datetime(2026, 6, 5, 10, 15, tzinfo=ET),
+            )
+        )
+
+    monkeypatch.setattr(
+        intraday_service_module,
+        "evaluate_intraday_trading_bias",
+        evaluate_with_fresh_now,
+    )
+
+    with caplog.at_level(logging.INFO, logger=intraday_service_module.__name__):
+        intraday_service_module.build_intraday_trading_bias(
+            "nvda",
+            yfinance_adapter=fake_adapter,  # type: ignore[arg-type]
+            loaded_model=None,
+            pattern_analysis_service=None,
+            research_events_service=None,
+        )
+
+    message = "\n".join(record.getMessage() for record in caplog.records)
+    assert "Intraday day-trade setup trace" in message
+    assert "symbol=NVDA" in message
+    assert "trading_date=2026-06-05" in message
+    assert "intraday_bars=11" in message
+    assert "regular_bars=9" in message
+    assert "opening_range_high=103" in message
+    assert "opening_range_low=99" in message
+    assert "vwap=" in message
+    assert "setup_status=" in message
+    assert "rejection_reason=" in message
