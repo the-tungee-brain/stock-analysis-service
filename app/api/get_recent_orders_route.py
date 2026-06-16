@@ -1,5 +1,6 @@
 from typing import Optional
 
+import requests
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth.dependencies import get_current_user_id
@@ -18,6 +19,17 @@ from app.services.transaction_service import (
 )
 
 router = APIRouter()
+
+
+def _raise_schwab_dependency_error(exc: requests.exceptions.RequestException) -> None:
+    status_code = 504 if isinstance(exc, requests.exceptions.Timeout) else 503
+    raise HTTPException(
+        status_code=status_code,
+        detail={
+            "message": "Schwab is temporarily unavailable. Please retry shortly.",
+            "retryable": True,
+        },
+    ) from exc
 
 
 @router.get("/recent-orders", response_model=RecentOrdersResponse)
@@ -56,19 +68,24 @@ def get_recent_orders(
             status_code=401,
             detail=schwab_auth_service.reauth_http_detail(user_id, exc),
         )
+    except requests.exceptions.RequestException as exc:
+        _raise_schwab_dependency_error(exc)
 
-    account = portfolio_service.get_enriched_account(
-        access_token=schwab_token.access_token
-    )["account"]
-    account_number = account.securitiesAccount.accountNumber
+    try:
+        account = portfolio_service.get_enriched_account(
+            access_token=schwab_token.access_token
+        )["account"]
+        account_number = account.securitiesAccount.accountNumber
 
-    return transaction_service.build_recent_orders_response(
-        account_number=account_number,
-        access_token=schwab_token.access_token,
-        user_id=user_id,
-        symbol=symbol,
-        days_back=days_back,
-        limit=limit,
-        offset=offset,
-        refresh=refresh,
-    )
+        return transaction_service.build_recent_orders_response(
+            account_number=account_number,
+            access_token=schwab_token.access_token,
+            user_id=user_id,
+            symbol=symbol,
+            days_back=days_back,
+            limit=limit,
+            offset=offset,
+            refresh=refresh,
+        )
+    except requests.exceptions.RequestException as exc:
+        _raise_schwab_dependency_error(exc)
