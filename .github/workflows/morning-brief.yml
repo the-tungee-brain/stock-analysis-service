@@ -6,6 +6,12 @@ on:
     # Off the hour to reduce GitHub schedule drops at :00.
     - cron: "23 13 * * *"
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Force resend even if a brief was already delivered today"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   prewarm:
@@ -52,6 +58,7 @@ jobs:
         env:
           API_BASE_URL: ${{ secrets.API_BASE_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          FORCE_SEND: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
         run: |
           set -euo pipefail
 
@@ -61,7 +68,7 @@ jobs:
           fi
 
           response="$(curl -sS --max-time 300 -w "\n%{http_code}" -X POST \
-            "${API_BASE_URL%/}/internal/dispatch-morning-briefs" \
+            "${API_BASE_URL%/}/internal/dispatch-morning-briefs?force=${FORCE_SEND}" \
             -H "X-Cron-Secret: ${CRON_SECRET}" \
             -H "Content-Type: application/json")"
 
