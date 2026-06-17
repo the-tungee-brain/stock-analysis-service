@@ -781,7 +781,7 @@ def _plan_from_row(row: tuple[Any, ...]) -> TradePlanRecord:
         plan_id=str(plan_id),
         symbol=str(symbol),
         workflow=str(workflow),  # type: ignore[arg-type]
-        plan_date=plan_date,
+        plan_date=_date_value(plan_date),
         generated_at=_aware_datetime(generated_at),
         source=str(source),  # type: ignore[arg-type]
         source_freshness_label=str(source_freshness_label or ""),
@@ -836,7 +836,7 @@ def _event_from_row(row: tuple[Any, ...]) -> TradeReplayEvent:
         id=str(event_id),
         plan_id=str(plan_id) if plan_id else None,
         symbol=str(symbol),
-        event_date=event_date,
+        event_date=_date_value(event_date),
         workflow=str(workflow),  # type: ignore[arg-type]
         event_type=str(event_type),
         event_time=_aware_datetime(event_time),
@@ -941,7 +941,7 @@ def _missed_move_from_row(row: tuple[Any, ...]) -> MissedMoveRecord:
         missed_move_id=str(missed_move_id),
         symbol=str(symbol),
         workflow=str(workflow),  # type: ignore[arg-type]
-        event_date=event_date,
+        event_date=_date_value(event_date),
         setup_type=str(setup_type),
         direction=str(direction or "unknown"),
         trigger_time=_aware_datetime(trigger_time) if trigger_time else None,
@@ -977,6 +977,12 @@ def _missed_move_from_row(row: tuple[Any, ...]) -> MissedMoveRecord:
         created_at=_aware_datetime(created_at),
         updated_at=_aware_datetime(updated_at) if updated_at else None,
     )
+
+
+def _date_value(value: date | datetime) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    return value
 
 
 def _aware_datetime(value: datetime) -> datetime:
