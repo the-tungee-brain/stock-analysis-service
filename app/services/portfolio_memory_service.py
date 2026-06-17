@@ -16,6 +16,8 @@ from app.models.intelligence_models import PortfolioIntelligence, ProactiveAlert
 from app.models.portfolio_memory_models import (
     AttentionItem,
     MorningBrief,
+    MorningBriefMover,
+    MorningBriefSnapshot,
     PortfolioChanges,
     PortfolioSnapshotRecord,
     PortfolioSnapshotSummary,
@@ -56,7 +58,7 @@ class PortfolioMemoryService:
             )
             summary = self._build_summary(
                 portfolio_brief=portfolio_brief,
-                position_count=len(compact_positions),
+                positions=compact_positions,
             )
 
             record = PortfolioSnapshotRecord(
@@ -179,9 +181,11 @@ class PortfolioMemoryService:
             current_alerts=current_alerts,
         )
         top_alerts = sorted(current_alerts, key=lambda alert: alert.priority)[:5]
+        snapshot = self._latest_morning_snapshot(user_id=user_id)
 
         return MorningBrief(
             generated_at=datetime.now(timezone.utc),
+            snapshot=snapshot,
             macro_regime=(
                 portfolio_brief.digest.macro_regime if portfolio_brief.digest else None
             ),
@@ -264,6 +268,8 @@ class PortfolioMemoryService:
                     quantity=quantity,
                     market_value=position.marketValue,
                     weight_pct=round(weight_pct, 2) if weight_pct is not None else 0.0,
+                    day_pnl=round(position.currentDayProfitLoss, 2),
+                    day_pnl_pct=round(position.currentDayProfitLossPercentage, 2),
                     pnl=round(pnl, 2),
                     pnl_pct=round(pnl_pct, 2) if pnl_pct is not None else None,
                     option_strategy=position.optionStrategy,
@@ -280,10 +286,20 @@ class PortfolioMemoryService:
     def _build_summary(
         *,
         portfolio_brief: PortfolioIntelligence | None,
-        position_count: int,
+        positions: list[SnapshotPosition],
     ) -> PortfolioSnapshotSummary:
         if portfolio_brief is None:
-            return PortfolioSnapshotSummary(position_count=position_count)
+            score = PortfolioMemoryService._diversification_score(
+                positions=positions,
+                sector_weights={},
+            )
+            return PortfolioSnapshotSummary(
+                position_count=len(positions),
+                diversification_score=score,
+                diversification_rating=PortfolioMemoryService._diversification_rating(
+                    score
+                ),
+            )
 
         sector_weights: dict[str, float] = {}
         if portfolio_brief.digest and portfolio_brief.digest.sector_weights:
@@ -292,11 +308,20 @@ class PortfolioMemoryService:
                 for item in portfolio_brief.digest.sector_weights
             }
 
+        diversification_score = PortfolioMemoryService._diversification_score(
+            positions=positions,
+            sector_weights=sector_weights,
+        )
+
         return PortfolioSnapshotSummary(
             alert_count=len(portfolio_brief.alerts),
             signal_count=len(portfolio_brief.signals),
-            position_count=position_count,
+            position_count=len(positions),
             sector_weights=sector_weights,
+            diversification_score=diversification_score,
+            diversification_rating=PortfolioMemoryService._diversification_rating(
+                diversification_score
+            ),
         )
 
     def _diff_snapshots(
@@ -406,3 +431,101 @@ class PortfolioMemoryService:
             parts.append("no material position changes detected")
 
         return "; ".join(parts)
+
+    def _latest_morning_snapshot(self, *, user_id: str) -> MorningBriefSnapshot | None:
+        try:
+            snapshots = self.portfolio_snapshot_adapter.list_recent(user_id, limit=1)
+        except Exception:
+            return None
+        if not snapshots:
+            return None
+
+        record = snapshots[0]
+        day_pnl = sum(
+            position.day_pnl or 0.0
+            for position in record.positions
+            if position.day_pnl is not None
+        )
+        has_day_pnl = any(position.day_pnl is not None for position in record.positions)
+        day_pnl_pct = (
+            (day_pnl / record.liquidation_value) * 100.0
+            if has_day_pnl and record.liquidation_value and record.liquidation_value > 0
+            else None
+        )
+
+        movers = [
+            position
+            for position in record.positions
+            if position.day_pnl_pct is not None
+        ]
+        biggest_winner = max(movers, key=lambda item: item.day_pnl_pct, default=None)
+        biggest_loser = min(movers, key=lambda item: item.day_pnl_pct, default=None)
+
+        summary = record.summary
+        return MorningBriefSnapshot(
+            portfolio_value=record.liquidation_value,
+            day_pnl=round(day_pnl, 2) if has_day_pnl else None,
+            day_pnl_pct=round(day_pnl_pct, 2) if day_pnl_pct is not None else None,
+            cash_available=record.cash_balance,
+            diversification_score=(
+                summary.diversification_score if summary else None
+            ),
+            diversification_rating=(
+                summary.diversification_rating if summary else None
+            ),
+            biggest_winner=(
+                MorningBriefMover(
+                    symbol=biggest_winner.symbol,
+                    day_pnl=biggest_winner.day_pnl,
+                    day_pnl_pct=biggest_winner.day_pnl_pct,
+                )
+                if biggest_winner
+                else None
+            ),
+            biggest_loser=(
+                MorningBriefMover(
+                    symbol=biggest_loser.symbol,
+                    day_pnl=biggest_loser.day_pnl,
+                    day_pnl_pct=biggest_loser.day_pnl_pct,
+                )
+                if biggest_loser
+                else None
+            ),
+        )
+
+    @staticmethod
+    def _diversification_score(
+        *,
+        positions: list[SnapshotPosition],
+        sector_weights: dict[str, float],
+    ) -> int | None:
+        weights = PortfolioMemoryService._aggregate_weights(positions)
+        if not weights:
+            return None
+
+        sorted_weights = sorted(weights.values(), reverse=True)
+        top1 = sorted_weights[0]
+        top3 = sum(sorted_weights[:3])
+        hhi = sum((weight / 100.0) ** 2 for weight in sorted_weights)
+        effective_names = (1.0 / hhi) if hhi > 0 else len(sorted_weights)
+        top_sector = max(sector_weights.values(), default=0.0)
+
+        score = 100.0
+        score -= max(top1 - 15.0, 0.0) * 1.4
+        score -= max(top3 - 45.0, 0.0) * 0.7
+        score -= max(top_sector - 35.0, 0.0) * 0.8
+        score -= max(8.0 - effective_names, 0.0) * 5.0
+        score += min(len(sorted_weights), 12) * 1.0
+        return max(0, min(100, round(score)))
+
+    @staticmethod
+    def _diversification_rating(score: int | None) -> str | None:
+        if score is None:
+            return None
+        if score < 40:
+            return "Poor"
+        if score < 60:
+            return "Fair"
+        if score < 80:
+            return "Good"
+        return "Strong"

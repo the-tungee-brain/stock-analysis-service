@@ -389,6 +389,7 @@ class PortfolioIntelligenceService:
     def _macro_regime(snapshots: dict[str, PromptQuoteSnapshot]) -> str | None:
         vix = snapshots.get("$VIX") or snapshots.get("VIX")
         spx = snapshots.get("$SPX") or snapshots.get("SPX")
+        qqq = snapshots.get("QQQ")
         tlt = snapshots.get("TLT")
 
         parts: list[str] = []
@@ -405,6 +406,12 @@ class PortfolioIntelligenceService:
         elif spx and spx.net_change is not None and spx.last:
             pct = (spx.net_change / spx.last) * 100.0
             parts.append(f"S&P 500 ~{pct:+.2f}% today")
+
+        if qqq and qqq.net_change_pct is not None:
+            parts.append(f"Nasdaq {qqq.net_change_pct:+.2f}% today")
+        elif qqq and qqq.net_change is not None and qqq.last:
+            pct = (qqq.net_change / qqq.last) * 100.0
+            parts.append(f"Nasdaq ~{pct:+.2f}% today")
 
         if tlt and tlt.net_change_pct is not None:
             if tlt.net_change_pct > 0.3:

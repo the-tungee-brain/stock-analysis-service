@@ -23,6 +23,8 @@ class SnapshotPosition(BaseModel):
     quantity: float
     market_value: float = Field(serialization_alias="marketValue")
     weight_pct: float = Field(serialization_alias="weightPct")
+    day_pnl: float | None = Field(default=None, serialization_alias="dayPnl")
+    day_pnl_pct: float | None = Field(default=None, serialization_alias="dayPnlPct")
     pnl: float | None = None
     pnl_pct: float | None = Field(default=None, serialization_alias="pnlPct")
     option_strategy: str | None = Field(
@@ -41,6 +43,12 @@ class PortfolioSnapshotSummary(BaseModel):
     position_count: int = Field(default=0, serialization_alias="positionCount")
     sector_weights: dict[str, float] = Field(
         default_factory=dict, serialization_alias="sectorWeights"
+    )
+    diversification_score: int | None = Field(
+        default=None, serialization_alias="diversificationScore"
+    )
+    diversification_rating: str | None = Field(
+        default=None, serialization_alias="diversificationRating"
     )
 
 
@@ -122,10 +130,44 @@ class AttentionItem(BaseModel):
     alert_id: str | None = Field(default=None, serialization_alias="alertId")
 
 
+class MorningBriefMover(BaseModel):
+    model_config = _MEMORY_MODEL_CONFIG
+
+    symbol: str
+    day_pnl: float | None = Field(default=None, serialization_alias="dayPnl")
+    day_pnl_pct: float | None = Field(default=None, serialization_alias="dayPnlPct")
+
+
+class MorningBriefSnapshot(BaseModel):
+    model_config = _MEMORY_MODEL_CONFIG
+
+    portfolio_value: float | None = Field(
+        default=None, serialization_alias="portfolioValue"
+    )
+    day_pnl: float | None = Field(default=None, serialization_alias="dayPnl")
+    day_pnl_pct: float | None = Field(default=None, serialization_alias="dayPnlPct")
+    cash_available: float | None = Field(
+        default=None, serialization_alias="cashAvailable"
+    )
+    diversification_score: int | None = Field(
+        default=None, serialization_alias="diversificationScore"
+    )
+    diversification_rating: str | None = Field(
+        default=None, serialization_alias="diversificationRating"
+    )
+    biggest_winner: MorningBriefMover | None = Field(
+        default=None, serialization_alias="biggestWinner"
+    )
+    biggest_loser: MorningBriefMover | None = Field(
+        default=None, serialization_alias="biggestLoser"
+    )
+
+
 class MorningBrief(BaseModel):
     model_config = _MEMORY_MODEL_CONFIG
 
     generated_at: datetime = Field(serialization_alias="generatedAt")
+    snapshot: MorningBriefSnapshot | None = None
     macro_regime: str | None = Field(default=None, serialization_alias="macroRegime")
     digest: PortfolioDigest | None = None
     changes: PortfolioChanges | None = None

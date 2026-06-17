@@ -61,7 +61,7 @@ if TYPE_CHECKING:
     from models.prediction_service import LoadedModel
     from app.services.pattern_analysis_service import PatternAnalysisService
 
-BENCHMARK_SYMBOLS = ["$SPX", "$DJI", "$VIX", "TLT"]
+BENCHMARK_SYMBOLS = ["$SPX", "QQQ", "$VIX", "TLT"]
 TRANSACTION_ACTIONS = frozenset(
     {AnalysisAction.WHAT_CHANGED, AnalysisAction.TAX_ANGLE}
 )
